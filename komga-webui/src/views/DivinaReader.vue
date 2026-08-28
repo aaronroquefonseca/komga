@@ -193,6 +193,14 @@
               <settings-switch v-model="swipe" :label="$t('bookreader.settings.gestures')"/>
             </v-list-item>
 
+            <v-list-item v-if="!continuousReader">
+              <settings-switch
+                v-model="followFinger"
+                label="Follow finger"
+                :disabled="!swipe || !animations"
+              />
+            </v-list-item>
+
             <v-list-item>
               <settings-switch v-model="alwaysFullscreen" :label="$t('bookreader.settings.always_fullscreen')"
                                :disabled="!screenfull.isEnabled"/>
@@ -234,13 +242,6 @@
 
             <template v-if="!continuousReader">
               <v-subheader class="font-weight-black text-h6">{{ $t('bookreader.settings.paged') }}</v-subheader>
-              <v-list-item>
-                <settings-switch
-                  v-model="followFinger"
-                  label="Follow finger"
-                  :disabled="!swipe || !animations"
-                />
-              </v-list-item>
               <v-list-item>
                 <settings-select
                   :items="scaleTypes"
