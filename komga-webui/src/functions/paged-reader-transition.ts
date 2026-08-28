@@ -9,6 +9,13 @@ export type PaperCurlFoldGeometry = {
   shadowBottom: number
 }
 
+export type PaperCurlWarpGeometry = PaperCurlFoldGeometry & {
+  rotationY: number
+  cornerRotation: number
+  verticalShift: number
+  lift: number
+}
+
 export function transitionProgress(offset: number, axisSize: number): number {
   if (axisSize <= 0) return 0
   return Math.max(0, Math.min(1, Math.abs(offset) / axisSize))
@@ -42,7 +49,7 @@ function clampPercent(value: number): number {
  * The sheet is never tessellated. `seamTop` and `seamBottom` describe one edge
  * separating the still-visible front page from the revealed target page. Corner
  * turns exaggerate that single edge into a diagonal line, while `fold*` and
- * `shadow*` describe narrow continuous bands on the revealed side of the seam.
+ * `shadow*` describe continuous lighting bands around the seam.
  */
 export function paperCurlFoldGeometry(
   progress: number,
@@ -70,7 +77,6 @@ export function paperCurlFoldGeometry(
   const seamTop = clampPercent(base + topOffset)
   const seamBottom = clampPercent(base + bottomOffset)
 
-  // The folded backside is widest mid-turn and collapses to zero at both ends.
   const foldWidth = Math.sin(p * Math.PI) * 20
   const shadowWidth = Math.sin(p * Math.PI) * 11
 
@@ -81,5 +87,50 @@ export function paperCurlFoldGeometry(
     foldBottom: clampPercent(seamBottom - direction * foldWidth),
     shadowTop: clampPercent(seamTop - direction * shadowWidth),
     shadowBottom: clampPercent(seamBottom - direction * shadowWidth),
+  }
+}
+
+/**
+ * Continuous 3D warp applied to the one-piece page flap.
+ *
+ * The fold boundary still tracks the finger linearly, but the material on the
+ * free side of that boundary rotates as one physical sheet. At 90 degrees the
+ * front becomes edge-on; after that the target-page back face becomes visible,
+ * reaching a flat 180-degree turn at completion.
+ *
+ * The constants here are deliberate tuning knobs for the paper feel. Keeping
+ * them in one function makes it straightforward to calibrate after touch tests.
+ */
+export function paperCurlWarpGeometry(
+  progress: number,
+  physicalDirection: number,
+  variant: PageCurlVariant,
+): PaperCurlWarpGeometry {
+  const p = Math.max(0, Math.min(1, progress))
+  const direction = Math.sign(physicalDirection || -1)
+  const fold = paperCurlFoldGeometry(p, direction, variant)
+  const arch = Math.sin(p * Math.PI)
+
+  const maxCornerRotation = 16
+  const maxCornerShift = 5
+  const maxLift = 44
+
+  const cornerRotation = variant === 'top'
+    ? -direction * arch * maxCornerRotation
+    : variant === 'bottom'
+      ? direction * arch * maxCornerRotation
+      : 0
+  const verticalShift = variant === 'top'
+    ? arch * maxCornerShift
+    : variant === 'bottom'
+      ? -arch * maxCornerShift
+      : 0
+
+  return {
+    ...fold,
+    rotationY: direction * p * 180,
+    cornerRotation,
+    verticalShift,
+    lift: arch * maxLift,
   }
 }
