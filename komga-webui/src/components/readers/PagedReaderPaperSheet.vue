@@ -1,8 +1,7 @@
 <template>
-  <div class="paper-sheet" aria-hidden="true">
-    <!-- The destination page is a single uninterrupted sheet underneath the
-         page being turned. This is the same basic illusion MangaBox uses: page
-         clipping and lighting, not a collection of independently rotating tiles. -->
+  <div class="paper-sheet" :style="sheetStyle" aria-hidden="true">
+    <!-- The destination page stays flat underneath the sheet for the entire
+         gesture. Areas uncovered by the bend therefore reveal real content. -->
     <div class="paper-layer paper-target">
       <paged-reader-spread
         :spread="backSpread"
@@ -11,8 +10,8 @@
       />
     </div>
 
-    <!-- One continuous front page. Its only deformation is the single fold
-         boundary described by clip-path. -->
+    <!-- Stationary part of the current page. The remainder is duplicated into
+         the warped flap below, so the image stays continuous at the fold seam. -->
     <div class="paper-layer paper-front" :style="frontStyle">
       <paged-reader-spread
         :spread="frontSpread"
@@ -21,20 +20,33 @@
       />
     </div>
 
-    <!-- Back of the physical page. It deliberately contains the destination
-         page, as requested, and is clipped to one continuous folded band. -->
-    <div class="paper-layer paper-backface" :style="backfaceStyle">
-      <paged-reader-spread
-        :spread="backSpread"
-        :flip-direction="flipDirection"
-        :scale="scale"
-      />
+    <!-- One continuous physical flap, never strips or tiles. Its front is the
+         current page and its back is the destination page. The same clipped
+         region is rotated through 180 degrees around the moving fold line. -->
+    <div class="paper-flap" :style="flapStyle">
+      <div class="paper-flap-face paper-flap-front" :style="flapFrontStyle">
+        <paged-reader-spread
+          :spread="frontSpread"
+          :flip-direction="flipDirection"
+          :scale="scale"
+        />
+        <div class="paper-flap-shade" :style="frontShadeStyle" />
+      </div>
+
+      <div class="paper-flap-face paper-flap-back" :style="flapBackStyle">
+        <paged-reader-spread
+          :spread="backSpread"
+          :flip-direction="flipDirection"
+          :scale="scale"
+        />
+        <div class="paper-flap-shade" :style="backShadeStyle" />
+      </div>
     </div>
 
-    <div class="paper-fold-tone" :style="foldToneStyle" />
+    <!-- These remain flat lighting cues around the moving crease. They do not
+         carry page content; the warped flap above now does that job. -->
     <div class="paper-drop-shadow" :style="shadowStyle" />
-    <div class="paper-highlight" :style="highlightStyle" />
-    <div class="paper-fore-edge" :style="edgeStyle" />
+    <div class="paper-crease-highlight" :style="highlightStyle" />
   </div>
 </template>
 
@@ -45,9 +57,28 @@ import {PageDtoWithUrl} from '@/types/komga-books'
 import {ScaleType} from '@/types/enum-reader'
 import {
   PageCurlVariant,
-  PaperCurlFoldGeometry,
-  paperCurlFoldGeometry,
+  PaperCurlWarpGeometry,
+  paperCurlWarpGeometry,
 } from '@/functions/paged-reader-transition'
+
+// Paper-curl visual tuning knobs. Geometry that changes the actual path of the
+// sheet lives in paperCurlWarpGeometry(); lighting/perspective stays here so we
+// can calibrate both independently after real touch tests.
+const PAPER_CURL_TUNING = {
+  perspectivePx: 1450,
+  seamOverlapPercent: 0.18,
+  frontDarken: 0.12,
+  backBaseBrightness: 0.76,
+  backArchBrightness: 0.10,
+  maxShadeOpacity: 0.46,
+  maxShadowOpacity: 0.48,
+  shadowWidthPercent: 12,
+  highlightWidthPercent: 1.4,
+}
+
+function clampPercent(value: number): number {
+  return Math.max(0, Math.min(100, value))
+}
 
 export default Vue.extend({
   name: 'PagedReaderPaperSheet',
@@ -86,8 +117,19 @@ export default Vue.extend({
     direction(): number {
       return Math.sign(this.physicalDirection || -1)
     },
-    geometry(): PaperCurlFoldGeometry {
-      return paperCurlFoldGeometry(this.progress, this.direction, this.variant)
+    clampedProgress(): number {
+      return Math.max(0, Math.min(1, this.progress))
+    },
+    arch(): number {
+      return Math.sin(this.clampedProgress * Math.PI)
+    },
+    geometry(): PaperCurlWarpGeometry {
+      return paperCurlWarpGeometry(this.clampedProgress, this.direction, this.variant)
+    },
+    sheetStyle(): Record<string, string> {
+      return {
+        perspective: `${PAPER_CURL_TUNING.perspectivePx}px`,
+      }
     },
     frontClip(): string {
       const {seamTop, seamBottom} = this.geometry
@@ -96,13 +138,15 @@ export default Vue.extend({
       }
       return `polygon(${seamTop}% 0, 100% 0, 100% 100%, ${seamBottom}% 100%)`
     },
-    foldClip(): string {
-      const {seamTop, seamBottom, foldTop, foldBottom} = this.geometry
-      return `polygon(${seamTop}% 0, ${foldTop}% 0, ${foldBottom}% 100%, ${seamBottom}% 100%)`
-    },
-    shadowClip(): string {
-      const {seamTop, seamBottom, shadowTop, shadowBottom} = this.geometry
-      return `polygon(${seamTop}% 0, ${shadowTop}% 0, ${shadowBottom}% 100%, ${seamBottom}% 100%)`
+    flapClip(): string {
+      const overlap = this.direction * PAPER_CURL_TUNING.seamOverlapPercent
+      const seamTop = clampPercent(this.geometry.seamTop + overlap)
+      const seamBottom = clampPercent(this.geometry.seamBottom + overlap)
+
+      if (this.direction < 0) {
+        return `polygon(${seamTop}% 0, 100% 0, 100% 100%, ${seamBottom}% 100%)`
+      }
+      return `polygon(0 0, ${seamTop}% 0, ${seamBottom}% 100%, 0 100%)`
     },
     frontStyle(): Record<string, string> {
       return {
@@ -110,59 +154,88 @@ export default Vue.extend({
         WebkitClipPath: this.frontClip,
       }
     },
-    backfaceStyle(): Record<string, string> {
-      const arch = Math.sin(Math.max(0, Math.min(1, this.progress)) * Math.PI)
+    flapStyle(): Record<string, string> {
+      const {seamTop, seamBottom, rotationY, cornerRotation, verticalShift, lift} = this.geometry
+      const originX = this.variant === 'top'
+        ? seamTop
+        : this.variant === 'bottom'
+          ? seamBottom
+          : (seamTop + seamBottom) / 2
+      const originY = this.variant === 'top'
+        ? 0
+        : this.variant === 'bottom'
+          ? 100
+          : 50
+
       return {
-        clipPath: this.foldClip,
-        WebkitClipPath: this.foldClip,
-        filter: `brightness(${0.72 + arch * 0.10}) saturate(${0.82 + arch * 0.08})`,
+        transformOrigin: `${originX}% ${originY}%`,
+        transform: `translate3d(0, ${verticalShift}%, ${lift}px) rotateZ(${cornerRotation}deg) rotateY(${rotationY}deg)`,
       }
     },
-    foldToneStyle(): Record<string, string> {
-      const gradient = this.direction < 0
-        ? 'linear-gradient(to right, rgba(255,255,255,0.34), rgba(255,255,255,0.05) 35%, rgba(0,0,0,0.24) 100%)'
-        : 'linear-gradient(to left, rgba(255,255,255,0.34), rgba(255,255,255,0.05) 35%, rgba(0,0,0,0.24) 100%)'
+    flapFrontStyle(): Record<string, string> {
+      const brightness = 1 - this.arch * PAPER_CURL_TUNING.frontDarken
       return {
-        clipPath: this.foldClip,
-        WebkitClipPath: this.foldClip,
+        clipPath: this.flapClip,
+        WebkitClipPath: this.flapClip,
+        filter: `brightness(${brightness})`,
+      }
+    },
+    flapBackStyle(): Record<string, string> {
+      const brightness = PAPER_CURL_TUNING.backBaseBrightness +
+        this.arch * PAPER_CURL_TUNING.backArchBrightness
+      return {
+        clipPath: this.flapClip,
+        WebkitClipPath: this.flapClip,
+        filter: `brightness(${brightness}) saturate(${0.86 + this.arch * 0.08})`,
+      }
+    },
+    frontShadeStyle(): Record<string, string> {
+      const gradient = this.direction < 0
+        ? 'linear-gradient(to left, rgba(255,255,255,0.08), rgba(0,0,0,0.08) 58%, rgba(0,0,0,0.42) 100%)'
+        : 'linear-gradient(to right, rgba(255,255,255,0.08), rgba(0,0,0,0.08) 58%, rgba(0,0,0,0.42) 100%)'
+      return {
         background: gradient,
-        opacity: `${Math.sin(Math.max(0, Math.min(1, this.progress)) * Math.PI)}`,
+        opacity: `${this.arch * PAPER_CURL_TUNING.maxShadeOpacity}`,
+      }
+    },
+    backShadeStyle(): Record<string, string> {
+      const gradient = this.direction < 0
+        ? 'linear-gradient(to right, rgba(255,255,255,0.24), rgba(0,0,0,0.08) 45%, rgba(0,0,0,0.36) 100%)'
+        : 'linear-gradient(to left, rgba(255,255,255,0.24), rgba(0,0,0,0.08) 45%, rgba(0,0,0,0.36) 100%)'
+      return {
+        background: gradient,
+        opacity: `${this.arch * PAPER_CURL_TUNING.maxShadeOpacity}`,
       }
     },
     shadowStyle(): Record<string, string> {
+      const {seamTop, seamBottom} = this.geometry
+      const width = this.arch * PAPER_CURL_TUNING.shadowWidthPercent
+      const shadowTop = clampPercent(seamTop - this.direction * width)
+      const shadowBottom = clampPercent(seamBottom - this.direction * width)
+      const clip = `polygon(${seamTop}% 0, ${shadowTop}% 0, ${shadowBottom}% 100%, ${seamBottom}% 100%)`
       const gradient = this.direction < 0
-        ? 'linear-gradient(to right, rgba(0,0,0,0.46), rgba(0,0,0,0.18) 42%, rgba(0,0,0,0) 100%)'
-        : 'linear-gradient(to left, rgba(0,0,0,0.46), rgba(0,0,0,0.18) 42%, rgba(0,0,0,0) 100%)'
+        ? 'linear-gradient(to right, rgba(0,0,0,0.52), rgba(0,0,0,0.16) 48%, rgba(0,0,0,0) 100%)'
+        : 'linear-gradient(to left, rgba(0,0,0,0.52), rgba(0,0,0,0.16) 48%, rgba(0,0,0,0) 100%)'
+
       return {
-        clipPath: this.shadowClip,
-        WebkitClipPath: this.shadowClip,
+        clipPath: clip,
+        WebkitClipPath: clip,
         background: gradient,
-        opacity: `${Math.sin(Math.max(0, Math.min(1, this.progress)) * Math.PI)}`,
+        opacity: `${this.arch * PAPER_CURL_TUNING.maxShadowOpacity}`,
       }
     },
     highlightStyle(): Record<string, string> {
       const {seamTop, seamBottom} = this.geometry
-      const width = Math.sin(Math.max(0, Math.min(1, this.progress)) * Math.PI) * 2.8
-      const highlightTop = Math.max(0, Math.min(100, seamTop + this.direction * width))
-      const highlightBottom = Math.max(0, Math.min(100, seamBottom + this.direction * width))
+      const width = this.arch * PAPER_CURL_TUNING.highlightWidthPercent
+      const highlightTop = clampPercent(seamTop + this.direction * width)
+      const highlightBottom = clampPercent(seamBottom + this.direction * width)
       const clip = `polygon(${seamTop}% 0, ${highlightTop}% 0, ${highlightBottom}% 100%, ${seamBottom}% 100%)`
+
       return {
         clipPath: clip,
         WebkitClipPath: clip,
-        background: 'rgba(255,255,255,0.34)',
-        opacity: `${Math.sin(Math.max(0, Math.min(1, this.progress)) * Math.PI)}`,
-      }
-    },
-    edgeStyle(): Record<string, string> {
-      const {seamTop, seamBottom} = this.geometry
-      const width = Math.sin(Math.max(0, Math.min(1, this.progress)) * Math.PI) * 0.7
-      const edgeTop = Math.max(0, Math.min(100, seamTop - this.direction * width))
-      const edgeBottom = Math.max(0, Math.min(100, seamBottom - this.direction * width))
-      const clip = `polygon(${seamTop}% 0, ${edgeTop}% 0, ${edgeBottom}% 100%, ${seamBottom}% 100%)`
-      return {
-        clipPath: clip,
-        WebkitClipPath: clip,
-        opacity: `${Math.sin(Math.max(0, Math.min(1, this.progress)) * Math.PI)}`,
+        background: 'rgba(255,255,255,0.5)',
+        opacity: `${this.arch * 0.9}`,
       }
     },
   },
@@ -177,13 +250,15 @@ export default Vue.extend({
   pointer-events: none;
   isolation: isolate;
   contain: paint;
+  transform-style: preserve-3d;
 }
 
 .paper-layer,
-.paper-fold-tone,
+.paper-flap,
+.paper-flap-face,
+.paper-flap-shade,
 .paper-drop-shadow,
-.paper-highlight,
-.paper-fore-edge {
+.paper-crease-highlight {
   position: absolute;
   inset: 0;
 }
@@ -193,34 +268,42 @@ export default Vue.extend({
 }
 
 .paper-front {
-  z-index: 4;
+  z-index: 3;
   will-change: clip-path;
 }
 
-.paper-backface {
+.paper-flap {
   z-index: 5;
+  transform-style: preserve-3d;
+  will-change: transform;
+}
+
+.paper-flap-face {
+  backface-visibility: hidden;
+  -webkit-backface-visibility: hidden;
+  transform-style: preserve-3d;
   will-change: clip-path, filter;
 }
 
-.paper-fold-tone {
-  z-index: 6;
-  will-change: clip-path, opacity;
+.paper-flap-front {
+  transform: rotateY(0deg);
+}
+
+.paper-flap-back {
+  transform: rotateY(180deg);
+}
+
+.paper-flap-shade {
+  z-index: 2;
 }
 
 .paper-drop-shadow {
-  z-index: 3;
+  z-index: 2;
   will-change: clip-path, opacity;
 }
 
-.paper-highlight {
-  z-index: 7;
-  will-change: clip-path, opacity;
-}
-
-.paper-fore-edge {
-  z-index: 8;
-  background: rgba(245, 245, 245, 0.9);
-  box-shadow: 0 0 10px rgba(0, 0, 0, 0.38);
+.paper-crease-highlight {
+  z-index: 6;
   will-change: clip-path, opacity;
 }
 </style>
