@@ -159,12 +159,15 @@ export default Vue.extend({
       immediate: true,
     },
     frontSpread() {
+      this.pageBoundsReady = false
       this.schedulePageBoundsMeasurement()
     },
     scale() {
+      this.pageBoundsReady = false
       this.schedulePageBoundsMeasurement()
     },
     flipDirection() {
+      this.pageBoundsReady = false
       this.schedulePageBoundsMeasurement()
     },
   },
@@ -223,18 +226,22 @@ export default Vue.extend({
       return `polygon(${this.paperX(seamTop)}px ${top}px, ${this.paperX(shadowTop)}px ${top}px, ${this.paperX(shadowBottom)}px ${bottom}px, ${this.paperX(seamBottom)}px ${bottom}px)`
     },
     currentStyle(): Record<string, string> {
+      if (!this.pageBoundsReady) return {}
       return {
         clipPath: this.currentClip,
         WebkitClipPath: this.currentClip,
       }
     },
     backStyle(): Record<string, string> {
+      if (!this.pageBoundsReady) return {opacity: '0'}
       return {
         clipPath: this.backClip,
         WebkitClipPath: this.backClip,
+        opacity: '1',
       }
     },
     shadowStyle(): Record<string, string> {
+      if (!this.pageBoundsReady) return {opacity: '0'}
       const arch = Math.sin(clamp01(this.progress) * Math.PI)
       const gradient = this.direction < 0
         ? 'linear-gradient(to right, rgba(0,0,0,0.34), rgba(0,0,0,0))'
@@ -247,6 +254,7 @@ export default Vue.extend({
       }
     },
     edgeStyle(): Record<string, string> {
+      if (!this.pageBoundsReady) return {opacity: '0'}
       const {seamTop, seamBottom} = this.geometry
       const width = 0.45
       const edgeTop = seamTop + this.direction * width
@@ -296,13 +304,6 @@ export default Vue.extend({
 
       if (rects.length === 0) {
         this.pageBoundsReady = false
-        this.pageBounds = {
-          left: 0,
-          top: 0,
-          width: Math.max(1, rootRect.width),
-          height: Math.max(1, rootRect.height),
-        }
-        this.heightOverWidth = this.pageBounds.height / this.pageBounds.width
         return
       }
 
@@ -327,7 +328,10 @@ export default Vue.extend({
     },
     syncTouchGeometry() {
       if (!(this.$el instanceof HTMLElement)) return
-      if (!this.pageBoundsReady) this.schedulePageBoundsMeasurement()
+      if (!this.pageBoundsReady) {
+        this.schedulePageBoundsMeasurement()
+        return
+      }
 
       const rootRect = (this.$el as HTMLElement).getBoundingClientRect()
       const pageTop = rootRect.top + this.pageBounds.top
