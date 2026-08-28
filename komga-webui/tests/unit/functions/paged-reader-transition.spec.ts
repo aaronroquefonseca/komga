@@ -20,9 +20,9 @@ describe('paged reader transitions', () => {
     expect(pageCurlVariantForStart(900, 1000)).toBe('bottom')
   })
 
-  test('page curl rotation follows physical navigation direction', () => {
-    expect(pageCurlRotation(0.5, -1)).toBe(-84)
-    expect(pageCurlRotation(0.5, 1)).toBe(84)
-    expect(pageCurlRotation(2, 1)).toBe(168)
+  test('page curl rotation keeps the projected free edge aligned with travel', () => {
+    expect(pageCurlRotation(0.5, -1)).toBeCloseTo(-60)
+    expect(pageCurlRotation(0.5, 1)).toBeCloseTo(60)
+    expect(pageCurlRotation(2, 1)).toBeCloseTo(90)
   })
 })
