@@ -55,6 +55,7 @@ export default Vue.extend({
 
 <style scoped>
 .full-height {
+  width: 100%;
   height: 100%;
 }
 
