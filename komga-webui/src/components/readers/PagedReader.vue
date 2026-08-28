@@ -14,6 +14,8 @@
     @touchcancel="followFingerCancel"
     @click.capture="onClickCapture"
   >
+    <!-- Preserve Komga's original carousel exactly for Slide (Default) without
+         Follow finger, and for None. -->
     <v-carousel v-model="carouselPage"
                 :show-arrows="false"
                 :continuous="false"
@@ -24,7 +26,6 @@
                 touchless
                 height="100%"
     >
-      <!-- Carousel: preserve Komga/Vuetify's original renderer for Default and None. -->
       <v-carousel-item v-for="(spread, i) in spreads"
                        :key="`spread${i}`"
                        :eager="eagerLoad(i)"
@@ -33,72 +34,78 @@
                        :transition="carouselAnimations ? undefined : false"
                        :reverse-transition="carouselAnimations ? undefined : false"
       >
-        <div class="full-height d-flex flex-column justify-center">
-          <div :class="`d-flex flex-row${flipDirection ? '-reverse' : ''} justify-center px-0 mx-0`">
-            <img v-for="(page, j) in spread"
-                 :alt="`Page ${page.number}`"
-                 :key="`spread${i}-${j}`"
-                 :src="page.url"
-                 :class="imgClass(spread)"
-                 class="img-fit-all"
-            />
-          </div>
-        </div>
+        <paged-reader-spread
+          :spread="spread"
+          :flip-direction="flipDirection"
+          :scale="scale"
+        />
       </v-carousel-item>
     </v-carousel>
 
-    <!-- Persistent renderer for custom transitions and follow-finger Default. Stable spread
-         keys keep the same image DOM nodes alive across consecutive transitions. -->
-    <div v-if="customRendererEnabled" class="transition-layer">
-      <div v-for="spreadIndex in interactiveSpreadIndices"
+    <!-- Custom renderer. All spread wrappers stay mounted with stable keys. -->
+    <div v-if="customRendererEnabled"
+         class="transition-layer"
+         :class="{'transition-layer-active': drag.prepared}"
+    >
+      <div v-for="(spread, spreadIndex) in spreads"
            :key="`transition-spread-${spreadIndex}`"
            class="transition-spread"
            :class="transitionSpreadClasses(spreadIndex)"
-           :style="interactiveSpreadStyle(spreadIndex)"
+           :style="customSpreadStyle(spreadIndex)"
       >
-        <div class="full-height d-flex flex-column justify-center">
-          <div :class="`d-flex flex-row${flipDirection ? '-reverse' : ''} justify-center px-0 mx-0`">
-            <img v-for="(page, j) in spreads[spreadIndex]"
-                 :alt="`Page ${page.number}`"
-                 :key="`transition-${spreadIndex}-${j}`"
-                 :src="page.url"
-                 :class="imgClass(spreads[spreadIndex])"
-                 class="img-fit-all"
-            />
-          </div>
-        </div>
+        <template v-if="shouldRenderCustomSpread(spreadIndex)">
+          <template v-if="isPaperCurlCurrent(spreadIndex)">
+            <div v-for="segment in paperSegments"
+                 :key="`paper-segment-${spreadIndex}-${segment}`"
+                 class="paper-segment"
+                 :style="paperSegmentStyle(segment)"
+            >
+              <div class="paper-segment-content"
+                   :style="paperSegmentContentStyle(segment)"
+              >
+                <paged-reader-spread
+                  :spread="spread"
+                  :flip-direction="flipDirection"
+                  :scale="scale"
+                />
+              </div>
+            </div>
+          </template>
+
+          <paged-reader-spread
+            v-else
+            :spread="spread"
+            :flip-direction="flipDirection"
+            :scale="scale"
+          />
+        </template>
       </div>
     </div>
 
-    <!-- clickable zone: left -->
     <div v-if="!vertical"
          @click="turnLeft()"
          class="left-quarter"
          style="z-index: 1;"
     />
 
-    <!-- clickable zone: right -->
     <div v-if="!vertical"
          @click="turnRight()"
          class="right-quarter"
          style="z-index: 1;"
     />
 
-    <!-- clickable zone: top -->
     <div v-if="vertical"
          @click="verticalPrev()"
          class="top-quarter"
          style="z-index: 1;"
     />
 
-    <!-- clickable zone: bottom -->
     <div v-if="vertical"
          @click="verticalNext()"
          class="bottom-quarter"
          style="z-index: 1;"
     />
 
-    <!-- clickable zone: menu -->
     <div @click="centerClick()"
          :class="`${vertical ? 'center-vertical' : 'center-horizontal'}`"
          style="z-index: 1;"
@@ -113,6 +120,7 @@ import {PagedReaderLayout, PagedReaderTransition, ScaleType} from '@/types/enum-
 import {shortcutsLTR, shortcutsRTL, shortcutsVertical} from '@/functions/shortcuts/paged-reader'
 import {PageDtoWithUrl} from '@/types/komga-books'
 import {buildSpreads} from '@/functions/book-spreads'
+import PagedReaderSpread from '@/components/readers/PagedReaderSpread.vue'
 import {
   dragOffsetWithResistance,
   navigationDeltaForDrag,
@@ -122,18 +130,20 @@ import {
   PageCurlVariant,
   pageCurlRotation,
   pageCurlVariantForStart,
+  paperCurlSegmentPhase,
   transitionProgress,
 } from '@/functions/paged-reader-transition'
 
 export default Vue.extend({
   name: 'PagedReader',
+  components: {PagedReaderSpread},
   data: function () {
     return {
       logger: 'PagedReader',
       carouselPage: 0,
       spreads: [] as PageDtoWithUrl[][],
       suppressClickUntil: 0,
-      dragSettleTimer: undefined as number | undefined,
+      dragAnimationFrame: undefined as number | undefined,
       drag: {
         tracking: false,
         prepared: false,
@@ -231,7 +241,7 @@ export default Vue.extend({
   },
   destroyed() {
     window.removeEventListener('keydown', this.keyPressed)
-    if (this.dragSettleTimer !== undefined) window.clearTimeout(this.dragSettleTimer)
+    this.cancelDragAnimation()
   },
   computed: {
     shortcuts(): any {
@@ -268,7 +278,8 @@ export default Vue.extend({
       return this.currentSlide < this.slidesCount
     },
     isDoublePages(): boolean {
-      return this.pageLayout === PagedReaderLayout.DOUBLE_PAGES || this.pageLayout === PagedReaderLayout.DOUBLE_NO_COVER
+      return this.pageLayout === PagedReaderLayout.DOUBLE_PAGES ||
+        this.pageLayout === PagedReaderLayout.DOUBLE_NO_COVER
     },
     transitionEnabled(): boolean {
       return this.transition !== PagedReaderTransition.NONE
@@ -278,20 +289,14 @@ export default Vue.extend({
     },
     customRendererEnabled(): boolean {
       return this.interactiveGestureEnabled ||
-        (this.transition !== PagedReaderTransition.DEFAULT && this.transition !== PagedReaderTransition.NONE)
+        (this.transition !== PagedReaderTransition.DEFAULT &&
+          this.transition !== PagedReaderTransition.NONE)
     },
     carouselAnimations(): boolean {
       return this.transition === PagedReaderTransition.DEFAULT && !this.customRendererEnabled
     },
-    interactiveBaseIndex(): number {
+    transitionBaseIndex(): number {
       return this.drag.prepared ? this.drag.currentIndex : this.carouselPage
-    },
-    interactiveSpreadIndices(): number[] {
-      const result: number[] = []
-      for (let i = this.interactiveBaseIndex - 2; i <= this.interactiveBaseIndex + 2; i++) {
-        if (i >= 0 && i < this.spreads.length) result.push(i)
-      }
-      return result
     },
     physicalIndexDirection(): number {
       if (this.vertical) return 1
@@ -309,38 +314,34 @@ export default Vue.extend({
     transitionDuration(): number {
       switch (this.transition) {
         case PagedReaderTransition.PAGE_TURN:
+        case PagedReaderTransition.PAPER_CURL:
           return 300
         case PagedReaderTransition.FADE:
-          return 180
+        case PagedReaderTransition.SOFT_WIPE:
+          return 190
         default:
           return 220
       }
+    },
+    paperSegments(): number[] {
+      return Array.from({length: 18}, (_, i) => i)
     },
   },
   methods: {
     keyPressed(e: KeyboardEvent) {
       this.shortcuts[e.key]?.execute(this)
     },
-    imgClass(spread: PageDtoWithUrl[]): string {
-      const double = spread.length > 1
-      switch (this.scale) {
-        case ScaleType.WIDTH:
-          return double ? 'img-double-fit-width' : 'img-fit-width'
-        case ScaleType.WIDTH_SHRINK_ONLY:
-          return double ? 'img-double-fit-width-shrink-only' : 'img-fit-width-shrink-only'
-        case ScaleType.HEIGHT:
-          return 'img-fit-height'
-        case ScaleType.SCREEN:
-          return double ? 'img-double-fit-screen' : 'img-fit-screen'
-        default:
-          return 'img-fit-original'
-      }
-    },
     eagerLoad(spreadIndex: number): boolean {
       return Math.abs(this.carouselPage - spreadIndex) <= 2
     },
     preRender(spreadIndex: number): boolean {
       return Math.abs(this.carouselPage - spreadIndex) > (this.transitionEnabled ? 1 : 0)
+    },
+    shouldRenderCustomSpread(spreadIndex: number): boolean {
+      if (!this.customRendererEnabled) return false
+      if (Math.abs(this.carouselPage - spreadIndex) <= 3) return true
+      if (this.drag.prepared && Math.abs(this.drag.currentIndex - spreadIndex) <= 3) return true
+      return this.drag.targetIndex === spreadIndex
     },
     centerClick() {
       this.$emit('menu')
@@ -361,7 +362,7 @@ export default Vue.extend({
     },
     prev() {
       if (this.customRendererEnabled) {
-        this.navigateInteractive(-1)
+        this.navigateCustom(-1)
       } else if (this.canPrev) {
         this.carouselPage--
         window.scrollTo(0, 0)
@@ -371,7 +372,7 @@ export default Vue.extend({
     },
     next() {
       if (this.customRendererEnabled) {
-        this.navigateInteractive(1)
+        this.navigateCustom(1)
       } else if (this.canNext) {
         this.carouselPage++
         window.scrollTo(0, 0)
@@ -379,7 +380,7 @@ export default Vue.extend({
         this.$emit('jump-next')
       }
     },
-    navigateInteractive(delta: number) {
+    navigateCustom(delta: number) {
       if (this.drag.settling) this.finishDragSettlement(true)
       if (this.drag.tracking) return
 
@@ -397,7 +398,9 @@ export default Vue.extend({
       this.drag.navigationDelta = delta
       this.drag.axisSize = Math.max(1, this.vertical ? root.clientHeight : root.clientWidth)
       this.drag.physicalDirection = -Math.sign(delta * this.physicalIndexDirection)
+      this.drag.rawOffset = 0
       this.drag.offset = 0
+      this.drag.velocity = 0
       this.drag.curlVariant = 'middle'
 
       this.$nextTick(() => {
@@ -424,7 +427,9 @@ export default Vue.extend({
       this.drag.navigationDelta = 0
       this.drag.currentIndex = this.carouselPage
       this.drag.targetIndex = null
-      this.drag.curlVariant = this.vertical ? 'middle' : pageCurlVariantForStart(touch.clientY, root.clientHeight)
+      this.drag.curlVariant = this.vertical
+        ? 'middle'
+        : pageCurlVariantForStart(touch.clientY, root.clientHeight)
     },
     followFingerMove(event: TouchEvent) {
       if (!this.drag.tracking || event.touches.length !== 1) return
@@ -489,55 +494,74 @@ export default Vue.extend({
       else this.resetDrag()
     },
     settleDrag(commitTarget: boolean, jump?: 'previous' | 'next') {
+      this.cancelDragAnimation()
       this.drag.settling = true
       this.drag.settleCommit = commitTarget && this.drag.targetIndex !== null
       this.drag.settleJump = jump || ''
       this.suppressClickUntil = Date.now() + 350
 
-      if (this.drag.settleCommit) {
-        this.drag.offset = this.drag.physicalDirection * this.drag.axisSize
-      } else {
-        this.drag.offset = 0
+      const from = this.drag.offset
+      const to = this.drag.settleCommit
+        ? this.drag.physicalDirection * this.drag.axisSize
+        : 0
+      const remaining = Math.min(1, Math.abs(to - from) / Math.max(1, this.drag.axisSize))
+      const duration = Math.max(80, this.transitionDuration * Math.max(0.35, remaining))
+      const startedAt = performance.now()
+
+      const tick = (now: number) => {
+        if (!this.drag.settling) return
+        const linear = Math.min(1, Math.max(0, (now - startedAt) / duration))
+        const eased = 1 - Math.pow(1 - linear, 3)
+        this.drag.offset = from + (to - from) * eased
+
+        if (linear < 1) {
+          this.dragAnimationFrame = window.requestAnimationFrame(tick)
+          return
+        }
+
+        this.drag.offset = to
+        this.finishDragSettlement(false)
       }
 
-      if (this.dragSettleTimer !== undefined) window.clearTimeout(this.dragSettleTimer)
-      this.dragSettleTimer = window.setTimeout(() => this.finishDragSettlement(false), this.transitionDuration)
+      this.dragAnimationFrame = window.requestAnimationFrame(tick)
+    },
+    cancelDragAnimation() {
+      if (this.dragAnimationFrame !== undefined) {
+        window.cancelAnimationFrame(this.dragAnimationFrame)
+        this.dragAnimationFrame = undefined
+      }
     },
     finishDragSettlement(immediate = false) {
-      if (this.dragSettleTimer !== undefined) window.clearTimeout(this.dragSettleTimer)
+      this.cancelDragAnimation()
 
       const commitTarget = this.drag.settleCommit
       const targetIndex = this.drag.targetIndex
       const jump = this.drag.settleJump
 
+      if (immediate && commitTarget && targetIndex !== null) {
+        this.drag.offset = this.drag.physicalDirection * this.drag.axisSize
+      }
+
+      /*
+       * Commit and reset synchronously. Vue batches these mutations into one DOM
+       * patch, so the target spread's final animated geometry and its idle
+       * geometry are identical in the first painted committed frame.
+       *
+       * Do not call window.scrollTo here: changing the document scroll position
+       * while the transition layer is visible caused the persistent
+       * "same page at a different position" flash.
+       */
       if (commitTarget && targetIndex !== null) {
         this.carouselPage = targetIndex
-        window.scrollTo(0, 0)
       }
 
-      const complete = () => {
-        // A new gesture may already have force-finalized and replaced this settlement.
-        if (!this.drag.settling || this.drag.targetIndex !== targetIndex) return
-        this.resetDrag()
-        if (jump === 'previous') this.$emit('jump-previous')
-        if (jump === 'next') this.$emit('jump-next')
-      }
+      this.resetDrag()
 
-      if (immediate) {
-        complete()
-        return
-      }
-
-      // setTimeout can run before the browser paints the final CSS-transition frame.
-      // Keep that exact final transform alive through two compositor frames before
-      // rebasing to the idle page, preventing a one-frame positional flash.
-      this.$nextTick(() => {
-        window.requestAnimationFrame(() => {
-          window.requestAnimationFrame(complete)
-        })
-      })
+      if (jump === 'previous') this.$emit('jump-previous')
+      if (jump === 'next') this.$emit('jump-next')
     },
     resetDrag() {
+      this.cancelDragAnimation()
       this.drag.tracking = false
       this.drag.prepared = false
       this.drag.active = false
@@ -552,18 +576,23 @@ export default Vue.extend({
       this.drag.currentIndex = this.carouselPage
       this.drag.targetIndex = null
       this.drag.curlVariant = 'middle'
-      this.dragSettleTimer = undefined
+    },
+    effectiveTransition(): PagedReaderTransition {
+      if (this.drag.navigationDelta < 0) {
+        if (this.transition === PagedReaderTransition.COVER) return PagedReaderTransition.REVEAL
+        if (this.transition === PagedReaderTransition.REVEAL) return PagedReaderTransition.COVER
+      }
+      return this.transition
     },
     transitionSpreadClasses(spreadIndex: number): Record<string, boolean> {
-      const current = spreadIndex === this.interactiveBaseIndex
+      const current = spreadIndex === this.transitionBaseIndex
+      const effect = this.effectiveTransition()
       return {
         'transition-current': current,
         'transition-target': this.drag.prepared && spreadIndex === this.drag.targetIndex,
-        'page-turn-sheet': this.transition === PagedReaderTransition.PAGE_TURN && this.drag.prepared && current,
-        'curl-to-left': this.activePhysicalDirection < 0,
-        'curl-to-right': this.activePhysicalDirection > 0,
-        'curl-top': this.drag.curlVariant === 'top',
-        'curl-bottom': this.drag.curlVariant === 'bottom',
+        'page-flip-sheet': effect === PagedReaderTransition.PAGE_TURN && this.drag.prepared && current,
+        'soft-wipe-target': effect === PagedReaderTransition.SOFT_WIPE &&
+          this.drag.prepared && spreadIndex === this.drag.targetIndex,
       }
     },
     idleSpreadStyle(spreadIndex: number): Record<string, string> {
@@ -572,52 +601,57 @@ export default Vue.extend({
           transform: 'translate3d(0, 0, 0)',
           opacity: '1',
           zIndex: '2',
+          visibility: 'visible',
         }
       }
       return {
         transform: 'translate3d(0, 0, 0)',
         opacity: '0',
         zIndex: '0',
+        visibility: 'hidden',
       }
     },
-    interactiveSpreadStyle(spreadIndex: number): Record<string, string> {
+    customSpreadStyle(spreadIndex: number): Record<string, string> {
       if (!this.drag.prepared) return this.idleSpreadStyle(spreadIndex)
 
-      const baseIndex = this.interactiveBaseIndex
+      const baseIndex = this.transitionBaseIndex
       const isCurrent = spreadIndex === baseIndex
       const isTarget = spreadIndex === this.drag.targetIndex
       const progress = this.transitionProgressValue
       const offset = this.drag.offset
       const direction = this.activePhysicalDirection
-      const transitionCss = this.drag.settling
-        ? `transform ${this.transitionDuration}ms cubic-bezier(0.22, 0.61, 0.36, 1), opacity ${this.transitionDuration}ms ease, filter ${this.transitionDuration}ms ease`
-        : 'none'
+      const effect = this.effectiveTransition()
 
-      if (!isCurrent && !isTarget && this.transition !== PagedReaderTransition.DEFAULT && this.transition !== PagedReaderTransition.PUSH) {
+      if (!isCurrent && !isTarget &&
+        effect !== PagedReaderTransition.DEFAULT &&
+        effect !== PagedReaderTransition.PUSH) {
         return {
           transform: 'translate3d(0, 0, 0)',
           opacity: '0',
           zIndex: '0',
-          transition: transitionCss,
+          visibility: 'hidden',
         }
       }
 
-      switch (this.transition) {
+      switch (effect) {
         case PagedReaderTransition.COVER: {
           if (isCurrent) {
-            return {transform: 'translate3d(0, 0, 0)', opacity: '1', zIndex: '1', transition: transitionCss}
+            return {
+              transform: 'translate3d(0, 0, 0)',
+              opacity: '1',
+              zIndex: '1',
+              visibility: 'visible',
+            }
           }
           if (isTarget) {
-            const start = -direction * 100
-            const coordinate = this.vertical
-              ? `calc(${start}% + ${offset}px)`
-              : `calc(${start}% + ${offset}px)`
+            const start = -direction * this.drag.axisSize
+            const coordinate = start + offset
             return {
-              transform: this.vertical ? `translate3d(0, ${coordinate}, 0)` : `translate3d(${coordinate}, 0, 0)`,
+              transform: this.axisTranslate(coordinate),
               opacity: '1',
               zIndex: '3',
+              visibility: 'visible',
               filter: `drop-shadow(${direction * 10}px 0 12px rgba(0, 0, 0, 0.28))`,
-              transition: transitionCss,
             }
           }
           break
@@ -625,50 +659,84 @@ export default Vue.extend({
         case PagedReaderTransition.REVEAL: {
           if (isCurrent) {
             return {
-              transform: this.vertical ? `translate3d(0, ${offset}px, 0)` : `translate3d(${offset}px, 0, 0)`,
+              transform: this.axisTranslate(offset),
               opacity: '1',
               zIndex: '3',
+              visibility: 'visible',
               filter: `drop-shadow(${-direction * 10}px 0 12px rgba(0, 0, 0, 0.24))`,
-              transition: transitionCss,
             }
           }
           if (isTarget) {
             const scale = 0.985 + progress * 0.015
-            return {transform: `translate3d(0, 0, 0) scale(${scale})`, opacity: '1', zIndex: '1', transition: transitionCss}
+            return {
+              transform: `translate3d(0, 0, 0) scale(${scale})`,
+              opacity: '1',
+              zIndex: '1',
+              visibility: 'visible',
+            }
           }
           break
         }
         case PagedReaderTransition.PARALLAX: {
           if (isCurrent) {
             return {
-              transform: this.vertical ? `translate3d(0, ${offset}px, 0)` : `translate3d(${offset}px, 0, 0)`,
+              transform: this.axisTranslate(offset),
               opacity: '1',
               zIndex: '3',
-              transition: transitionCss,
+              visibility: 'visible',
             }
           }
           if (isTarget) {
-            const start = -direction * 35
-            const parallaxOffset = offset * 0.35
-            const coordinate = `calc(${start}% + ${parallaxOffset}px)`
+            const start = -direction * this.drag.axisSize * 0.35
+            const coordinate = start + offset * 0.35
             const scale = 0.985 + progress * 0.015
             return {
-              transform: this.vertical
-                ? `translate3d(0, ${coordinate}, 0) scale(${scale})`
-                : `translate3d(${coordinate}, 0, 0) scale(${scale})`,
+              transform: `${this.axisTranslate(coordinate)} scale(${scale})`,
               opacity: '1',
               zIndex: '1',
-              transition: transitionCss,
+              visibility: 'visible',
             }
           }
           break
         }
         case PagedReaderTransition.FADE: {
           if (isCurrent) {
-            return {transform: 'translate3d(0, 0, 0)', opacity: `${1 - progress}`, zIndex: '3', transition: transitionCss}
+            return {
+              transform: 'translate3d(0, 0, 0)',
+              opacity: `${1 - progress}`,
+              zIndex: '3',
+              visibility: 'visible',
+            }
           }
           if (isTarget) {
-            return {transform: 'translate3d(0, 0, 0)', opacity: `${progress}`, zIndex: '2', transition: transitionCss}
+            return {
+              transform: 'translate3d(0, 0, 0)',
+              opacity: `${progress}`,
+              zIndex: '2',
+              visibility: 'visible',
+            }
+          }
+          break
+        }
+        case PagedReaderTransition.SOFT_WIPE: {
+          if (isCurrent) {
+            return {
+              transform: 'translate3d(0, 0, 0)',
+              opacity: '1',
+              zIndex: '2',
+              visibility: 'visible',
+            }
+          }
+          if (isTarget) {
+            const mask = this.softWipeMask(progress, direction)
+            return {
+              transform: 'translate3d(0, 0, 0)',
+              opacity: '1',
+              zIndex: '3',
+              visibility: 'visible',
+              WebkitMaskImage: mask,
+              maskImage: mask,
+            }
           }
           break
         }
@@ -676,16 +744,20 @@ export default Vue.extend({
           if (isCurrent) {
             const rotation = pageCurlRotation(progress, direction)
             const edge = direction < 0 ? 'left' : 'right'
-            const verticalOrigin = this.drag.curlVariant === 'top' ? 'top' : this.drag.curlVariant === 'bottom' ? 'bottom' : 'center'
-            const cornerTilt = this.drag.curlVariant === 'top'
-              ? -direction * progress * 3.5
+            const verticalOrigin = this.drag.curlVariant === 'top'
+              ? 'top'
               : this.drag.curlVariant === 'bottom'
-                ? direction * progress * 3.5
+                ? 'bottom'
+                : 'center'
+            const cornerTilt = this.drag.curlVariant === 'top'
+              ? -direction * progress * 12
+              : this.drag.curlVariant === 'bottom'
+                ? direction * progress * 12
                 : 0
             const verticalShift = this.drag.curlVariant === 'top'
-              ? -progress * 1.5
+              ? -progress * 5
               : this.drag.curlVariant === 'bottom'
-                ? progress * 1.5
+                ? progress * 5
                 : 0
             const transform = this.vertical
               ? `rotateX(${-rotation}deg)`
@@ -698,9 +770,8 @@ export default Vue.extend({
               transformOrigin,
               opacity: '1',
               zIndex: '4',
+              visibility: 'visible',
               filter: `drop-shadow(${direction * 14}px 2px ${8 + progress * 16}px rgba(0, 0, 0, ${0.18 + progress * 0.28}))`,
-              '--curl-shadow-opacity': `${Math.min(0.55, progress * 0.55)}`,
-              transition: transitionCss,
             }
           }
           if (isTarget) {
@@ -709,7 +780,27 @@ export default Vue.extend({
               transform: `translate3d(0, 0, 0) scale(${scale})`,
               opacity: `${0.8 + progress * 0.2}`,
               zIndex: '1',
-              transition: transitionCss,
+              visibility: 'visible',
+            }
+          }
+          break
+        }
+        case PagedReaderTransition.PAPER_CURL: {
+          if (isCurrent) {
+            return {
+              transform: 'translate3d(0, 0, 0)',
+              opacity: '1',
+              zIndex: '4',
+              visibility: 'visible',
+            }
+          }
+          if (isTarget) {
+            const scale = 0.99 + progress * 0.01
+            return {
+              transform: `translate3d(0, 0, 0) scale(${scale})`,
+              opacity: '1',
+              zIndex: '1',
+              visibility: 'visible',
             }
           }
           break
@@ -717,26 +808,109 @@ export default Vue.extend({
         case PagedReaderTransition.PUSH:
         case PagedReaderTransition.DEFAULT:
         default: {
-          const pageOffset = (spreadIndex - baseIndex) * this.physicalIndexDirection * 100
-          const coordinate = `calc(${pageOffset}% + ${offset}px)`
-          const currentScale = this.transition === PagedReaderTransition.PUSH && isCurrent ? 1 - progress * 0.018 : 1
-          const targetScale = this.transition === PagedReaderTransition.PUSH && isTarget ? 0.982 + progress * 0.018 : 1
+          const pageOffset = (spreadIndex - baseIndex) *
+            this.physicalIndexDirection * this.drag.axisSize
+          const coordinate = pageOffset + offset
+          const currentScale = effect === PagedReaderTransition.PUSH && isCurrent
+            ? 1 - progress * 0.018
+            : 1
+          const targetScale = effect === PagedReaderTransition.PUSH && isTarget
+            ? 0.982 + progress * 0.018
+            : 1
           const scale = isCurrent ? currentScale : isTarget ? targetScale : 1
           return {
-            transform: this.vertical
-              ? `translate3d(0, ${coordinate}, 0) scale(${scale})`
-              : `translate3d(${coordinate}, 0, 0) scale(${scale})`,
+            transform: `${this.axisTranslate(coordinate)} scale(${scale})`,
             opacity: '1',
             zIndex: isTarget ? '3' : isCurrent ? '2' : '1',
-            filter: this.transition === PagedReaderTransition.PUSH && (isCurrent || isTarget)
+            visibility: Math.abs(spreadIndex - baseIndex) <= 2 ? 'visible' : 'hidden',
+            filter: effect === PagedReaderTransition.PUSH && (isCurrent || isTarget)
               ? `drop-shadow(${direction * 8}px 0 10px rgba(0, 0, 0, ${0.08 + progress * 0.14}))`
               : 'none',
-            transition: transitionCss,
           }
         }
       }
 
-      return {opacity: '0', zIndex: '0', transition: transitionCss}
+      return {
+        opacity: '0',
+        zIndex: '0',
+        visibility: 'hidden',
+      }
+    },
+    axisTranslate(position: number): string {
+      return this.vertical
+        ? `translate3d(0, ${position}px, 0)`
+        : `translate3d(${position}px, 0, 0)`
+    },
+    softWipeMask(progress: number, direction: number): string {
+      if (progress <= 0) return 'linear-gradient(#0000, #0000)'
+      if (progress >= 1) return 'linear-gradient(#000, #000)'
+
+      const seam = direction < 0 ? 100 - progress * 100 : progress * 100
+      const feather = 4
+      const low = Math.max(0, seam - feather)
+      const high = Math.min(100, seam + feather)
+
+      if (this.vertical) {
+        if (direction < 0) {
+          return `linear-gradient(to bottom, transparent 0%, transparent ${low}%, black ${high}%, black 100%)`
+        }
+        return `linear-gradient(to bottom, black 0%, black ${low}%, transparent ${high}%, transparent 100%)`
+      }
+
+      if (direction < 0) {
+        return `linear-gradient(to right, transparent 0%, transparent ${low}%, black ${high}%, black 100%)`
+      }
+      return `linear-gradient(to right, black 0%, black ${low}%, transparent ${high}%, transparent 100%)`
+    },
+    isPaperCurlCurrent(spreadIndex: number): boolean {
+      return this.drag.prepared &&
+        this.effectiveTransition() === PagedReaderTransition.PAPER_CURL &&
+        spreadIndex === this.transitionBaseIndex
+    },
+    paperSegmentStyle(segment: number): Record<string, string> {
+      const count = this.paperSegments.length
+      const width = 100 / count
+      const center = (segment + 0.5) / count
+      const direction = this.activePhysicalDirection || -1
+      const fromOuter = direction < 0 ? 1 - center : center
+      const progress = this.transitionProgressValue
+      const phase = paperCurlSegmentPhase(progress, fromOuter)
+      const rotation = direction * phase * 155
+      const lift = Math.sin(phase * Math.PI) * 42
+      const outerWeight = 1 - fromOuter
+      const cornerTilt = this.drag.curlVariant === 'top'
+        ? -direction * phase * outerWeight * 11
+        : this.drag.curlVariant === 'bottom'
+          ? direction * phase * outerWeight * 11
+          : 0
+      const verticalShift = this.drag.curlVariant === 'top'
+        ? -phase * outerWeight * 22
+        : this.drag.curlVariant === 'bottom'
+          ? phase * outerWeight * 22
+          : 0
+      const originEdge = direction < 0 ? 'left' : 'right'
+      const originY = this.drag.curlVariant === 'top'
+        ? 'top'
+        : this.drag.curlVariant === 'bottom'
+          ? 'bottom'
+          : 'center'
+
+      return {
+        left: `${segment * width}%`,
+        width: `${width + 0.08}%`,
+        transformOrigin: `${originEdge} ${originY}`,
+        transform: `translate3d(0, ${verticalShift}px, ${lift}px) rotateZ(${cornerTilt}deg) rotateY(${rotation}deg)`,
+        boxShadow: phase > 0
+          ? `${direction * -4}px 0 ${4 + phase * 12}px rgba(0, 0, 0, ${phase * 0.22})`
+          : 'none',
+      }
+    },
+    paperSegmentContentStyle(segment: number): Record<string, string> {
+      const count = this.paperSegments.length
+      return {
+        width: `${count * 100}%`,
+        left: `${-segment * 100}%`,
+      }
     },
     onClickCapture(event: MouseEvent) {
       if (Date.now() < this.suppressClickUntil) {
@@ -764,6 +938,7 @@ export default Vue.extend({
   },
 })
 </script>
+
 <style scoped>
 .paged-reader-root {
   position: relative;
@@ -785,6 +960,8 @@ export default Vue.extend({
   z-index: 1;
   perspective: 1800px;
   transform-style: preserve-3d;
+  isolation: isolate;
+  contain: paint;
 }
 
 .transition-spread {
@@ -792,25 +969,29 @@ export default Vue.extend({
   inset: 0;
   width: 100%;
   height: 100%;
-  will-change: transform, opacity, filter;
   backface-visibility: hidden;
   transform-style: preserve-3d;
+  contain: paint;
 }
 
-.page-turn-sheet::after {
-  content: '';
+.transition-layer-active .transition-spread {
+  will-change: transform, opacity, filter;
+}
+
+.paper-segment {
   position: absolute;
-  inset: 0;
-  pointer-events: none;
-  opacity: var(--curl-shadow-opacity, 0);
+  top: 0;
+  bottom: 0;
+  overflow: hidden;
+  backface-visibility: hidden;
+  transform-style: preserve-3d;
+  will-change: transform;
 }
 
-.page-turn-sheet.curl-to-left::after {
-  background: linear-gradient(to left, rgba(255, 255, 255, 0.08), rgba(0, 0, 0, 0.28));
-}
-
-.page-turn-sheet.curl-to-right::after {
-  background: linear-gradient(to right, rgba(255, 255, 255, 0.08), rgba(0, 0, 0, 0.28));
+.paper-segment-content {
+  position: absolute;
+  top: 0;
+  height: 100%;
 }
 
 .left-quarter {
@@ -856,53 +1037,6 @@ export default Vue.extend({
   height: 50%;
   width: 100%;
   position: absolute;
-}
-
-.img-fit-all {
-  object-fit: contain;
-  object-position: center;
-}
-
-.img-fit-width {
-  width: 100vw;
-  min-height: 100vh;
-  align-self: flex-start;
-}
-
-.img-double-fit-width {
-  width: 50vw;
-  min-height: 100vh;
-  align-self: flex-start;
-}
-
-.img-fit-width-shrink-only {
-  max-width: 100vw;
-  align-self: flex-start;
-}
-
-.img-double-fit-width-shrink-only {
-  max-width: 50vw;
-  align-self: flex-start;
-}
-
-.img-fit-original {
-  width: auto;
-  height: auto;
-}
-
-.img-fit-height {
-  min-height: 100vh;
-  height: 100vh;
-}
-
-.img-fit-screen {
-  width: 100vw;
-  height: 100vh;
-}
-
-.img-double-fit-screen {
-  max-width: 50vw;
-  height: 100vh;
 }
 
 .pre-render {
