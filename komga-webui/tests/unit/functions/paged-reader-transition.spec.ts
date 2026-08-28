@@ -1,8 +1,7 @@
 import {
   pageCurlRotation,
   pageCurlVariantForStart,
-  paperCurlSegmentPhase,
-  paperCurlTilePhase,
+  paperCurlFoldGeometry,
   transitionProgress,
 } from '@/functions/paged-reader-transition'
 
@@ -28,29 +27,54 @@ describe('paged reader transitions', () => {
     expect(pageCurlRotation(2, 1)).toBeCloseTo(90)
   })
 
-  test('paper curl fold front reaches outer strips before spine strips', () => {
-    expect(paperCurlSegmentPhase(0, 0)).toBe(0)
-    expect(paperCurlSegmentPhase(0.25, 0.05)).toBeGreaterThan(0.9)
-    expect(paperCurlSegmentPhase(0.25, 0.8)).toBe(0)
-    expect(paperCurlSegmentPhase(1, 0.95)).toBe(1)
+  test('middle paper curl is one continuous vertical fold', () => {
+    const fold = paperCurlFoldGeometry(0.5, -1, 'middle')
+
+    expect(fold.seamTop).toBeCloseTo(50)
+    expect(fold.seamBottom).toBeCloseTo(50)
+    expect(fold.foldTop).toBeCloseTo(70)
+    expect(fold.foldBottom).toBeCloseTo(70)
+    expect(fold.shadowTop).toBeCloseTo(61)
+    expect(fold.shadowBottom).toBeCloseTo(61)
   })
 
-  test('middle paper curl propagates from free edge toward spine', () => {
-    expect(paperCurlTilePhase(0.2, 0, 0.5, 'middle')).toBeGreaterThan(0)
-    expect(paperCurlTilePhase(0.2, 0.8, 0.5, 'middle')).toBe(0)
-    expect(paperCurlTilePhase(1, 1, 0.5, 'middle')).toBe(1)
+  test('top and bottom turns exaggerate one continuous diagonal edge', () => {
+    const top = paperCurlFoldGeometry(0.5, -1, 'top')
+    const bottom = paperCurlFoldGeometry(0.5, -1, 'bottom')
+
+    expect(top.seamTop).toBeLessThan(top.seamBottom - 30)
+    expect(bottom.seamBottom).toBeLessThan(bottom.seamTop - 30)
   })
 
-  test('top and bottom paper curl strongly favor the touched corner', () => {
-    const progress = 0.35
-    const topNear = paperCurlTilePhase(progress, 0, 0.05, 'top')
-    const topFar = paperCurlTilePhase(progress, 0, 0.95, 'top')
-    const bottomNear = paperCurlTilePhase(progress, 0, 0.95, 'bottom')
-    const bottomFar = paperCurlTilePhase(progress, 0, 0.05, 'bottom')
+  test('paper fold reverses cleanly with physical direction', () => {
+    const left = paperCurlFoldGeometry(0.5, -1, 'top')
+    const right = paperCurlFoldGeometry(0.5, 1, 'top')
 
-    expect(topNear).toBeGreaterThan(0.3)
-    expect(topFar).toBe(0)
-    expect(bottomNear).toBeGreaterThan(0.3)
-    expect(bottomFar).toBe(0)
+    expect(left.seamTop).toBeCloseTo(100 - right.seamTop)
+    expect(left.seamBottom).toBeCloseTo(100 - right.seamBottom)
+    expect(left.foldTop).toBeGreaterThan(left.seamTop)
+    expect(right.foldTop).toBeLessThan(right.seamTop)
+  })
+
+  test('paper fold collapses exactly at both settled endpoints', () => {
+    const start = paperCurlFoldGeometry(0, -1, 'top')
+    const end = paperCurlFoldGeometry(1, -1, 'top')
+
+    expect(start).toEqual({
+      seamTop: 100,
+      seamBottom: 100,
+      foldTop: 100,
+      foldBottom: 100,
+      shadowTop: 100,
+      shadowBottom: 100,
+    })
+    expect(end).toEqual({
+      seamTop: 0,
+      seamBottom: 0,
+      foldTop: 0,
+      foldBottom: 0,
+      shadowTop: 0,
+      shadowBottom: 0,
+    })
   })
 })
