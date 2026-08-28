@@ -1,31 +1,40 @@
 <template>
   <div class="paper-sheet" aria-hidden="true">
-    <div
-      v-for="tile in tiles"
-      :key="`paper-tile-${tile.row}-${tile.column}`"
-      class="paper-tile"
-      :style="tileStyle(tile.row, tile.column)"
-    >
-      <div class="paper-tile-face paper-tile-front">
-        <div class="paper-tile-content" :style="tileContentStyle(tile.row, tile.column)">
-          <paged-reader-spread
-            :spread="frontSpread"
-            :flip-direction="flipDirection"
-            :scale="scale"
-          />
-        </div>
-      </div>
-
-      <div class="paper-tile-face paper-tile-back">
-        <div class="paper-tile-content" :style="tileContentStyle(tile.row, tile.column)">
-          <paged-reader-spread
-            :spread="backSpread"
-            :flip-direction="flipDirection"
-            :scale="scale"
-          />
-        </div>
-      </div>
+    <!-- The destination page is a single uninterrupted sheet underneath the
+         page being turned. This is the same basic illusion MangaBox uses: page
+         clipping and lighting, not a collection of independently rotating tiles. -->
+    <div class="paper-layer paper-target">
+      <paged-reader-spread
+        :spread="backSpread"
+        :flip-direction="flipDirection"
+        :scale="scale"
+      />
     </div>
+
+    <!-- One continuous front page. Its only deformation is the single fold
+         boundary described by clip-path. -->
+    <div class="paper-layer paper-front" :style="frontStyle">
+      <paged-reader-spread
+        :spread="frontSpread"
+        :flip-direction="flipDirection"
+        :scale="scale"
+      />
+    </div>
+
+    <!-- Back of the physical page. It deliberately contains the destination
+         page, as requested, and is clipped to one continuous folded band. -->
+    <div class="paper-layer paper-backface" :style="backfaceStyle">
+      <paged-reader-spread
+        :spread="backSpread"
+        :flip-direction="flipDirection"
+        :scale="scale"
+      />
+    </div>
+
+    <div class="paper-fold-tone" :style="foldToneStyle" />
+    <div class="paper-drop-shadow" :style="shadowStyle" />
+    <div class="paper-highlight" :style="highlightStyle" />
+    <div class="paper-fore-edge" :style="edgeStyle" />
   </div>
 </template>
 
@@ -34,12 +43,11 @@ import Vue from 'vue'
 import PagedReaderSpread from '@/components/readers/PagedReaderSpread.vue'
 import {PageDtoWithUrl} from '@/types/komga-books'
 import {ScaleType} from '@/types/enum-reader'
-import {PageCurlVariant, paperCurlTilePhase} from '@/functions/paged-reader-transition'
-
-type PaperTile = {
-  row: number
-  column: number
-}
+import {
+  PageCurlVariant,
+  PaperCurlFoldGeometry,
+  paperCurlFoldGeometry,
+} from '@/functions/paged-reader-transition'
 
 export default Vue.extend({
   name: 'PagedReaderPaperSheet',
@@ -74,88 +82,87 @@ export default Vue.extend({
       required: true,
     },
   },
-  data: () => ({
-    columns: 12,
-    rows: 4,
-  }),
   computed: {
-    tiles(): PaperTile[] {
-      const result: PaperTile[] = []
-      for (let row = 0; row < this.rows; row++) {
-        for (let column = 0; column < this.columns; column++) {
-          result.push({row, column})
-        }
-      }
-      return result
+    direction(): number {
+      return Math.sign(this.physicalDirection || -1)
     },
-  },
-  methods: {
-    tileStyle(row: number, column: number): Record<string, string> {
-      const direction = Math.sign(this.physicalDirection || -1)
-      const columnCenter = (column + 0.5) / this.columns
-      const rowCenter = (row + 0.5) / this.rows
-      const distanceFromFreeEdge = direction < 0 ? 1 - columnCenter : columnCenter
-      const phase = paperCurlTilePhase(
-        this.progress,
-        distanceFromFreeEdge,
-        rowCenter,
-        this.variant,
-      )
-
-      const freeEdgeWeight = 1 - distanceFromFreeEdge
-      const touchedCornerWeight = this.variant === 'top'
-        ? 1 - rowCenter
-        : this.variant === 'bottom'
-          ? rowCenter
-          : 0
-      const arch = Math.sin(phase * Math.PI)
-
-      // Almost a complete half-turn: after 90deg the back face (the target
-      // spread) becomes visible, so the physical sheet never turns blank.
-      const rotationY = direction * phase * 178
-      const lift = arch * (28 + 62 * freeEdgeWeight)
-
-      // Corner modes are intentionally pronounced. The touched corner bends
-      // toward the centre of the book while the opposite corner remains flat
-      // until much later in the gesture.
-      const cornerStrength = touchedCornerWeight * freeEdgeWeight
-      const rotationZ = this.variant === 'top'
-        ? -direction * phase * cornerStrength * 30
-        : this.variant === 'bottom'
-          ? direction * phase * cornerStrength * 30
-          : 0
-      const verticalShiftVh = this.variant === 'top'
-        ? phase * cornerStrength * 12
-        : this.variant === 'bottom'
-          ? -phase * cornerStrength * 12
-          : 0
-
-      const originEdge = direction < 0 ? 'left' : 'right'
-      const originY = this.variant === 'top'
-        ? 'top'
-        : this.variant === 'bottom'
-          ? 'bottom'
-          : 'center'
-
+    geometry(): PaperCurlFoldGeometry {
+      return paperCurlFoldGeometry(this.progress, this.direction, this.variant)
+    },
+    frontClip(): string {
+      const {seamTop, seamBottom} = this.geometry
+      if (this.direction < 0) {
+        return `polygon(0 0, ${seamTop}% 0, ${seamBottom}% 100%, 0 100%)`
+      }
+      return `polygon(${seamTop}% 0, 100% 0, 100% 100%, ${seamBottom}% 100%)`
+    },
+    foldClip(): string {
+      const {seamTop, seamBottom, foldTop, foldBottom} = this.geometry
+      return `polygon(${seamTop}% 0, ${foldTop}% 0, ${foldBottom}% 100%, ${seamBottom}% 100%)`
+    },
+    shadowClip(): string {
+      const {seamTop, seamBottom, shadowTop, shadowBottom} = this.geometry
+      return `polygon(${seamTop}% 0, ${shadowTop}% 0, ${shadowBottom}% 100%, ${seamBottom}% 100%)`
+    },
+    frontStyle(): Record<string, string> {
       return {
-        left: `${column * 100 / this.columns}%`,
-        top: `${row * 100 / this.rows}%`,
-        width: `${100 / this.columns + 0.06}%`,
-        height: `${100 / this.rows + 0.06}%`,
-        transformOrigin: `${originEdge} ${originY}`,
-        transform: `translate3d(0, ${verticalShiftVh}vh, ${lift}px) rotateZ(${rotationZ}deg) rotateY(${rotationY}deg)`,
-        zIndex: `${100 + Math.round(phase * 100)}`,
-        boxShadow: phase > 0
-          ? `${direction * -4}px 0 ${5 + phase * 16}px rgba(0, 0, 0, ${0.10 + phase * 0.22})`
-          : 'none',
+        clipPath: this.frontClip,
+        WebkitClipPath: this.frontClip,
       }
     },
-    tileContentStyle(row: number, column: number): Record<string, string> {
+    backfaceStyle(): Record<string, string> {
+      const arch = Math.sin(Math.max(0, Math.min(1, this.progress)) * Math.PI)
       return {
-        width: `${this.columns * 100}%`,
-        height: `${this.rows * 100}%`,
-        left: `${-column * 100}%`,
-        top: `${-row * 100}%`,
+        clipPath: this.foldClip,
+        WebkitClipPath: this.foldClip,
+        filter: `brightness(${0.72 + arch * 0.10}) saturate(${0.82 + arch * 0.08})`,
+      }
+    },
+    foldToneStyle(): Record<string, string> {
+      const gradient = this.direction < 0
+        ? 'linear-gradient(to right, rgba(255,255,255,0.34), rgba(255,255,255,0.05) 35%, rgba(0,0,0,0.24) 100%)'
+        : 'linear-gradient(to left, rgba(255,255,255,0.34), rgba(255,255,255,0.05) 35%, rgba(0,0,0,0.24) 100%)'
+      return {
+        clipPath: this.foldClip,
+        WebkitClipPath: this.foldClip,
+        background: gradient,
+        opacity: `${Math.sin(Math.max(0, Math.min(1, this.progress)) * Math.PI)}`,
+      }
+    },
+    shadowStyle(): Record<string, string> {
+      const gradient = this.direction < 0
+        ? 'linear-gradient(to right, rgba(0,0,0,0.46), rgba(0,0,0,0.18) 42%, rgba(0,0,0,0) 100%)'
+        : 'linear-gradient(to left, rgba(0,0,0,0.46), rgba(0,0,0,0.18) 42%, rgba(0,0,0,0) 100%)'
+      return {
+        clipPath: this.shadowClip,
+        WebkitClipPath: this.shadowClip,
+        background: gradient,
+        opacity: `${Math.sin(Math.max(0, Math.min(1, this.progress)) * Math.PI)}`,
+      }
+    },
+    highlightStyle(): Record<string, string> {
+      const {seamTop, seamBottom} = this.geometry
+      const width = Math.sin(Math.max(0, Math.min(1, this.progress)) * Math.PI) * 2.8
+      const highlightTop = Math.max(0, Math.min(100, seamTop + this.direction * width))
+      const highlightBottom = Math.max(0, Math.min(100, seamBottom + this.direction * width))
+      const clip = `polygon(${seamTop}% 0, ${highlightTop}% 0, ${highlightBottom}% 100%, ${seamBottom}% 100%)`
+      return {
+        clipPath: clip,
+        WebkitClipPath: clip,
+        background: 'rgba(255,255,255,0.34)',
+        opacity: `${Math.sin(Math.max(0, Math.min(1, this.progress)) * Math.PI)}`,
+      }
+    },
+    edgeStyle(): Record<string, string> {
+      const {seamTop, seamBottom} = this.geometry
+      const width = Math.sin(Math.max(0, Math.min(1, this.progress)) * Math.PI) * 0.7
+      const edgeTop = Math.max(0, Math.min(100, seamTop - this.direction * width))
+      const edgeBottom = Math.max(0, Math.min(100, seamBottom - this.direction * width))
+      const clip = `polygon(${seamTop}% 0, ${edgeTop}% 0, ${edgeBottom}% 100%, ${seamBottom}% 100%)`
+      return {
+        clipPath: clip,
+        WebkitClipPath: clip,
+        opacity: `${Math.sin(Math.max(0, Math.min(1, this.progress)) * Math.PI)}`,
       }
     },
   },
@@ -166,32 +173,54 @@ export default Vue.extend({
 .paper-sheet {
   position: absolute;
   inset: 0;
-  overflow: visible;
-  perspective: 1800px;
-  transform-style: preserve-3d;
+  overflow: hidden;
   pointer-events: none;
+  isolation: isolate;
+  contain: paint;
 }
 
-.paper-tile {
-  position: absolute;
-  transform-style: preserve-3d;
-  will-change: transform;
-}
-
-.paper-tile-face {
+.paper-layer,
+.paper-fold-tone,
+.paper-drop-shadow,
+.paper-highlight,
+.paper-fore-edge {
   position: absolute;
   inset: 0;
-  overflow: hidden;
-  backface-visibility: hidden;
-  -webkit-backface-visibility: hidden;
-  transform-style: preserve-3d;
 }
 
-.paper-tile-back {
-  transform: rotateY(180deg);
+.paper-target {
+  z-index: 1;
 }
 
-.paper-tile-content {
-  position: absolute;
+.paper-front {
+  z-index: 4;
+  will-change: clip-path;
+}
+
+.paper-backface {
+  z-index: 5;
+  will-change: clip-path, filter;
+}
+
+.paper-fold-tone {
+  z-index: 6;
+  will-change: clip-path, opacity;
+}
+
+.paper-drop-shadow {
+  z-index: 3;
+  will-change: clip-path, opacity;
+}
+
+.paper-highlight {
+  z-index: 7;
+  will-change: clip-path, opacity;
+}
+
+.paper-fore-edge {
+  z-index: 8;
+  background: rgba(245, 245, 245, 0.9);
+  box-shadow: 0 0 10px rgba(0, 0, 0, 0.38);
+  will-change: clip-path, opacity;
 }
 </style>
