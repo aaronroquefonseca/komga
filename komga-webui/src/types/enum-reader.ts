@@ -27,6 +27,8 @@ export enum PagedReaderTransition {
   PARALLAX = 'parallax',
   PAGE_TURN = 'page_turn',
   FADE = 'fade',
+  SOFT_WIPE = 'soft_wipe',
+  PAPER_CURL = 'paper_curl',
   NONE = 'none'
 }
 
