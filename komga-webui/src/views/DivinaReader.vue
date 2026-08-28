@@ -144,6 +144,7 @@
         :scale="scale"
         :animations="animations"
         :swipe="swipe"
+        :follow-finger="followFinger"
         @menu="toggleToolbars()"
         @jump-previous="jumpToPrevious()"
         @jump-next="jumpToNext()"
@@ -234,6 +235,13 @@
             <template v-if="!continuousReader">
               <v-subheader class="font-weight-black text-h6">{{ $t('bookreader.settings.paged') }}</v-subheader>
               <v-list-item>
+                <settings-switch
+                  v-model="followFinger"
+                  label="Follow finger"
+                  :disabled="!swipe || !animations"
+                />
+              </v-list-item>
+              <v-list-item>
                 <settings-select
                   :items="scaleTypes"
                   v-model="scale"
@@ -277,7 +285,7 @@
       multi-line
       class="mt-12"
     >
-      <div class="text-body-1 pa-6">
+      <div class="body-1 pa-6">
         <p>{{ $t('bookreader.end_of_book') }}</p>
         <p v-if="!$_.isEmpty(siblingNext)">{{ $t('bookreader.move_next') }}</p>
         <p v-else>{{ $t('bookreader.move_next_exit') }}</p>
@@ -390,6 +398,7 @@ export default Vue.extend({
       settings: {
         pageLayout: PagedReaderLayout.SINGLE_PAGE,
         swipe: false,
+        followFinger: false,
         alwaysFullscreen: false,
         animations: true,
         scale: ScaleType.SCREEN,
@@ -460,6 +469,7 @@ export default Vue.extend({
     this.animations = this.$store.state.persistedState.webreader.animations
     this.pageLayout = this.$store.state.persistedState.webreader.paged.pageLayout
     this.swipe = this.$store.state.persistedState.webreader.swipe
+    this.followFinger = this.$store.state.persistedState.webreader.followFinger === true
     this.alwaysFullscreen = this.$store.state.persistedState.webreader.alwaysFullscreen
     this.scale = this.$store.state.persistedState.webreader.paged.scale
     this.continuousScale = this.$store.state.persistedState.webreader.continuous.scale
@@ -650,6 +660,15 @@ export default Vue.extend({
       set: function (swipe: boolean): void {
         this.settings.swipe = swipe
         this.$store.commit('setWebreaderSwipe', swipe)
+      },
+    },
+    followFinger: {
+      get: function (): boolean {
+        return this.settings.followFinger
+      },
+      set: function (followFinger: boolean): void {
+        this.settings.followFinger = followFinger
+        this.$store.commit('setWebreaderFollowFinger', followFinger)
       },
     },
     alwaysFullscreen: {
