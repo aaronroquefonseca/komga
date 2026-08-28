@@ -1,11 +1,17 @@
 <template>
   <div
+    class="paged-reader-root"
     v-touch="{
-               left: () => {if(swipe) {turnRight()}},
-               right: () => {if(swipe) {turnLeft()}},
-               up: () => {if(swipe) {verticalNext()}},
-               down: () => {if(swipe) {verticalPrev()}}
+               left: () => {if(swipe && !interactiveGestureEnabled) {turnRight()}},
+               right: () => {if(swipe && !interactiveGestureEnabled) {turnLeft()}},
+               up: () => {if(swipe && !interactiveGestureEnabled) {verticalNext()}},
+               down: () => {if(swipe && !interactiveGestureEnabled) {verticalPrev()}}
              }"
+    @touchstart="followFingerStart"
+    @touchmove="followFingerMove"
+    @touchend="followFingerEnd"
+    @touchcancel="followFingerCancel"
+    @click.capture="onClickCapture"
   >
     <v-carousel v-model="carouselPage"
                 :show-arrows="false"
@@ -22,8 +28,8 @@
                        :eager="eagerLoad(i)"
                        class="full-height"
                        :class="preRender(i) ? 'pre-render' : ''"
-                       :transition="animations ? undefined : false"
-                       :reverse-transition="animations ? undefined : false"
+                       :transition="carouselAnimations ? undefined : false"
+                       :reverse-transition="carouselAnimations ? undefined : false"
       >
         <div class="full-height d-flex flex-column justify-center">
           <div :class="`d-flex flex-row${flipDirection ? '-reverse' : ''} justify-center px-0 mx-0`">
@@ -38,6 +44,39 @@
         </div>
       </v-carousel-item>
     </v-carousel>
+
+    <div v-if="drag.active" class="drag-layer">
+      <div class="drag-spread" :style="dragStyle(drag.offset)">
+        <div class="full-height d-flex flex-column justify-center">
+          <div :class="`d-flex flex-row${flipDirection ? '-reverse' : ''} justify-center px-0 mx-0`">
+            <img v-for="(page, j) in dragCurrentSpread"
+                 :alt="`Page ${page.number}`"
+                 :key="`drag-current-${j}`"
+                 :src="page.url"
+                 :class="imgClass(dragCurrentSpread)"
+                 class="img-fit-all"
+            />
+          </div>
+        </div>
+      </div>
+
+      <div v-if="dragTargetSpread.length > 0"
+           class="drag-spread"
+           :style="dragStyle(dragTargetPosition)"
+      >
+        <div class="full-height d-flex flex-column justify-center">
+          <div :class="`d-flex flex-row${flipDirection ? '-reverse' : ''} justify-center px-0 mx-0`">
+            <img v-for="(page, j) in dragTargetSpread"
+                 :alt="`Page ${page.number}`"
+                 :key="`drag-target-${j}`"
+                 :src="page.url"
+                 :class="imgClass(dragTargetSpread)"
+                 class="img-fit-all"
+            />
+          </div>
+        </div>
+      </div>
+    </div>
 
     <!--  clickable zone: left  -->
     <div v-if="!vertical"
@@ -82,6 +121,11 @@ import {PagedReaderLayout, ScaleType} from '@/types/enum-reader'
 import {shortcutsLTR, shortcutsRTL, shortcutsVertical} from '@/functions/shortcuts/paged-reader'
 import {PageDtoWithUrl} from '@/types/komga-books'
 import {buildSpreads} from '@/functions/book-spreads'
+import {
+  dragOffsetWithResistance,
+  navigationDeltaForDrag,
+  shouldCommitDrag,
+} from '@/functions/paged-reader-drag'
 
 export default Vue.extend({
   name: 'PagedReader',
@@ -90,6 +134,24 @@ export default Vue.extend({
       logger: 'PagedReader',
       carouselPage: 0,
       spreads: [] as PageDtoWithUrl[][],
+      suppressCarouselAnimation: false,
+      suppressClickUntil: 0,
+      dragSettleTimer: undefined as number | undefined,
+      drag: {
+        tracking: false,
+        active: false,
+        settling: false,
+        startX: 0,
+        startY: 0,
+        lastTime: 0,
+        rawOffset: 0,
+        offset: 0,
+        velocity: 0,
+        axisSize: 1,
+        physicalDirection: 0,
+        navigationDelta: 0,
+        targetIndex: null as number | null,
+      },
     }
   },
   props: {
@@ -112,6 +174,10 @@ export default Vue.extend({
     swipe: {
       type: Boolean,
       required: true,
+    },
+    followFinger: {
+      type: Boolean,
+      default: false,
     },
     readingDirection: {
       type: String as () => ReadingDirection,
@@ -159,6 +225,7 @@ export default Vue.extend({
   },
   destroyed() {
     window.removeEventListener('keydown', this.keyPressed)
+    if (this.dragSettleTimer !== undefined) window.clearTimeout(this.dragSettleTimer)
   },
   computed: {
     shortcuts(): any {
@@ -196,6 +263,23 @@ export default Vue.extend({
     },
     isDoublePages(): boolean {
       return this.pageLayout === PagedReaderLayout.DOUBLE_PAGES || this.pageLayout === PagedReaderLayout.DOUBLE_NO_COVER
+    },
+    interactiveGestureEnabled(): boolean {
+      return this.swipe && this.animations && this.followFinger
+    },
+    carouselAnimations(): boolean {
+      return this.animations && !this.suppressCarouselAnimation
+    },
+    dragCurrentSpread(): PageDtoWithUrl[] {
+      return this.spreads[this.carouselPage] || []
+    },
+    dragTargetSpread(): PageDtoWithUrl[] {
+      return this.drag.targetIndex === null ? [] : this.spreads[this.drag.targetIndex] || []
+    },
+    dragTargetPosition(): number {
+      if (this.drag.physicalDirection === 0) return 0
+      const start = this.drag.physicalDirection < 0 ? this.drag.axisSize : -this.drag.axisSize
+      return start + this.drag.offset
     },
   },
   methods: {
@@ -256,6 +340,139 @@ export default Vue.extend({
         this.$emit('jump-next')
       }
     },
+    followFingerStart(event: TouchEvent) {
+      if (!this.interactiveGestureEnabled || this.drag.settling || event.touches.length !== 1) return
+
+      const touch = event.touches[0]
+      const root = this.$el as HTMLElement
+      this.drag.tracking = true
+      this.drag.active = false
+      this.drag.startX = touch.clientX
+      this.drag.startY = touch.clientY
+      this.drag.lastTime = performance.now()
+      this.drag.rawOffset = 0
+      this.drag.offset = 0
+      this.drag.velocity = 0
+      this.drag.axisSize = Math.max(1, this.vertical ? root.clientHeight : root.clientWidth)
+      this.drag.physicalDirection = 0
+      this.drag.navigationDelta = 0
+      this.drag.targetIndex = null
+    },
+    followFingerMove(event: TouchEvent) {
+      if (!this.drag.tracking || event.touches.length !== 1) return
+
+      const touch = event.touches[0]
+      const deltaX = touch.clientX - this.drag.startX
+      const deltaY = touch.clientY - this.drag.startY
+      const primary = this.vertical ? deltaY : deltaX
+      const cross = this.vertical ? deltaX : deltaY
+
+      if (!this.drag.active) {
+        if (Math.abs(primary) < 8) return
+        if (Math.abs(primary) <= Math.abs(cross)) {
+          this.drag.tracking = false
+          return
+        }
+        this.drag.active = true
+        this.suppressClickUntil = Date.now() + 500
+      }
+
+      event.preventDefault()
+
+      const now = performance.now()
+      const elapsed = Math.max(1, now - this.drag.lastTime)
+      this.drag.velocity = (primary - this.drag.rawOffset) / elapsed
+      this.drag.lastTime = now
+      this.drag.rawOffset = primary
+      this.drag.physicalDirection = Math.sign(primary)
+      this.drag.navigationDelta = navigationDeltaForDrag(primary, this.vertical, this.flipDirection)
+
+      const targetIndex = this.carouselPage + this.drag.navigationDelta
+      const hasTarget = targetIndex >= 0 && targetIndex < this.spreads.length
+      this.drag.targetIndex = hasTarget ? targetIndex : null
+      this.drag.offset = dragOffsetWithResistance(primary, this.drag.axisSize, hasTarget)
+    },
+    followFingerEnd() {
+      if (!this.drag.tracking) return
+      this.drag.tracking = false
+      if (!this.drag.active) return
+
+      const commit = shouldCommitDrag(
+        this.drag.rawOffset,
+        this.drag.axisSize,
+        this.drag.velocity,
+      )
+
+      if (commit && this.drag.targetIndex !== null) {
+        this.settleDrag(true)
+      } else if (commit && this.drag.navigationDelta !== 0) {
+        this.settleDrag(false, this.drag.navigationDelta < 0 ? 'previous' : 'next')
+      } else {
+        this.settleDrag(false)
+      }
+    },
+    followFingerCancel() {
+      if (!this.drag.tracking && !this.drag.active) return
+      this.drag.tracking = false
+      if (this.drag.active) this.settleDrag(false)
+      else this.resetDrag()
+    },
+    settleDrag(commitTarget: boolean, jump?: 'previous' | 'next') {
+      this.drag.settling = true
+      this.suppressClickUntil = Date.now() + 500
+
+      if (commitTarget && this.drag.targetIndex !== null) {
+        this.suppressCarouselAnimation = true
+        this.drag.offset = this.drag.physicalDirection * this.drag.axisSize
+      } else {
+        this.drag.offset = 0
+      }
+
+      if (this.dragSettleTimer !== undefined) window.clearTimeout(this.dragSettleTimer)
+      this.dragSettleTimer = window.setTimeout(() => {
+        if (commitTarget && this.drag.targetIndex !== null) {
+          this.carouselPage = this.drag.targetIndex
+          window.scrollTo(0, 0)
+        }
+
+        this.$nextTick(() => {
+          this.resetDrag()
+          window.requestAnimationFrame(() => {
+            this.suppressCarouselAnimation = false
+          })
+        })
+
+        if (jump === 'previous') this.$emit('jump-previous')
+        if (jump === 'next') this.$emit('jump-next')
+      }, 180)
+    },
+    resetDrag() {
+      this.drag.tracking = false
+      this.drag.active = false
+      this.drag.settling = false
+      this.drag.rawOffset = 0
+      this.drag.offset = 0
+      this.drag.velocity = 0
+      this.drag.physicalDirection = 0
+      this.drag.navigationDelta = 0
+      this.drag.targetIndex = null
+      this.dragSettleTimer = undefined
+    },
+    dragStyle(position: number): Record<string, string> {
+      const transform = this.vertical
+        ? `translate3d(0, ${position}px, 0)`
+        : `translate3d(${position}px, 0, 0)`
+      return {
+        transform,
+        transition: this.drag.settling ? 'transform 180ms cubic-bezier(0.22, 0.61, 0.36, 1)' : 'none',
+      }
+    },
+    onClickCapture(event: MouseEvent) {
+      if (Date.now() < this.suppressClickUntil) {
+        event.preventDefault()
+        event.stopPropagation()
+      }
+    },
     toSpreadIndex(i: number): number {
       this.$debug('[toSpreadIndex]', `i:${i}`, `isDoublePages:${this.isDoublePages}`)
       if (this.spreads.length > 0) {
@@ -277,8 +494,31 @@ export default Vue.extend({
 })
 </script>
 <style scoped>
+.paged-reader-root {
+  height: 100%;
+  width: 100%;
+  position: relative;
+  overflow: hidden;
+}
+
 .full-height {
   height: 100%;
+}
+
+.drag-layer {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  pointer-events: none;
+  z-index: 1;
+}
+
+.drag-spread {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  will-change: transform;
 }
 
 .left-quarter {
