@@ -126,7 +126,8 @@
         v-if="continuousReader"
         :pages="pages"
         :page.sync="page"
-        :animations="animations"
+        :smooth-scroll="webtoonSmoothScroll"
+        :page-navigation="webtoonPageNavigation"
         :scale="continuousScale"
         :sidePadding="sidePadding"
         :page-margin="pageMargin"
@@ -142,7 +143,7 @@
         :reading-direction="readingDirection"
         :page-layout="pageLayout"
         :scale="scale"
-        :animations="animations"
+        :transition="pagedTransition"
         :swipe="swipe"
         :follow-finger="followFinger"
         @menu="toggleToolbars()"
@@ -185,23 +186,6 @@
             </v-list-item>
 
             <v-list-item>
-              <settings-switch v-model="animations"
-                               :label="$t('bookreader.settings.animate_page_transitions')"/>
-            </v-list-item>
-
-            <v-list-item>
-              <settings-switch v-model="swipe" :label="$t('bookreader.settings.gestures')"/>
-            </v-list-item>
-
-            <v-list-item v-if="!continuousReader">
-              <settings-switch
-                v-model="followFinger"
-                label="Follow finger"
-                :disabled="!swipe || !animations"
-              />
-            </v-list-item>
-
-            <v-list-item>
               <settings-switch v-model="alwaysFullscreen" :label="$t('bookreader.settings.always_fullscreen')"
                                :disabled="!screenfull.isEnabled"/>
             </v-list-item>
@@ -217,6 +201,18 @@
 
             <template v-if="continuousReader">
               <v-subheader class="font-weight-black text-h6">{{ $t('bookreader.settings.webtoon') }}</v-subheader>
+              <v-list-item>
+                <settings-switch
+                  v-model="webtoonSmoothScroll"
+                  :label="$t('bookreader.settings.webtoon_smooth_scroll')"
+                />
+              </v-list-item>
+              <v-list-item>
+                <settings-switch
+                  v-model="webtoonPageNavigation"
+                  :label="$t('bookreader.settings.webtoon_page_navigation')"
+                />
+              </v-list-item>
               <v-list-item>
                 <settings-select
                   :items="continuousScaleTypes"
@@ -242,6 +238,23 @@
 
             <template v-if="!continuousReader">
               <v-subheader class="font-weight-black text-h6">{{ $t('bookreader.settings.paged') }}</v-subheader>
+              <v-list-item>
+                <settings-select
+                  :items="transitionTypes"
+                  v-model="pagedTransition"
+                  :label="$t('bookreader.settings.page_transition')"
+                />
+              </v-list-item>
+              <v-list-item>
+                <settings-switch v-model="swipe" :label="$t('bookreader.settings.gestures')"/>
+              </v-list-item>
+              <v-list-item>
+                <settings-switch
+                  v-model="followFinger"
+                  :label="$t('bookreader.settings.follow_finger')"
+                  :disabled="!swipe || pagedTransition === PagedReaderTransition.NONE"
+                />
+              </v-list-item>
               <v-list-item>
                 <settings-select
                   :items="scaleTypes"
@@ -340,7 +353,14 @@ import Vue from 'vue'
 import {Location} from 'vue-router'
 import PagedReader from '@/components/readers/PagedReader.vue'
 import ContinuousReader from '@/components/readers/ContinuousReader.vue'
-import {ContinuousScaleType, MarginValues, PaddingPercentage, PagedReaderLayout, ScaleType} from '@/types/enum-reader'
+import {
+  ContinuousScaleType,
+  MarginValues,
+  PaddingPercentage,
+  PagedReaderLayout,
+  PagedReaderTransition,
+  ScaleType,
+} from '@/types/enum-reader'
 import {
   shortcutsLTR,
   shortcutsRTL,
@@ -371,6 +391,7 @@ export default Vue.extend({
   data: function () {
     return {
       ItemTypes,
+      PagedReaderTransition,
       screenfull,
       fullscreenIcon: 'mdi-fullscreen',
       book: {} as BookDto,
@@ -398,10 +419,12 @@ export default Vue.extend({
       goToPage: 1,
       settings: {
         pageLayout: PagedReaderLayout.SINGLE_PAGE,
+        pagedTransition: PagedReaderTransition.DEFAULT,
         swipe: false,
         followFinger: false,
         alwaysFullscreen: false,
-        animations: true,
+        webtoonSmoothScroll: true,
+        webtoonPageNavigation: true,
         scale: ScaleType.SCREEN,
         continuousScale: ContinuousScaleType.WIDTH,
         sidePadding: 0,
@@ -417,6 +440,10 @@ export default Vue.extend({
       },
       readingDirs: Object.values(ReadingDirection).map(x => ({
         text: this.$i18n.t(`enums.reading_direction.${x}`),
+        value: x,
+      })),
+      transitionTypes: Object.values(PagedReaderTransition).map(x => ({
+        text: this.$i18n.t(`bookreader.settings.page_transition_types.${x}`),
         value: x,
       })),
       scaleTypes: Object.values(ScaleType).map(x => ({
@@ -466,17 +493,27 @@ export default Vue.extend({
 
     this.$debug('[mounted]', 'route.query:', this.$route.query)
 
-    this.readingDirection = this.$store.state.persistedState.webreader.readingDirection
-    this.animations = this.$store.state.persistedState.webreader.animations
-    this.pageLayout = this.$store.state.persistedState.webreader.paged.pageLayout
-    this.swipe = this.$store.state.persistedState.webreader.swipe
-    this.followFinger = this.$store.state.persistedState.webreader.followFinger === true
-    this.alwaysFullscreen = this.$store.state.persistedState.webreader.alwaysFullscreen
-    this.scale = this.$store.state.persistedState.webreader.paged.scale
-    this.continuousScale = this.$store.state.persistedState.webreader.continuous.scale
-    this.sidePadding = this.$store.state.persistedState.webreader.continuous.padding
-    this.pageMargin = this.$store.state.persistedState.webreader.continuous.margin
-    this.backgroundColor = this.$store.state.persistedState.webreader.background
+    const webreader = this.$store.state.persistedState.webreader
+    const previousAnimations = webreader.animations !== false
+    const storedTransition = webreader.paged.transition
+    const storedSmoothScroll = webreader.continuous.smoothScroll
+    const storedPageNavigation = webreader.continuous.pageNavigation
+
+    this.readingDirection = webreader.readingDirection
+    this.pagedTransition = Object.values(PagedReaderTransition).includes(storedTransition)
+      ? storedTransition
+      : previousAnimations ? PagedReaderTransition.DEFAULT : PagedReaderTransition.NONE
+    this.webtoonSmoothScroll = typeof storedSmoothScroll === 'boolean' ? storedSmoothScroll : previousAnimations
+    this.webtoonPageNavigation = typeof storedPageNavigation === 'boolean' ? storedPageNavigation : true
+    this.pageLayout = webreader.paged.pageLayout
+    this.swipe = webreader.swipe
+    this.followFinger = webreader.followFinger === true
+    this.alwaysFullscreen = webreader.alwaysFullscreen
+    this.scale = webreader.paged.scale
+    this.continuousScale = webreader.continuous.scale
+    this.sidePadding = webreader.continuous.padding
+    this.pageMargin = webreader.continuous.margin
+    this.backgroundColor = webreader.background
 
     this.setup(this.bookId, Number(this.$route.query.page))
   },
@@ -567,14 +604,33 @@ export default Vue.extend({
     currentPage(): PageDtoWithUrl {
       return this.pages[this.page - 1]
     },
-
-    animations: {
-      get: function (): boolean {
-        return this.settings.animations
+    pagedTransition: {
+      get: function (): PagedReaderTransition {
+        return this.settings.pagedTransition
       },
-      set: function (animations: boolean): void {
-        this.settings.animations = animations
-        this.$store.commit('setWebreaderAnimations', animations)
+      set: function (transition: PagedReaderTransition): void {
+        if (Object.values(PagedReaderTransition).includes(transition)) {
+          this.settings.pagedTransition = transition
+          this.$store.commit('setWebreaderPagedTransition', transition)
+        }
+      },
+    },
+    webtoonSmoothScroll: {
+      get: function (): boolean {
+        return this.settings.webtoonSmoothScroll
+      },
+      set: function (smoothScroll: boolean): void {
+        this.settings.webtoonSmoothScroll = smoothScroll
+        this.$store.commit('setWebreaderContinuousSmoothScroll', smoothScroll)
+      },
+    },
+    webtoonPageNavigation: {
+      get: function (): boolean {
+        return this.settings.webtoonPageNavigation
+      },
+      set: function (pageNavigation: boolean): void {
+        this.settings.webtoonPageNavigation = pageNavigation
+        this.$store.commit('setWebreaderContinuousPageNavigation', pageNavigation)
       },
     },
     scale: {
