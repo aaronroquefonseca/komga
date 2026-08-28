@@ -222,7 +222,7 @@ export default Vue.extend({
       immediate: true,
     },
     transition() {
-      if (this.drag.settling) this.finishDragSettlement()
+      if (this.drag.settling) this.finishDragSettlement(true)
       else if (this.drag.prepared) this.resetDrag()
     },
   },
@@ -380,7 +380,7 @@ export default Vue.extend({
       }
     },
     navigateInteractive(delta: number) {
-      if (this.drag.settling) this.finishDragSettlement()
+      if (this.drag.settling) this.finishDragSettlement(true)
       if (this.drag.tracking) return
 
       const targetIndex = this.carouselPage + delta
@@ -406,7 +406,7 @@ export default Vue.extend({
     },
     followFingerStart(event: TouchEvent) {
       if (!this.interactiveGestureEnabled || event.touches.length !== 1) return
-      if (this.drag.settling) this.finishDragSettlement()
+      if (this.drag.settling) this.finishDragSettlement(true)
 
       const touch = event.touches[0]
       const root = this.$el as HTMLElement
@@ -501,9 +501,9 @@ export default Vue.extend({
       }
 
       if (this.dragSettleTimer !== undefined) window.clearTimeout(this.dragSettleTimer)
-      this.dragSettleTimer = window.setTimeout(() => this.finishDragSettlement(), this.transitionDuration)
+      this.dragSettleTimer = window.setTimeout(() => this.finishDragSettlement(false), this.transitionDuration)
     },
-    finishDragSettlement() {
+    finishDragSettlement(immediate = false) {
       if (this.dragSettleTimer !== undefined) window.clearTimeout(this.dragSettleTimer)
 
       const commitTarget = this.drag.settleCommit
@@ -515,10 +515,27 @@ export default Vue.extend({
         window.scrollTo(0, 0)
       }
 
-      this.resetDrag()
+      const complete = () => {
+        // A new gesture may already have force-finalized and replaced this settlement.
+        if (!this.drag.settling || this.drag.targetIndex !== targetIndex) return
+        this.resetDrag()
+        if (jump === 'previous') this.$emit('jump-previous')
+        if (jump === 'next') this.$emit('jump-next')
+      }
 
-      if (jump === 'previous') this.$emit('jump-previous')
-      if (jump === 'next') this.$emit('jump-next')
+      if (immediate) {
+        complete()
+        return
+      }
+
+      // setTimeout can run before the browser paints the final CSS-transition frame.
+      // Keep that exact final transform alive through two compositor frames before
+      // rebasing to the idle page, preventing a one-frame positional flash.
+      this.$nextTick(() => {
+        window.requestAnimationFrame(() => {
+          window.requestAnimationFrame(complete)
+        })
+      })
     },
     resetDrag() {
       this.drag.tracking = false
