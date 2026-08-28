@@ -19,7 +19,7 @@
                 :continuous="false"
                 :reverse="flipDirection"
                 :vertical="vertical"
-                :class="{'carousel-hidden': drag.prepared}"
+                :class="{'carousel-hidden': interactiveGestureEnabled}"
                 hide-delimiters
                 touchless
                 height="100%"
@@ -47,32 +47,21 @@
       </v-carousel-item>
     </v-carousel>
 
-    <div v-show="drag.prepared" class="drag-layer">
-      <div class="drag-spread" :style="dragStyle(drag.offset)">
-        <div class="full-height d-flex flex-column justify-center">
-          <div :class="`d-flex flex-row${flipDirection ? '-reverse' : ''} justify-center px-0 mx-0`">
-            <img v-for="(page, j) in dragCurrentSpread"
-                 :alt="`Page ${page.number}`"
-                 :key="`drag-current-${j}`"
-                 :src="page.url"
-                 :class="imgClass(dragCurrentSpread)"
-                 class="img-fit-all"
-            />
-          </div>
-        </div>
-      </div>
-
-      <div v-if="dragTargetSpread.length > 0"
+    <!-- Persistent renderer used only by Follow finger. Each spread keeps a stable key so
+         committing a drag never swaps image src values between DOM nodes. -->
+    <div v-if="interactiveGestureEnabled" class="drag-layer">
+      <div v-for="spreadIndex in interactiveSpreadIndices"
+           :key="`interactive-spread-${spreadIndex}`"
            class="drag-spread"
-           :style="dragStyle(dragTargetPosition)"
+           :style="interactiveSpreadStyle(spreadIndex)"
       >
         <div class="full-height d-flex flex-column justify-center">
           <div :class="`d-flex flex-row${flipDirection ? '-reverse' : ''} justify-center px-0 mx-0`">
-            <img v-for="(page, j) in dragTargetSpread"
+            <img v-for="(page, j) in spreads[spreadIndex]"
                  :alt="`Page ${page.number}`"
-                 :key="`drag-target-${j}`"
+                 :key="`interactive-${spreadIndex}-${j}`"
                  :src="page.url"
-                 :class="imgClass(dragTargetSpread)"
+                 :class="imgClass(spreads[spreadIndex])"
                  class="img-fit-all"
             />
           </div>
@@ -136,7 +125,6 @@ export default Vue.extend({
       logger: 'PagedReader',
       carouselPage: 0,
       spreads: [] as PageDtoWithUrl[][],
-      suppressCarouselAnimation: false,
       suppressClickUntil: 0,
       dragSettleTimer: undefined as number | undefined,
       drag: {
@@ -144,6 +132,8 @@ export default Vue.extend({
         prepared: false,
         active: false,
         settling: false,
+        settleCommit: false,
+        settleJump: '' as '' | 'previous' | 'next',
         startX: 0,
         startY: 0,
         lastTime: 0,
@@ -272,18 +262,21 @@ export default Vue.extend({
       return this.swipe && this.animations && this.followFinger
     },
     carouselAnimations(): boolean {
-      return this.animations && !this.suppressCarouselAnimation
+      return this.animations && !this.interactiveGestureEnabled
     },
-    dragCurrentSpread(): PageDtoWithUrl[] {
-      return this.spreads[this.drag.currentIndex] || []
+    interactiveBaseIndex(): number {
+      return this.drag.prepared ? this.drag.currentIndex : this.carouselPage
     },
-    dragTargetSpread(): PageDtoWithUrl[] {
-      return this.drag.targetIndex === null ? [] : this.spreads[this.drag.targetIndex] || []
+    interactiveSpreadIndices(): number[] {
+      const result: number[] = []
+      for (let i = this.interactiveBaseIndex - 2; i <= this.interactiveBaseIndex + 2; i++) {
+        if (i >= 0 && i < this.spreads.length) result.push(i)
+      }
+      return result
     },
-    dragTargetPosition(): number {
-      if (this.drag.physicalDirection === 0) return 0
-      const start = this.drag.physicalDirection < 0 ? this.drag.axisSize : -this.drag.axisSize
-      return start + this.drag.offset
+    physicalIndexDirection(): number {
+      if (this.vertical) return 1
+      return this.flipDirection ? -1 : 1
     },
   },
   methods: {
@@ -329,7 +322,9 @@ export default Vue.extend({
       if (this.vertical) this.next()
     },
     prev() {
-      if (this.canPrev) {
+      if (this.interactiveGestureEnabled) {
+        this.navigateInteractive(-1)
+      } else if (this.canPrev) {
         this.carouselPage--
         window.scrollTo(0, 0)
       } else {
@@ -337,15 +332,40 @@ export default Vue.extend({
       }
     },
     next() {
-      if (this.canNext) {
+      if (this.interactiveGestureEnabled) {
+        this.navigateInteractive(1)
+      } else if (this.canNext) {
         this.carouselPage++
         window.scrollTo(0, 0)
       } else {
         this.$emit('jump-next')
       }
     },
+    navigateInteractive(delta: number) {
+      if (this.drag.settling) this.finishDragSettlement()
+      if (this.drag.tracking) return
+
+      const targetIndex = this.carouselPage + delta
+      if (targetIndex < 0 || targetIndex >= this.spreads.length) {
+        this.$emit(delta < 0 ? 'jump-previous' : 'jump-next')
+        return
+      }
+
+      const root = this.$el as HTMLElement
+      this.drag.prepared = true
+      this.drag.active = true
+      this.drag.currentIndex = this.carouselPage
+      this.drag.targetIndex = targetIndex
+      this.drag.navigationDelta = delta
+      this.drag.axisSize = Math.max(1, this.vertical ? root.clientHeight : root.clientWidth)
+      this.drag.physicalDirection = -Math.sign(delta * this.physicalIndexDirection)
+      this.drag.offset = 0
+
+      window.requestAnimationFrame(() => this.settleDrag(true))
+    },
     followFingerStart(event: TouchEvent) {
-      if (!this.interactiveGestureEnabled || this.drag.settling || event.touches.length !== 1) return
+      if (!this.interactiveGestureEnabled || event.touches.length !== 1) return
+      if (this.drag.settling) this.finishDragSettlement()
 
       const touch = event.touches[0]
       const root = this.$el as HTMLElement
@@ -380,7 +400,7 @@ export default Vue.extend({
           return
         }
         this.drag.active = true
-        this.suppressClickUntil = Date.now() + 500
+        this.suppressClickUntil = Date.now() + 350
       }
 
       event.preventDefault()
@@ -428,44 +448,43 @@ export default Vue.extend({
     },
     settleDrag(commitTarget: boolean, jump?: 'previous' | 'next') {
       this.drag.settling = true
-      this.suppressClickUntil = Date.now() + 500
+      this.drag.settleCommit = commitTarget && this.drag.targetIndex !== null
+      this.drag.settleJump = jump || ''
+      this.suppressClickUntil = Date.now() + 350
 
-      if (commitTarget && this.drag.targetIndex !== null) {
-        this.suppressCarouselAnimation = true
+      if (this.drag.settleCommit) {
         this.drag.offset = this.drag.physicalDirection * this.drag.axisSize
       } else {
         this.drag.offset = 0
       }
 
       if (this.dragSettleTimer !== undefined) window.clearTimeout(this.dragSettleTimer)
-      this.dragSettleTimer = window.setTimeout(() => {
-        if (commitTarget && this.drag.targetIndex !== null) {
-          const targetIndex = this.drag.targetIndex
-          this.carouselPage = targetIndex
-          window.scrollTo(0, 0)
+      this.dragSettleTimer = window.setTimeout(() => this.finishDragSettlement(), 180)
+    },
+    finishDragSettlement() {
+      if (this.dragSettleTimer !== undefined) window.clearTimeout(this.dragSettleTimer)
 
-          this.$nextTick(() => {
-            window.requestAnimationFrame(() => {
-              window.requestAnimationFrame(() => {
-                this.resetDrag()
-                this.suppressCarouselAnimation = false
-              })
-            })
-          })
-        } else {
-          this.resetDrag()
-          this.suppressCarouselAnimation = false
-        }
+      const commitTarget = this.drag.settleCommit
+      const targetIndex = this.drag.targetIndex
+      const jump = this.drag.settleJump
 
-        if (jump === 'previous') this.$emit('jump-previous')
-        if (jump === 'next') this.$emit('jump-next')
-      }, 180)
+      if (commitTarget && targetIndex !== null) {
+        this.carouselPage = targetIndex
+        window.scrollTo(0, 0)
+      }
+
+      this.resetDrag()
+
+      if (jump === 'previous') this.$emit('jump-previous')
+      if (jump === 'next') this.$emit('jump-next')
     },
     resetDrag() {
       this.drag.tracking = false
       this.drag.prepared = false
       this.drag.active = false
       this.drag.settling = false
+      this.drag.settleCommit = false
+      this.drag.settleJump = ''
       this.drag.rawOffset = 0
       this.drag.offset = 0
       this.drag.velocity = 0
@@ -475,10 +494,14 @@ export default Vue.extend({
       this.drag.targetIndex = null
       this.dragSettleTimer = undefined
     },
-    dragStyle(position: number): Record<string, string> {
+    interactiveSpreadStyle(spreadIndex: number): Record<string, string> {
+      const baseIndex = this.interactiveBaseIndex
+      const pageOffset = (spreadIndex - baseIndex) * this.physicalIndexDirection * 100
+      const fingerOffset = this.drag.prepared ? this.drag.offset : 0
+      const coordinate = `calc(${pageOffset}% + ${fingerOffset}px)`
       const transform = this.vertical
-        ? `translate3d(0, ${position}px, 0)`
-        : `translate3d(${position}px, 0, 0)`
+        ? `translate3d(0, ${coordinate}, 0)`
+        : `translate3d(${coordinate}, 0, 0)`
       return {
         transform,
         transition: this.drag.settling ? 'transform 180ms cubic-bezier(0.22, 0.61, 0.36, 1)' : 'none',
@@ -537,6 +560,7 @@ export default Vue.extend({
   width: 100%;
   height: 100%;
   will-change: transform;
+  backface-visibility: hidden;
 }
 
 .left-quarter {
