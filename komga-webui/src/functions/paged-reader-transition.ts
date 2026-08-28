@@ -14,11 +14,23 @@ export function pageCurlVariantForStart(startY: number, height: number): PageCur
 }
 
 /**
- * Rotate a page around its spine while keeping the projected free edge aligned
- * with the finger's horizontal travel: cos(theta) = 1 - progress.
+ * Rotate a rigid page around its spine while keeping the projected free edge
+ * aligned with the finger's horizontal travel: cos(theta) = 1 - progress.
  */
 export function pageCurlRotation(progress: number, physicalDirection: number): number {
   const clamped = Math.max(0, Math.min(1, progress))
   const degrees = Math.acos(1 - clamped) * 180 / Math.PI
   return degrees * Math.sign(physicalDirection || 1)
+}
+
+/**
+ * Amount of bend for one strip of the segmented paper sheet. The fold front
+ * travels from the free edge toward the spine as progress follows the finger.
+ */
+export function paperCurlSegmentPhase(progress: number, distanceFromOuterEdge: number): number {
+  const p = Math.max(0, Math.min(1, progress))
+  const distance = Math.max(0, Math.min(1, distanceFromOuterEdge))
+  const foldFront = p * 1.3
+  const bendWidth = 0.28
+  return Math.max(0, Math.min(1, (foldFront - distance) / bendWidth))
 }
