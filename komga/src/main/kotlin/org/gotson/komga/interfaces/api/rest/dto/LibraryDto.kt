@@ -1,6 +1,7 @@
 package org.gotson.komga.interfaces.api.rest.dto
 
 import org.gotson.komga.domain.model.Library
+import org.gotson.komga.domain.model.SeriesMetadata
 import org.gotson.komga.infrastructure.web.toFilePath
 
 data class LibraryDto(
@@ -28,6 +29,7 @@ data class LibraryDto(
   val convertToCbz: Boolean,
   val emptyTrashAfterScan: Boolean,
   val seriesCover: SeriesCoverDto,
+  val defaultReadingDirection: SeriesMetadata.ReadingDirection?,
   val hashFiles: Boolean,
   val hashPages: Boolean,
   val hashKoreader: Boolean,
@@ -62,6 +64,7 @@ fun Library.toDto(includeRoot: Boolean) =
     convertToCbz = convertToCbz,
     emptyTrashAfterScan = emptyTrashAfterScan,
     seriesCover = seriesCover.toDto(),
+    defaultReadingDirection = defaultReadingDirection,
     hashFiles = hashFiles,
     hashPages = hashPages,
     hashKoreader = hashKoreader,

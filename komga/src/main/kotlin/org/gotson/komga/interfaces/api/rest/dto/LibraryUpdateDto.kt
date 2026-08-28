@@ -1,5 +1,6 @@
 package org.gotson.komga.interfaces.api.rest.dto
 
+import org.gotson.komga.domain.model.SeriesMetadata
 import org.gotson.komga.infrastructure.validation.NullOrNotBlank
 import kotlin.properties.Delegates
 
@@ -40,6 +41,10 @@ class LibraryUpdateDto {
   val convertToCbz: Boolean? = null
   val emptyTrashAfterScan: Boolean? = null
   val seriesCover: SeriesCoverDto? = null
+  var defaultReadingDirection: SeriesMetadata.ReadingDirection?
+    by Delegates.observable(null) { prop, _, _ ->
+      isSet[prop.name] = true
+    }
   val hashFiles: Boolean? = null
   val hashPages: Boolean? = null
   val hashKoreader: Boolean? = null
