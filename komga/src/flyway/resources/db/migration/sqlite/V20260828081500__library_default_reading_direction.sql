@@ -1,0 +1,2 @@
+ALTER TABLE LIBRARY
+    add column DEFAULT_READING_DIRECTION varchar;

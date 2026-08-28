@@ -1,6 +1,7 @@
 package org.gotson.komga.interfaces.api.rest.dto
 
 import jakarta.validation.constraints.NotBlank
+import org.gotson.komga.domain.model.SeriesMetadata
 
 data class LibraryCreationDto(
   @get:NotBlank val name: String,
@@ -26,6 +27,7 @@ data class LibraryCreationDto(
   val convertToCbz: Boolean = false,
   val emptyTrashAfterScan: Boolean = false,
   val seriesCover: SeriesCoverDto = SeriesCoverDto.FIRST,
+  val defaultReadingDirection: SeriesMetadata.ReadingDirection? = null,
   val hashFiles: Boolean = true,
   val hashPages: Boolean = false,
   val hashKoreader: Boolean = false,

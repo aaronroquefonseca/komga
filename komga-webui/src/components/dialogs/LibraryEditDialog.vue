@@ -291,6 +291,20 @@
                       />
                     </v-col>
                   </v-row>
+                  <v-row>
+                    <v-col>
+                      <span class="text-subtitle-1 text--primary">Default reading direction</span>
+                      <v-select :items="readingDirection"
+                                v-model="form.defaultReadingDirection"
+                                label="Default reading direction"
+                                solo
+                                flat
+                      />
+                      <div class="text-caption text--secondary mt-n4">
+                        Applied to newly discovered series. Explicit ComicInfo or EPUB metadata can still override it.
+                      </div>
+                    </v-col>
+                  </v-row>
 
                 </v-container>
               </v-card>
@@ -446,6 +460,7 @@ import FileBrowserDialog from '@/components/dialogs/FileBrowserDialog.vue'
 import Vue from 'vue'
 import {required} from 'vuelidate/lib/validators'
 import {ERROR} from '@/types/events'
+import {ReadingDirection} from '@/types/enum-books'
 import {ScanIntervalDto, SeriesCoverDto} from '@/types/enum-libraries'
 import {LibraryDto} from '@/types/komga-libraries'
 
@@ -479,6 +494,7 @@ export default Vue.extend({
         convertToCbz: false,
         emptyTrashAfterScan: false,
         seriesCover: SeriesCoverDto.FIRST as SeriesCoverDto,
+        defaultReadingDirection: null as ReadingDirection | null,
         hashFiles: true,
         hashPages: false,
         hashKoreader: false,
@@ -503,6 +519,15 @@ export default Vue.extend({
         text: this.$t(`enums.series_cover.${x}`),
         value: x,
       }))
+    },
+    readingDirection(): any[] {
+      return [{
+        text: 'Automatic (from metadata)',
+        value: null,
+      }, ...Object.keys(ReadingDirection).map(x => ({
+        text: this.$t(`enums.reading_direction.${x}`),
+        value: x,
+      }))]
     },
     scanInterval(): any[] {
       return Object.keys(ScanIntervalDto).map(x => ({
@@ -639,6 +664,7 @@ export default Vue.extend({
       this.form.convertToCbz = library ? library.convertToCbz : false
       this.form.emptyTrashAfterScan = library ? library.emptyTrashAfterScan : false
       this.form.seriesCover = library ? library.seriesCover : SeriesCoverDto.FIRST
+      this.form.defaultReadingDirection = library?.defaultReadingDirection ?? null
       this.form.hashFiles = library ? library.hashFiles : true
       this.form.hashPages = library ? library.hashPages : false
       this.form.hashKoreader = library ? library.hashKoreader : false
@@ -674,6 +700,7 @@ export default Vue.extend({
           convertToCbz: this.form.convertToCbz,
           emptyTrashAfterScan: this.form.emptyTrashAfterScan,
           seriesCover: this.form.seriesCover,
+          defaultReadingDirection: this.form.defaultReadingDirection,
           hashFiles: this.form.hashFiles,
           hashPages: this.form.hashPages,
           hashKoreader: this.form.hashKoreader,
