@@ -186,12 +186,47 @@
         />
       </v-col>
     </v-row>
+
+    <v-divider class="mb-4" />
+
+    <v-row>
+      <v-col>
+        <div class="text-label-large">
+          {{
+            $formatMessage({
+              description: 'Form add/edit library: Options - section header for default reading direction',
+              defaultMessage: 'Default reading direction',
+              id: 'library.defaultReadingDirection',
+            })
+          }}
+        </div>
+        <div class="text-body-small text-medium-emphasis mb-2">
+          {{
+            $formatMessage({
+              description: 'Form add/edit library: Options - default reading direction help text',
+              defaultMessage:
+                'Applied to newly discovered series. Explicit ComicInfo or EPUB metadata can still override it.',
+              id: 'library.defaultReadingDirectionHelp',
+            })
+          }}
+        </div>
+        <v-select
+          v-model="model.defaultReadingDirection"
+          :items="readingDirectionOptions"
+        />
+      </v-col>
+    </v-row>
   </v-container>
 </template>
 
 <script setup lang="ts">
 import { useIntl } from 'vue-intl'
 import { SeriesCoverValues, seriesCoverMessages } from '@/types/SeriesCover'
+import {
+  ReadingDirectionValues,
+  readingDirectionMessages,
+  type ReadingDirection,
+} from '@/types/ReadingDirection'
 import { commonMessages } from '@/utils/i18n/common-messages'
 import type { LibraryCreationDto } from '@/generated/openapi'
 
@@ -204,7 +239,9 @@ type LibraryCreationOptions = Pick<
   | 'repairExtensions'
   | 'convertToCbz'
   | 'seriesCover'
->
+> & {
+  defaultReadingDirection?: ReadingDirection | null
+}
 
 const model = defineModel<LibraryCreationOptions>({ required: true })
 
@@ -214,4 +251,19 @@ const seriesCoverOptions = SeriesCoverValues.map((x) => ({
   title: intl.formatMessage(seriesCoverMessages[x]),
   value: x,
 }))
+
+const readingDirectionOptions = [
+  {
+    title: intl.formatMessage({
+      description: 'Library default reading direction: automatic option',
+      defaultMessage: 'Automatic (from metadata)',
+      id: 'library.defaultReadingDirectionAutomatic',
+    }),
+    value: null,
+  },
+  ...ReadingDirectionValues.map((x) => ({
+    title: intl.formatMessage(readingDirectionMessages[x]),
+    value: x,
+  })),
+]
 </script>
