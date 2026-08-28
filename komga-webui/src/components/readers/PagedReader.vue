@@ -19,6 +19,7 @@
                 :continuous="false"
                 :reverse="flipDirection"
                 :vertical="vertical"
+                :class="{'carousel-hidden': drag.active}"
                 hide-delimiters
                 touchless
                 height="100%"
@@ -151,6 +152,7 @@ export default Vue.extend({
         axisSize: 1,
         physicalDirection: 0,
         navigationDelta: 0,
+        currentIndex: 0,
         targetIndex: null as number | null,
       },
     }
@@ -272,7 +274,7 @@ export default Vue.extend({
       return this.animations && !this.suppressCarouselAnimation
     },
     dragCurrentSpread(): PageDtoWithUrl[] {
-      return this.spreads[this.carouselPage] || []
+      return this.spreads[this.drag.currentIndex] || []
     },
     dragTargetSpread(): PageDtoWithUrl[] {
       return this.drag.targetIndex === null ? [] : this.spreads[this.drag.targetIndex] || []
@@ -357,6 +359,7 @@ export default Vue.extend({
       this.drag.axisSize = Math.max(1, this.vertical ? root.clientHeight : root.clientWidth)
       this.drag.physicalDirection = 0
       this.drag.navigationDelta = 0
+      this.drag.currentIndex = this.carouselPage
       this.drag.targetIndex = null
     },
     followFingerMove(event: TouchEvent) {
@@ -369,7 +372,7 @@ export default Vue.extend({
       const cross = this.vertical ? deltaX : deltaY
 
       if (!this.drag.active) {
-        if (Math.abs(primary) < 8) return
+        if (Math.abs(primary) < 4) return
         if (Math.abs(primary) <= Math.abs(cross)) {
           this.drag.tracking = false
           return
@@ -388,7 +391,7 @@ export default Vue.extend({
       this.drag.physicalDirection = Math.sign(primary)
       this.drag.navigationDelta = navigationDeltaForDrag(primary, this.vertical, this.flipDirection)
 
-      const targetIndex = this.carouselPage + this.drag.navigationDelta
+      const targetIndex = this.drag.currentIndex + this.drag.navigationDelta
       const hasTarget = targetIndex >= 0 && targetIndex < this.spreads.length
       this.drag.targetIndex = hasTarget ? targetIndex : null
       this.drag.offset = dragOffsetWithResistance(primary, this.drag.axisSize, hasTarget)
@@ -432,16 +435,22 @@ export default Vue.extend({
       if (this.dragSettleTimer !== undefined) window.clearTimeout(this.dragSettleTimer)
       this.dragSettleTimer = window.setTimeout(() => {
         if (commitTarget && this.drag.targetIndex !== null) {
-          this.carouselPage = this.drag.targetIndex
+          const targetIndex = this.drag.targetIndex
+          this.carouselPage = targetIndex
           window.scrollTo(0, 0)
-        }
 
-        this.$nextTick(() => {
-          this.resetDrag()
-          window.requestAnimationFrame(() => {
-            this.suppressCarouselAnimation = false
+          this.$nextTick(() => {
+            window.requestAnimationFrame(() => {
+              window.requestAnimationFrame(() => {
+                this.resetDrag()
+                this.suppressCarouselAnimation = false
+              })
+            })
           })
-        })
+        } else {
+          this.resetDrag()
+          this.suppressCarouselAnimation = false
+        }
 
         if (jump === 'previous') this.$emit('jump-previous')
         if (jump === 'next') this.$emit('jump-next')
@@ -456,6 +465,7 @@ export default Vue.extend({
       this.drag.velocity = 0
       this.drag.physicalDirection = 0
       this.drag.navigationDelta = 0
+      this.drag.currentIndex = this.carouselPage
       this.drag.targetIndex = null
       this.dragSettleTimer = undefined
     },
@@ -501,6 +511,10 @@ export default Vue.extend({
 
 .full-height {
   height: 100%;
+}
+
+.carousel-hidden {
+  visibility: hidden;
 }
 
 .drag-layer {
