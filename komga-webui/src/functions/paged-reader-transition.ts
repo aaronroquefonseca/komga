@@ -1,19 +1,10 @@
 export type PageCurlVariant = 'top' | 'middle' | 'bottom'
 
-export type PaperCurlFoldGeometry = {
+export type PaperCurlDynamicGeometry = {
   seamTop: number
   seamBottom: number
-  foldTop: number
-  foldBottom: number
   shadowTop: number
   shadowBottom: number
-}
-
-export type PaperCurlWarpGeometry = PaperCurlFoldGeometry & {
-  rotationY: number
-  cornerRotation: number
-  verticalShift: number
-  lift: number
 }
 
 export function transitionProgress(offset: number, axisSize: number): number {
@@ -39,98 +30,75 @@ export function pageCurlRotation(progress: number, physicalDirection: number): n
   return degrees * Math.sign(physicalDirection || 1)
 }
 
-function clampPercent(value: number): number {
-  return Math.max(0, Math.min(100, value))
+function clamp01(value: number): number {
+  return Math.max(0, Math.min(1, value))
+}
+
+function actualPercent(canonicalX: number, physicalDirection: number): number {
+  const x = clamp01(canonicalX)
+  return physicalDirection < 0 ? x * 100 : (1 - x) * 100
 }
 
 /**
- * Geometry for one continuous MangaBox-style fold boundary.
+ * Dynamic page-curl edge based on the same geometric idea used by Android
+ * page-curl readers: the fold line passes through the current drag point and is
+ * perpendicular to the vector from the grabbed free edge to that point.
  *
- * The sheet is never tessellated. `seamTop` and `seamBottom` describe one edge
- * separating the still-visible front page from the revealed target page. Corner
- * turns exaggerate that single edge into a diagonal line, while `fold*` and
- * `shadow*` describe continuous lighting bands around the seam.
+ * Komga permits a swipe to start anywhere, so horizontal travel is normalized
+ * to page progress (the virtual free edge starts at x=1). The real start/current
+ * finger Y coordinates are retained, which makes diagonal/corner turns fully
+ * continuous instead of selecting one of a few canned shapes.
+ *
+ * Coordinates returned here are percentages in the reader's actual LTR/RTL
+ * coordinate system. A completed turn always collapses exactly to the opposite
+ * page edge so settlement remains compatible with the flash-free renderer.
  */
-export function paperCurlFoldGeometry(
+export function paperCurlDynamicGeometry(
   progress: number,
+  startY: number,
+  currentY: number,
   physicalDirection: number,
-  variant: PageCurlVariant,
-): PaperCurlFoldGeometry {
-  const p = Math.max(0, Math.min(1, progress))
+): PaperCurlDynamicGeometry {
+  const p = clamp01(progress)
   const direction = Math.sign(physicalDirection || -1)
-  const base = direction < 0 ? 100 * (1 - p) : 100 * p
 
-  // Peak diagonal displacement occurs halfway through the turn and disappears
-  // at both endpoints, so start/end geometry remains exactly the full page.
-  const curve = Math.sin(p * Math.PI) * 30
-  let topOffset = 0
-  let bottomOffset = 0
-
-  if (variant === 'top') {
-    topOffset = direction < 0 ? -curve : curve
-    bottomOffset = direction < 0 ? curve * 0.32 : -curve * 0.32
-  } else if (variant === 'bottom') {
-    topOffset = direction < 0 ? curve * 0.32 : -curve * 0.32
-    bottomOffset = direction < 0 ? -curve : curve
+  if (p <= 0.0001) {
+    const edge = direction < 0 ? 100 : 0
+    return {seamTop: edge, seamBottom: edge, shadowTop: edge, shadowBottom: edge}
   }
 
-  const seamTop = clampPercent(base + topOffset)
-  const seamBottom = clampPercent(base + bottomOffset)
+  if (p >= 0.9999) {
+    const edge = direction < 0 ? 0 : 100
+    return {seamTop: edge, seamBottom: edge, shadowTop: edge, shadowBottom: edge}
+  }
 
-  const foldWidth = Math.sin(p * Math.PI) * 20
-  const shadowWidth = Math.sin(p * Math.PI) * 11
+  const sy = clamp01(startY)
+  const cy = clamp01(currentY)
+
+  // Canonical space always turns from the right edge toward the left. The
+  // virtual finger/fold point moves horizontally with progress while retaining
+  // the real vertical finger position.
+  const currentX = 1 - p
+  const anchorDeltaY = sy - cy
+
+  // The fold line direction is the free-edge vector rotated by 90 degrees.
+  // Solving that line at y=0 and y=1 gives its intersections with the page.
+  const topCanonical = currentX + anchorDeltaY * cy / p
+  const bottomCanonical = currentX - anchorDeltaY * (1 - cy) / p
+
+  const seamTop = actualPercent(topCanonical, direction)
+  const seamBottom = actualPercent(bottomCanonical, direction)
+
+  // Cast the paper shadow onto the newly revealed page, on the free-edge side
+  // of the fold. It grows around the middle of the turn and vanishes cleanly at
+  // both endpoints.
+  const shadowWidth = Math.sin(p * Math.PI) * 8
+  const shadowSign = direction < 0 ? 1 : -1
 
   return {
     seamTop,
     seamBottom,
-    foldTop: clampPercent(seamTop - direction * foldWidth),
-    foldBottom: clampPercent(seamBottom - direction * foldWidth),
-    shadowTop: clampPercent(seamTop - direction * shadowWidth),
-    shadowBottom: clampPercent(seamBottom - direction * shadowWidth),
-  }
-}
-
-/**
- * Continuous 3D warp applied to the one-piece page flap.
- *
- * The fold boundary still tracks the finger linearly, but the material on the
- * free side of that boundary rotates as one physical sheet. At 90 degrees the
- * front becomes edge-on; after that the target-page back face becomes visible,
- * reaching a flat 180-degree turn at completion.
- *
- * The constants here are deliberate tuning knobs for the paper feel. Keeping
- * them in one function makes it straightforward to calibrate after touch tests.
- */
-export function paperCurlWarpGeometry(
-  progress: number,
-  physicalDirection: number,
-  variant: PageCurlVariant,
-): PaperCurlWarpGeometry {
-  const p = Math.max(0, Math.min(1, progress))
-  const direction = Math.sign(physicalDirection || -1)
-  const fold = paperCurlFoldGeometry(p, direction, variant)
-  const arch = Math.sin(p * Math.PI)
-
-  const maxCornerRotation = 16
-  const maxCornerShift = 5
-  const maxLift = 44
-
-  const cornerRotation = variant === 'top'
-    ? -direction * arch * maxCornerRotation
-    : variant === 'bottom'
-      ? direction * arch * maxCornerRotation
-      : 0
-  const verticalShift = variant === 'top'
-    ? arch * maxCornerShift
-    : variant === 'bottom'
-      ? -arch * maxCornerShift
-      : 0
-
-  return {
-    ...fold,
-    rotationY: direction * p * 180,
-    cornerRotation,
-    verticalShift,
-    lift: arch * maxLift,
+    shadowTop: Math.max(0, Math.min(100, seamTop + shadowSign * shadowWidth)),
+    shadowBottom: Math.max(0, Math.min(100, seamBottom + shadowSign * shadowWidth)),
   }
 }
