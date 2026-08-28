@@ -2,6 +2,7 @@ import {
   pageCurlRotation,
   pageCurlVariantForStart,
   paperCurlFoldGeometry,
+  paperCurlWarpGeometry,
   transitionProgress,
 } from '@/functions/paged-reader-transition'
 
@@ -76,5 +77,28 @@ describe('paged reader transitions', () => {
       shadowTop: 0,
       shadowBottom: 0,
     })
+  })
+
+  test('warped flap exposes its front, edge, then back over one half-turn', () => {
+    const start = paperCurlWarpGeometry(0, -1, 'middle')
+    const half = paperCurlWarpGeometry(0.5, -1, 'middle')
+    const end = paperCurlWarpGeometry(1, -1, 'middle')
+
+    expect(start.rotationY).toBe(0)
+    expect(half.rotationY).toBe(-90)
+    expect(end.rotationY).toBe(-180)
+    expect(start.lift).toBeCloseTo(0)
+    expect(half.lift).toBeGreaterThan(40)
+    expect(end.lift).toBeCloseTo(0)
+  })
+
+  test('warped corner variants bend in opposite vertical directions', () => {
+    const top = paperCurlWarpGeometry(0.5, -1, 'top')
+    const bottom = paperCurlWarpGeometry(0.5, -1, 'bottom')
+
+    expect(top.cornerRotation).toBeGreaterThan(0)
+    expect(bottom.cornerRotation).toBeLessThan(0)
+    expect(top.verticalShift).toBeGreaterThan(0)
+    expect(bottom.verticalShift).toBeLessThan(0)
   })
 })
