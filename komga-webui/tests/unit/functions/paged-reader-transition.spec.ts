@@ -1,8 +1,7 @@
 import {
   pageCurlRotation,
   pageCurlVariantForStart,
-  paperCurlFoldGeometry,
-  paperCurlWarpGeometry,
+  paperCurlDynamicGeometry,
   transitionProgress,
 } from '@/functions/paged-reader-transition'
 
@@ -28,77 +27,56 @@ describe('paged reader transitions', () => {
     expect(pageCurlRotation(2, 1)).toBeCloseTo(90)
   })
 
-  test('middle paper curl is one continuous vertical fold', () => {
-    const fold = paperCurlFoldGeometry(0.5, -1, 'middle')
+  test('middle automated paper curl keeps a vertical fold line', () => {
+    const fold = paperCurlDynamicGeometry(0.5, 0.5, 0.5, -1)
 
     expect(fold.seamTop).toBeCloseTo(50)
     expect(fold.seamBottom).toBeCloseTo(50)
-    expect(fold.foldTop).toBeCloseTo(70)
-    expect(fold.foldBottom).toBeCloseTo(70)
-    expect(fold.shadowTop).toBeCloseTo(61)
-    expect(fold.shadowBottom).toBeCloseTo(61)
+    expect(fold.shadowTop).toBeCloseTo(58)
+    expect(fold.shadowBottom).toBeCloseTo(58)
   })
 
-  test('top and bottom turns exaggerate one continuous diagonal edge', () => {
-    const top = paperCurlFoldGeometry(0.5, -1, 'top')
-    const bottom = paperCurlFoldGeometry(0.5, -1, 'bottom')
+  test('live vertical finger movement continuously tilts the fold line', () => {
+    const fold = paperCurlDynamicGeometry(0.5, 0.1, 0.35, -1)
 
-    expect(top.seamTop).toBeLessThan(top.seamBottom - 30)
-    expect(bottom.seamBottom).toBeLessThan(bottom.seamTop - 30)
+    expect(fold.seamTop).toBeCloseTo(32.5)
+    expect(fold.seamBottom).toBeCloseTo(82.5)
+    expect(fold.seamBottom - fold.seamTop).toBeCloseTo(50)
   })
 
-  test('paper fold reverses cleanly with physical direction', () => {
-    const left = paperCurlFoldGeometry(0.5, -1, 'top')
-    const right = paperCurlFoldGeometry(0.5, 1, 'top')
+  test('opposite vertical movement mirrors the corner direction', () => {
+    const down = paperCurlDynamicGeometry(0.5, 0.1, 0.35, -1)
+    const up = paperCurlDynamicGeometry(0.5, 0.9, 0.65, -1)
+
+    expect(down.seamTop).toBeLessThan(down.seamBottom)
+    expect(up.seamTop).toBeGreaterThan(up.seamBottom)
+  })
+
+  test('paper curl geometry mirrors cleanly with physical direction', () => {
+    const left = paperCurlDynamicGeometry(0.5, 0.1, 0.35, -1)
+    const right = paperCurlDynamicGeometry(0.5, 0.1, 0.35, 1)
 
     expect(left.seamTop).toBeCloseTo(100 - right.seamTop)
     expect(left.seamBottom).toBeCloseTo(100 - right.seamBottom)
-    expect(left.foldTop).toBeGreaterThan(left.seamTop)
-    expect(right.foldTop).toBeLessThan(right.seamTop)
+    expect(left.shadowTop).toBeGreaterThan(left.seamTop)
+    expect(right.shadowTop).toBeLessThan(right.seamTop)
   })
 
-  test('paper fold collapses exactly at both settled endpoints', () => {
-    const start = paperCurlFoldGeometry(0, -1, 'top')
-    const end = paperCurlFoldGeometry(1, -1, 'top')
+  test('dynamic fold collapses exactly at both settled endpoints', () => {
+    const start = paperCurlDynamicGeometry(0, 0.1, 0.9, -1)
+    const end = paperCurlDynamicGeometry(1, 0.1, 0.9, -1)
 
     expect(start).toEqual({
       seamTop: 100,
       seamBottom: 100,
-      foldTop: 100,
-      foldBottom: 100,
       shadowTop: 100,
       shadowBottom: 100,
     })
     expect(end).toEqual({
       seamTop: 0,
       seamBottom: 0,
-      foldTop: 0,
-      foldBottom: 0,
       shadowTop: 0,
       shadowBottom: 0,
     })
-  })
-
-  test('warped flap exposes its front, edge, then back over one half-turn', () => {
-    const start = paperCurlWarpGeometry(0, -1, 'middle')
-    const half = paperCurlWarpGeometry(0.5, -1, 'middle')
-    const end = paperCurlWarpGeometry(1, -1, 'middle')
-
-    expect(start.rotationY).toBe(0)
-    expect(half.rotationY).toBe(-90)
-    expect(end.rotationY).toBe(-180)
-    expect(start.lift).toBeCloseTo(0)
-    expect(half.lift).toBeGreaterThan(40)
-    expect(end.lift).toBeCloseTo(0)
-  })
-
-  test('warped corner variants bend in opposite vertical directions', () => {
-    const top = paperCurlWarpGeometry(0.5, -1, 'top')
-    const bottom = paperCurlWarpGeometry(0.5, -1, 'bottom')
-
-    expect(top.cornerRotation).toBeGreaterThan(0)
-    expect(bottom.cornerRotation).toBeLessThan(0)
-    expect(top.verticalShift).toBeGreaterThan(0)
-    expect(bottom.verticalShift).toBeLessThan(0)
   })
 })
