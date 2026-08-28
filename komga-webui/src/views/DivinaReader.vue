@@ -285,7 +285,7 @@
       multi-line
       class="mt-12"
     >
-      <div class="body-1 pa-6">
+      <div class="text-body-1 pa-6">
         <p>{{ $t('bookreader.end_of_book') }}</p>
         <p v-if="!$_.isEmpty(siblingNext)">{{ $t('bookreader.move_next') }}</p>
         <p v-else>{{ $t('bookreader.move_next_exit') }}</p>
