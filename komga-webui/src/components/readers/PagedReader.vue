@@ -19,7 +19,7 @@
                 :continuous="false"
                 :reverse="flipDirection"
                 :vertical="vertical"
-                :class="{'carousel-hidden': drag.active}"
+                :class="{'carousel-hidden': drag.prepared}"
                 hide-delimiters
                 touchless
                 height="100%"
@@ -47,7 +47,7 @@
       </v-carousel-item>
     </v-carousel>
 
-    <div v-if="drag.active" class="drag-layer">
+    <div v-show="drag.prepared" class="drag-layer">
       <div class="drag-spread" :style="dragStyle(drag.offset)">
         <div class="full-height d-flex flex-column justify-center">
           <div :class="`d-flex flex-row${flipDirection ? '-reverse' : ''} justify-center px-0 mx-0`">
@@ -141,6 +141,7 @@ export default Vue.extend({
       dragSettleTimer: undefined as number | undefined,
       drag: {
         tracking: false,
+        prepared: false,
         active: false,
         settling: false,
         startX: 0,
@@ -349,6 +350,7 @@ export default Vue.extend({
       const touch = event.touches[0]
       const root = this.$el as HTMLElement
       this.drag.tracking = true
+      this.drag.prepared = true
       this.drag.active = false
       this.drag.startX = touch.clientX
       this.drag.startY = touch.clientY
@@ -374,7 +376,7 @@ export default Vue.extend({
       if (!this.drag.active) {
         if (Math.abs(primary) < 4) return
         if (Math.abs(primary) <= Math.abs(cross)) {
-          this.drag.tracking = false
+          this.resetDrag()
           return
         }
         this.drag.active = true
@@ -399,7 +401,10 @@ export default Vue.extend({
     followFingerEnd() {
       if (!this.drag.tracking) return
       this.drag.tracking = false
-      if (!this.drag.active) return
+      if (!this.drag.active) {
+        this.resetDrag()
+        return
+      }
 
       const commit = shouldCommitDrag(
         this.drag.rawOffset,
@@ -416,7 +421,7 @@ export default Vue.extend({
       }
     },
     followFingerCancel() {
-      if (!this.drag.tracking && !this.drag.active) return
+      if (!this.drag.tracking && !this.drag.prepared) return
       this.drag.tracking = false
       if (this.drag.active) this.settleDrag(false)
       else this.resetDrag()
@@ -458,6 +463,7 @@ export default Vue.extend({
     },
     resetDrag() {
       this.drag.tracking = false
+      this.drag.prepared = false
       this.drag.active = false
       this.drag.settling = false
       this.drag.rawOffset = 0
