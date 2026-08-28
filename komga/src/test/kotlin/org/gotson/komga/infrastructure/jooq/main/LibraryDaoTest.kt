@@ -2,6 +2,7 @@ package org.gotson.komga.infrastructure.jooq.main
 
 import org.assertj.core.api.Assertions.assertThat
 import org.gotson.komga.domain.model.Library
+import org.gotson.komga.domain.model.SeriesMetadata
 import org.gotson.komga.infrastructure.jooq.offset
 import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.Test
@@ -27,6 +28,7 @@ class LibraryDaoTest(
       Library(
         name = "Library",
         root = URL("file://library"),
+        defaultReadingDirection = SeriesMetadata.ReadingDirection.RIGHT_TO_LEFT,
       )
 
     libraryDao.insert(library)
@@ -36,6 +38,7 @@ class LibraryDaoTest(
     assertThat(created.lastModifiedDate).isCloseTo(now, offset)
     assertThat(created.name).isEqualTo(library.name)
     assertThat(created.root).isEqualTo(library.root)
+    assertThat(created.defaultReadingDirection).isEqualTo(library.defaultReadingDirection)
   }
 
   @Test
@@ -68,6 +71,7 @@ class LibraryDaoTest(
           convertToCbz = true,
           emptyTrashAfterScan = true,
           seriesCover = Library.SeriesCover.LAST,
+          defaultReadingDirection = SeriesMetadata.ReadingDirection.WEBTOON,
           hashFiles = false,
           hashPages = true,
           analyzeDimensions = false,
@@ -106,6 +110,7 @@ class LibraryDaoTest(
     assertThat(modified.convertToCbz).isEqualTo(updated.convertToCbz)
     assertThat(modified.emptyTrashAfterScan).isEqualTo(updated.emptyTrashAfterScan)
     assertThat(modified.seriesCover).isEqualTo(updated.seriesCover)
+    assertThat(modified.defaultReadingDirection).isEqualTo(updated.defaultReadingDirection)
     assertThat(modified.hashFiles).isEqualTo(updated.hashFiles)
     assertThat(modified.hashPages).isEqualTo(updated.hashPages)
     assertThat(modified.analyzeDimensions).isEqualTo(updated.analyzeDimensions)

@@ -1,6 +1,7 @@
 package org.gotson.komga.infrastructure.jooq.main
 
 import org.gotson.komga.domain.model.Library
+import org.gotson.komga.domain.model.SeriesMetadata
 import org.gotson.komga.domain.persistence.LibraryRepository
 import org.gotson.komga.infrastructure.jooq.SplitDslDaoBase
 import org.gotson.komga.jooq.main.Tables
@@ -106,6 +107,7 @@ class LibraryDao(
       .set(l.CONVERT_TO_CBZ, library.convertToCbz)
       .set(l.EMPTY_TRASH_AFTER_SCAN, library.emptyTrashAfterScan)
       .set(l.SERIES_COVER, library.seriesCover.toString())
+      .set(l.DEFAULT_READING_DIRECTION, library.defaultReadingDirection?.name)
       .set(l.HASH_FILES, library.hashFiles)
       .set(l.HASH_PAGES, library.hashPages)
       .set(l.HASH_KOREADER, library.hashKoreader)
@@ -143,6 +145,7 @@ class LibraryDao(
       .set(l.CONVERT_TO_CBZ, library.convertToCbz)
       .set(l.EMPTY_TRASH_AFTER_SCAN, library.emptyTrashAfterScan)
       .set(l.SERIES_COVER, library.seriesCover.toString())
+      .set(l.DEFAULT_READING_DIRECTION, library.defaultReadingDirection?.name)
       .set(l.HASH_FILES, library.hashFiles)
       .set(l.HASH_PAGES, library.hashPages)
       .set(l.HASH_KOREADER, library.hashKoreader)
@@ -199,6 +202,7 @@ class LibraryDao(
       convertToCbz = convertToCbz,
       emptyTrashAfterScan = emptyTrashAfterScan,
       seriesCover = Library.SeriesCover.valueOf(seriesCover),
+      defaultReadingDirection = defaultReadingDirection?.let(SeriesMetadata.ReadingDirection::valueOf),
       hashFiles = hashFiles,
       hashPages = hashPages,
       hashKoreader = hashKoreader,
