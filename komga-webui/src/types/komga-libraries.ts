@@ -1,3 +1,4 @@
+import {ReadingDirection} from '@/types/enum-books'
 import {ScanIntervalDto, SeriesCoverDto} from '@/types/enum-libraries'
 
 export interface LibraryDto {
@@ -25,6 +26,7 @@ export interface LibraryDto {
   convertToCbz: boolean,
   emptyTrashAfterScan: boolean,
   seriesCover: SeriesCoverDto,
+  defaultReadingDirection: ReadingDirection | null,
   hashFiles: boolean,
   hashPages: boolean,
   hashKoreader: boolean,
@@ -61,6 +63,7 @@ export interface LibraryCreationDto {
   convertToCbz: boolean,
   emptyTrashAfterScan: boolean,
   seriesCover: SeriesCoverDto,
+  defaultReadingDirection: ReadingDirection | null,
   hashFiles: boolean,
   hashPages: boolean,
   hashKoreader: boolean,
@@ -92,6 +95,7 @@ export interface LibraryUpdateDto {
   convertToCbz: boolean,
   emptyTrashAfterScan: boolean,
   seriesCover: SeriesCoverDto,
+  defaultReadingDirection: ReadingDirection | null,
   hashFiles: boolean,
   hashPages: boolean,
   hashKoreader: boolean,
