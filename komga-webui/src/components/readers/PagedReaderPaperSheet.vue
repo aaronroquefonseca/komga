@@ -1,7 +1,6 @@
 <template>
-  <div class="paper-sheet" :style="sheetStyle" aria-hidden="true">
-    <!-- The destination page stays flat underneath the sheet for the entire
-         gesture. Areas uncovered by the bend therefore reveal real content. -->
+  <div class="paper-sheet" aria-hidden="true">
+    <!-- The destination page always stays flat underneath the physical sheet. -->
     <div class="paper-layer paper-target">
       <paged-reader-spread
         :spread="backSpread"
@@ -10,9 +9,8 @@
       />
     </div>
 
-    <!-- Stationary part of the current page. The remainder is duplicated into
-         the warped flap below, so the image stays continuous at the fold seam. -->
-    <div class="paper-layer paper-front" :style="frontStyle">
+    <!-- The part of the current page that has not crossed the fold line yet. -->
+    <div class="paper-layer paper-current" :style="currentStyle">
       <paged-reader-spread
         :spread="frontSpread"
         :flip-direction="flipDirection"
@@ -20,33 +18,13 @@
       />
     </div>
 
-    <!-- One continuous physical flap, never strips or tiles. Its front is the
-         current page and its back is the destination page. The same clipped
-         region is rotated through 180 degrees around the moving fold line. -->
-    <div class="paper-flap" :style="flapStyle">
-      <div class="paper-flap-face paper-flap-front" :style="flapFrontStyle">
-        <paged-reader-spread
-          :spread="frontSpread"
-          :flip-direction="flipDirection"
-          :scale="scale"
-        />
-        <div class="paper-flap-shade" :style="frontShadeStyle" />
-      </div>
+    <!-- For this first faithful curl implementation the physical backside is
+         intentionally plain white. A later MangaBox-style pass can add page
+         pairing/back-page artwork without changing the fold geometry. -->
+    <div class="paper-layer paper-back" :style="backStyle" />
 
-      <div class="paper-flap-face paper-flap-back" :style="flapBackStyle">
-        <paged-reader-spread
-          :spread="backSpread"
-          :flip-direction="flipDirection"
-          :scale="scale"
-        />
-        <div class="paper-flap-shade" :style="backShadeStyle" />
-      </div>
-    </div>
-
-    <!-- These remain flat lighting cues around the moving crease. They do not
-         carry page content; the warped flap above now does that job. -->
-    <div class="paper-drop-shadow" :style="shadowStyle" />
-    <div class="paper-crease-highlight" :style="highlightStyle" />
+    <div class="paper-shadow" :style="shadowStyle" />
+    <div class="paper-edge" :style="edgeStyle" />
   </div>
 </template>
 
@@ -56,28 +34,13 @@ import PagedReaderSpread from '@/components/readers/PagedReaderSpread.vue'
 import {PageDtoWithUrl} from '@/types/komga-books'
 import {ScaleType} from '@/types/enum-reader'
 import {
-  PageCurlVariant,
-  PaperCurlWarpGeometry,
-  paperCurlWarpGeometry,
+  PaperCurlDynamicGeometry,
+  paperCurlDynamicGeometry,
 } from '@/functions/paged-reader-transition'
+import {pagedReaderTouchSnapshot} from '@/functions/paged-reader-touch'
 
-// Paper-curl visual tuning knobs. Geometry that changes the actual path of the
-// sheet lives in paperCurlWarpGeometry(); lighting/perspective stays here so we
-// can calibrate both independently after real touch tests.
-const PAPER_CURL_TUNING = {
-  perspectivePx: 1450,
-  seamOverlapPercent: 0.18,
-  frontDarken: 0.12,
-  backBaseBrightness: 0.76,
-  backArchBrightness: 0.10,
-  maxShadeOpacity: 0.46,
-  maxShadowOpacity: 0.48,
-  shadowWidthPercent: 12,
-  highlightWidthPercent: 1.4,
-}
-
-function clampPercent(value: number): number {
-  return Math.max(0, Math.min(100, value))
+function clamp01(value: number): number {
+  return Math.max(0, Math.min(1, value))
 }
 
 export default Vue.extend({
@@ -108,134 +71,123 @@ export default Vue.extend({
       type: Number,
       required: true,
     },
+    // Retained for compatibility with the reader API. The new curl no longer
+    // chooses one of three canned shapes: a live gesture supplies continuous Y
+    // geometry, while non-interactive turns use the middle automatically.
     variant: {
-      type: String as () => PageCurlVariant,
+      type: String,
       required: true,
     },
+  },
+  data: () => ({
+    touchSequence: -1,
+    touchCaptured: false,
+    touchStartY: 0.5,
+    touchCurrentY: 0.5,
+  }),
+  watch: {
+    progress: {
+      handler() {
+        this.syncTouchGeometry()
+      },
+      immediate: true,
+    },
+  },
+  mounted() {
+    this.syncTouchGeometry()
   },
   computed: {
     direction(): number {
       return Math.sign(this.physicalDirection || -1)
     },
-    clampedProgress(): number {
-      return Math.max(0, Math.min(1, this.progress))
+    geometry(): PaperCurlDynamicGeometry {
+      return paperCurlDynamicGeometry(
+        this.progress,
+        this.touchCaptured ? this.touchStartY : 0.5,
+        this.touchCaptured ? this.touchCurrentY : 0.5,
+        this.direction,
+      )
     },
-    arch(): number {
-      return Math.sin(this.clampedProgress * Math.PI)
-    },
-    geometry(): PaperCurlWarpGeometry {
-      return paperCurlWarpGeometry(this.clampedProgress, this.direction, this.variant)
-    },
-    sheetStyle(): Record<string, string> {
-      return {
-        perspective: `${PAPER_CURL_TUNING.perspectivePx}px`,
-      }
-    },
-    frontClip(): string {
+    currentClip(): string {
       const {seamTop, seamBottom} = this.geometry
       if (this.direction < 0) {
         return `polygon(0 0, ${seamTop}% 0, ${seamBottom}% 100%, 0 100%)`
       }
       return `polygon(${seamTop}% 0, 100% 0, 100% 100%, ${seamBottom}% 100%)`
     },
-    flapClip(): string {
-      const overlap = this.direction * PAPER_CURL_TUNING.seamOverlapPercent
-      const seamTop = clampPercent(this.geometry.seamTop + overlap)
-      const seamBottom = clampPercent(this.geometry.seamBottom + overlap)
-
+    backClip(): string {
+      const {seamTop, seamBottom} = this.geometry
       if (this.direction < 0) {
         return `polygon(${seamTop}% 0, 100% 0, 100% 100%, ${seamBottom}% 100%)`
       }
       return `polygon(0 0, ${seamTop}% 0, ${seamBottom}% 100%, 0 100%)`
     },
-    frontStyle(): Record<string, string> {
+    shadowClip(): string {
+      const {seamTop, seamBottom, shadowTop, shadowBottom} = this.geometry
+      return `polygon(${seamTop}% 0, ${shadowTop}% 0, ${shadowBottom}% 100%, ${seamBottom}% 100%)`
+    },
+    currentStyle(): Record<string, string> {
       return {
-        clipPath: this.frontClip,
-        WebkitClipPath: this.frontClip,
+        clipPath: this.currentClip,
+        WebkitClipPath: this.currentClip,
       }
     },
-    flapStyle(): Record<string, string> {
-      const {seamTop, seamBottom, rotationY, cornerRotation, verticalShift, lift} = this.geometry
-      const originX = this.variant === 'top'
-        ? seamTop
-        : this.variant === 'bottom'
-          ? seamBottom
-          : (seamTop + seamBottom) / 2
-      const originY = this.variant === 'top'
-        ? 0
-        : this.variant === 'bottom'
-          ? 100
-          : 50
-
+    backStyle(): Record<string, string> {
       return {
-        transformOrigin: `${originX}% ${originY}%`,
-        transform: `translate3d(0, ${verticalShift}%, ${lift}px) rotateZ(${cornerRotation}deg) rotateY(${rotationY}deg)`,
-      }
-    },
-    flapFrontStyle(): Record<string, string> {
-      const brightness = 1 - this.arch * PAPER_CURL_TUNING.frontDarken
-      return {
-        clipPath: this.flapClip,
-        WebkitClipPath: this.flapClip,
-        filter: `brightness(${brightness})`,
-      }
-    },
-    flapBackStyle(): Record<string, string> {
-      const brightness = PAPER_CURL_TUNING.backBaseBrightness +
-        this.arch * PAPER_CURL_TUNING.backArchBrightness
-      return {
-        clipPath: this.flapClip,
-        WebkitClipPath: this.flapClip,
-        filter: `brightness(${brightness}) saturate(${0.86 + this.arch * 0.08})`,
-      }
-    },
-    frontShadeStyle(): Record<string, string> {
-      const gradient = this.direction < 0
-        ? 'linear-gradient(to left, rgba(255,255,255,0.08), rgba(0,0,0,0.08) 58%, rgba(0,0,0,0.42) 100%)'
-        : 'linear-gradient(to right, rgba(255,255,255,0.08), rgba(0,0,0,0.08) 58%, rgba(0,0,0,0.42) 100%)'
-      return {
-        background: gradient,
-        opacity: `${this.arch * PAPER_CURL_TUNING.maxShadeOpacity}`,
-      }
-    },
-    backShadeStyle(): Record<string, string> {
-      const gradient = this.direction < 0
-        ? 'linear-gradient(to right, rgba(255,255,255,0.24), rgba(0,0,0,0.08) 45%, rgba(0,0,0,0.36) 100%)'
-        : 'linear-gradient(to left, rgba(255,255,255,0.24), rgba(0,0,0,0.08) 45%, rgba(0,0,0,0.36) 100%)'
-      return {
-        background: gradient,
-        opacity: `${this.arch * PAPER_CURL_TUNING.maxShadeOpacity}`,
+        clipPath: this.backClip,
+        WebkitClipPath: this.backClip,
       }
     },
     shadowStyle(): Record<string, string> {
-      const {seamTop, seamBottom} = this.geometry
-      const width = this.arch * PAPER_CURL_TUNING.shadowWidthPercent
-      const shadowTop = clampPercent(seamTop - this.direction * width)
-      const shadowBottom = clampPercent(seamBottom - this.direction * width)
-      const clip = `polygon(${seamTop}% 0, ${shadowTop}% 0, ${shadowBottom}% 100%, ${seamBottom}% 100%)`
+      const arch = Math.sin(clamp01(this.progress) * Math.PI)
       const gradient = this.direction < 0
-        ? 'linear-gradient(to right, rgba(0,0,0,0.52), rgba(0,0,0,0.16) 48%, rgba(0,0,0,0) 100%)'
-        : 'linear-gradient(to left, rgba(0,0,0,0.52), rgba(0,0,0,0.16) 48%, rgba(0,0,0,0) 100%)'
-
+        ? 'linear-gradient(to right, rgba(0,0,0,0.34), rgba(0,0,0,0))'
+        : 'linear-gradient(to left, rgba(0,0,0,0.34), rgba(0,0,0,0))'
       return {
-        clipPath: clip,
-        WebkitClipPath: clip,
+        clipPath: this.shadowClip,
+        WebkitClipPath: this.shadowClip,
         background: gradient,
-        opacity: `${this.arch * PAPER_CURL_TUNING.maxShadowOpacity}`,
+        opacity: `${arch}`,
       }
     },
-    highlightStyle(): Record<string, string> {
+    edgeStyle(): Record<string, string> {
       const {seamTop, seamBottom} = this.geometry
-      const width = this.arch * PAPER_CURL_TUNING.highlightWidthPercent
-      const highlightTop = clampPercent(seamTop + this.direction * width)
-      const highlightBottom = clampPercent(seamBottom + this.direction * width)
-      const clip = `polygon(${seamTop}% 0, ${highlightTop}% 0, ${highlightBottom}% 100%, ${seamBottom}% 100%)`
-
+      const width = 0.45
+      const edgeTop = clamp01((seamTop + this.direction * width) / 100) * 100
+      const edgeBottom = clamp01((seamBottom + this.direction * width) / 100) * 100
+      const clip = `polygon(${seamTop}% 0, ${edgeTop}% 0, ${edgeBottom}% 100%, ${seamBottom}% 100%)`
       return {
         clipPath: clip,
         WebkitClipPath: clip,
-        background: 'rgba(255,255,255,0.5)',
-        opacity: `${this.arch * 0.9}`,
+        opacity: `${Math.sin(clamp01(this.progress) * Math.PI)}`,
+      }
+    },
+  },
+  methods: {
+    syncTouchGeometry() {
+      if (!(this.$el instanceof HTMLElement)) return
+      const touch = pagedReaderTouchSnapshot()
+
+      // Only adopt a gesture while it is actually active. This means a normal
+      // tap/keyboard page turn cannot accidentally reuse a stale drag from some
+      // other part of the UI. Once captured, the final coordinates are retained
+      // while Komga animates the curl to completion or back to rest.
+      if (touch.active) {
+        if (touch.sequence !== this.touchSequence) {
+          this.touchSequence = touch.sequence
+          this.touchCaptured = true
+        }
+
+        if (touch.sequence === this.touchSequence) {
+          const rect = (this.$el as HTMLElement).getBoundingClientRect()
+          const height = Math.max(1, rect.height)
+          this.touchStartY = clamp01((touch.startY - rect.top) / height)
+          this.touchCurrentY = clamp01((touch.currentY - rect.top) / height)
+        }
+      } else if (this.touchCaptured && touch.sequence === this.touchSequence) {
+        const rect = (this.$el as HTMLElement).getBoundingClientRect()
+        const height = Math.max(1, rect.height)
+        this.touchCurrentY = clamp01((touch.currentY - rect.top) / height)
       }
     },
   },
@@ -250,15 +202,11 @@ export default Vue.extend({
   pointer-events: none;
   isolation: isolate;
   contain: paint;
-  transform-style: preserve-3d;
 }
 
 .paper-layer,
-.paper-flap,
-.paper-flap-face,
-.paper-flap-shade,
-.paper-drop-shadow,
-.paper-crease-highlight {
+.paper-shadow,
+.paper-edge {
   position: absolute;
   inset: 0;
 }
@@ -267,43 +215,27 @@ export default Vue.extend({
   z-index: 1;
 }
 
-.paper-front {
-  z-index: 3;
+.paper-current {
+  z-index: 4;
   will-change: clip-path;
 }
 
-.paper-flap {
+.paper-back {
   z-index: 5;
-  transform-style: preserve-3d;
-  will-change: transform;
+  background: #fff;
+  will-change: clip-path;
+  filter: drop-shadow(0 0 8px rgba(0, 0, 0, 0.18));
 }
 
-.paper-flap-face {
-  backface-visibility: hidden;
-  -webkit-backface-visibility: hidden;
-  transform-style: preserve-3d;
-  will-change: clip-path, filter;
-}
-
-.paper-flap-front {
-  transform: rotateY(0deg);
-}
-
-.paper-flap-back {
-  transform: rotateY(180deg);
-}
-
-.paper-flap-shade {
-  z-index: 2;
-}
-
-.paper-drop-shadow {
-  z-index: 2;
+.paper-shadow {
+  z-index: 3;
   will-change: clip-path, opacity;
 }
 
-.paper-crease-highlight {
+.paper-edge {
   z-index: 6;
+  background: rgba(250, 250, 250, 0.96);
+  box-shadow: 0 0 8px rgba(0, 0, 0, 0.28);
   will-change: clip-path, opacity;
 }
 </style>
