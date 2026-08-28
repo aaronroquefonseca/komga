@@ -1,6 +1,7 @@
 <template>
   <div
-    class="paged-reader-root"
+    :class="{'paged-reader-root': interactiveGestureEnabled}"
+    :style="interactiveGestureEnabled ? {touchAction: vertical ? 'pan-x' : 'pan-y'} : undefined"
     v-touch="{
                left: () => {if(swipe && !interactiveGestureEnabled) {turnRight()}},
                right: () => {if(swipe && !interactiveGestureEnabled) {turnLeft()}},
@@ -495,10 +496,7 @@ export default Vue.extend({
 </script>
 <style scoped>
 .paged-reader-root {
-  height: 100%;
-  width: 100%;
   position: relative;
-  overflow: hidden;
 }
 
 .full-height {
