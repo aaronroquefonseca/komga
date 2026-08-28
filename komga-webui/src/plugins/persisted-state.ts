@@ -9,16 +9,20 @@ export const persistedModule: Module<any, any> = {
       paged: {
         scale: '',
         pageLayout: '',
+        transition: '',
       },
       continuous: {
         scale: '',
         padding: '',
         margin: '',
+        smoothScroll: null as boolean | null,
+        pageNavigation: true,
       },
       readingDirection: '',
       swipe: false,
       followFinger: false,
       alwaysFullscreen: false,
+      // Kept for migration from the historical shared animation switch.
       animations: true,
       background: '',
     },
@@ -107,6 +111,9 @@ export const persistedModule: Module<any, any> = {
     setWebreaderPagedPageLayout(state, val) {
       state.webreader.paged.pageLayout = val
     },
+    setWebreaderPagedTransition(state, val) {
+      state.webreader.paged.transition = val
+    },
     setWebreaderContinuousScale(state, val) {
       state.webreader.continuous.scale = val
     },
@@ -115,6 +122,12 @@ export const persistedModule: Module<any, any> = {
     },
     setWebreaderContinuousMargin(state, val) {
       state.webreader.continuous.margin = val
+    },
+    setWebreaderContinuousSmoothScroll(state, val) {
+      state.webreader.continuous.smoothScroll = val
+    },
+    setWebreaderContinuousPageNavigation(state, val) {
+      state.webreader.continuous.pageNavigation = val
     },
     setWebreaderReadingDirection(state, val) {
       state.webreader.readingDirection = val
