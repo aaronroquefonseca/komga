@@ -16,14 +16,14 @@ function loadLocaleMessages(): LocaleMessages {
   return messages
 }
 
-export default new VueI18n({
+const i18n = new VueI18n({
   locale: process.env.VUE_APP_I18N_LOCALE || 'en',
   fallbackLocale: process.env.VUE_APP_I18N_FALLBACK_LOCALE || 'en',
   messages: loadLocaleMessages(),
   pluralizationRules: {
     /**
      * @param choice {number} a choice index given by the input to $tc: `$tc('path.to.rule', choiceIndex)`
-     * @param choicesLength {number} an overall amount of available choices
+     * @param choicesLength {number} an overall amount of choices
      * @returns a final choice index to select plural word by
      */
     'pl': function (choice, choicesLength) {
@@ -51,3 +51,27 @@ export default new VueI18n({
     },
   },
 })
+
+// Fork-only reader settings use English fallback until they are moved into Weblate.
+i18n.mergeLocaleMessage('en', {
+  bookreader: {
+    settings: {
+      follow_finger: 'Follow finger',
+      page_transition: 'Page transition',
+      page_transition_types: {
+        default: 'Komga default (Default)',
+        push: 'Push',
+        cover: 'Cover',
+        reveal: 'Reveal',
+        parallax: 'Parallax / Depth',
+        page_turn: 'Page turn / Curl',
+        fade: 'Fade',
+        none: 'None',
+      },
+      webtoon_smooth_scroll: 'Smooth page scrolling',
+      webtoon_page_navigation: 'Tap page navigation',
+    },
+  },
+})
+
+export default i18n
