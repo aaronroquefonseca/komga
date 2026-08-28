@@ -36,12 +36,31 @@ describe('paged reader transitions', () => {
     expect(fold.shadowBottom).toBeCloseTo(58)
   })
 
+  test('middle curl reflects the free half across the crease', () => {
+    const fold = paperCurlDynamicGeometry(0.5, 0.5, 0.5, -1)
+
+    expect(fold.backPolygon).toEqual([
+      {x: 50, y: 0},
+      {x: 0, y: 0},
+      {x: 0, y: 100},
+      {x: 50, y: 100},
+    ])
+  })
+
   test('live vertical finger movement continuously tilts the fold line', () => {
     const fold = paperCurlDynamicGeometry(0.5, 0.1, 0.35, -1)
 
     expect(fold.seamTop).toBeCloseTo(32.5)
     expect(fold.seamBottom).toBeCloseTo(82.5)
     expect(fold.seamBottom - fold.seamTop).toBeCloseTo(50)
+  })
+
+  test('viewport aspect ratio participates in physical curl angle', () => {
+    const square = paperCurlDynamicGeometry(0.5, 0.1, 0.35, -1, 1)
+    const portrait = paperCurlDynamicGeometry(0.5, 0.1, 0.35, -1, 2)
+
+    expect(square.seamTop).not.toBeCloseTo(portrait.seamTop)
+    expect(square.seamBottom).not.toBeCloseTo(portrait.seamBottom)
   })
 
   test('opposite vertical movement mirrors the corner direction', () => {
@@ -71,12 +90,24 @@ describe('paged reader transitions', () => {
       seamBottom: 100,
       shadowTop: 100,
       shadowBottom: 100,
+      backPolygon: [
+        {x: 100, y: 0},
+        {x: 100, y: 0},
+        {x: 100, y: 100},
+        {x: 100, y: 100},
+      ],
     })
     expect(end).toEqual({
       seamTop: 0,
       seamBottom: 0,
       shadowTop: 0,
       shadowBottom: 0,
+      backPolygon: [
+        {x: 0, y: 0},
+        {x: 0, y: 0},
+        {x: 0, y: 100},
+        {x: 0, y: 100},
+      ],
     })
   })
 })
