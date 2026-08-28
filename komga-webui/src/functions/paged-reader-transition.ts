@@ -1,5 +1,14 @@
 export type PageCurlVariant = 'top' | 'middle' | 'bottom'
 
+export type PaperCurlFoldGeometry = {
+  seamTop: number
+  seamBottom: number
+  foldTop: number
+  foldBottom: number
+  shadowTop: number
+  shadowBottom: number
+}
+
 export function transitionProgress(offset: number, axisSize: number): number {
   if (axisSize <= 0) return 0
   return Math.max(0, Math.min(1, Math.abs(offset) / axisSize))
@@ -23,48 +32,54 @@ export function pageCurlRotation(progress: number, physicalDirection: number): n
   return degrees * Math.sign(physicalDirection || 1)
 }
 
-/**
- * Legacy one-dimensional paper fold phase. Kept while the reader migrates from
- * vertical strips to the two-dimensional paper mesh.
- */
-export function paperCurlSegmentPhase(progress: number, distanceFromOuterEdge: number): number {
-  const p = Math.max(0, Math.min(1, progress))
-  const distance = Math.max(0, Math.min(1, distanceFromOuterEdge))
-  const foldFront = p * 1.3
-  const bendWidth = 0.28
-  return Math.max(0, Math.min(1, (foldFront - distance) / bendWidth))
+function clampPercent(value: number): number {
+  return Math.max(0, Math.min(100, value))
 }
 
 /**
- * Phase for one tile of the flexible paper mesh.
+ * Geometry for one continuous MangaBox-style fold boundary.
  *
- * Middle turns travel almost uniformly from the free edge to the spine. Corner
- * turns are deliberately diagonal: the touched corner starts immediately while
- * the opposite corner is held back, producing the large triangular fold of a
- * real page grabbed by its corner. Every tile still reaches 1 at progress=1 so
- * the sheet can settle cleanly onto the next page.
+ * The sheet is never tessellated. `seamTop` and `seamBottom` describe one edge
+ * separating the still-visible front page from the revealed target page. Corner
+ * turns exaggerate that single edge into a diagonal line, while `fold*` and
+ * `shadow*` describe narrow continuous bands on the revealed side of the seam.
  */
-export function paperCurlTilePhase(
+export function paperCurlFoldGeometry(
   progress: number,
-  distanceFromFreeEdge: number,
-  rowPosition: number,
+  physicalDirection: number,
   variant: PageCurlVariant,
-): number {
+): PaperCurlFoldGeometry {
   const p = Math.max(0, Math.min(1, progress))
-  const edge = Math.max(0, Math.min(1, distanceFromFreeEdge))
-  const y = Math.max(0, Math.min(1, rowPosition))
+  const direction = Math.sign(physicalDirection || -1)
+  const base = direction < 0 ? 100 * (1 - p) : 100 * p
 
-  const oppositeCornerDistance = variant === 'top'
-    ? y
-    : variant === 'bottom'
-      ? 1 - y
-      : 0
+  // Peak diagonal displacement occurs halfway through the turn and disappears
+  // at both endpoints, so start/end geometry remains exactly the full page.
+  const curve = Math.sin(p * Math.PI) * 30
+  let topOffset = 0
+  let bottomOffset = 0
 
-  const edgeDelay = edge * (variant === 'middle' ? 0.38 : 0.22)
-  const cornerDelay = oppositeCornerDistance * (variant === 'middle' ? 0 : 0.52)
-  const start = Math.min(0.94, edgeDelay + cornerDelay)
+  if (variant === 'top') {
+    topOffset = direction < 0 ? -curve : curve
+    bottomOffset = direction < 0 ? curve * 0.32 : -curve * 0.32
+  } else if (variant === 'bottom') {
+    topOffset = direction < 0 ? curve * 0.32 : -curve * 0.32
+    bottomOffset = direction < 0 ? -curve : curve
+  }
 
-  if (p >= 1) return 1
-  if (p <= start) return 0
-  return Math.max(0, Math.min(1, (p - start) / (1 - start)))
+  const seamTop = clampPercent(base + topOffset)
+  const seamBottom = clampPercent(base + bottomOffset)
+
+  // The folded backside is widest mid-turn and collapses to zero at both ends.
+  const foldWidth = Math.sin(p * Math.PI) * 20
+  const shadowWidth = Math.sin(p * Math.PI) * 11
+
+  return {
+    seamTop,
+    seamBottom,
+    foldTop: clampPercent(seamTop - direction * foldWidth),
+    foldBottom: clampPercent(seamBottom - direction * foldWidth),
+    shadowTop: clampPercent(seamTop - direction * shadowWidth),
+    shadowBottom: clampPercent(seamBottom - direction * shadowWidth),
+  }
 }
