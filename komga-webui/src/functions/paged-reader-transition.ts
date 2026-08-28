@@ -1,10 +1,16 @@
 export type PageCurlVariant = 'top' | 'middle' | 'bottom'
 
+export type PaperCurlPoint = {
+  x: number
+  y: number
+}
+
 export type PaperCurlDynamicGeometry = {
   seamTop: number
   seamBottom: number
   shadowTop: number
   shadowBottom: number
+  backPolygon: PaperCurlPoint[]
 }
 
 export function transitionProgress(offset: number, axisSize: number): number {
@@ -34,71 +40,126 @@ function clamp01(value: number): number {
   return Math.max(0, Math.min(1, value))
 }
 
-function actualPercent(canonicalX: number, physicalDirection: number): number {
-  const x = clamp01(canonicalX)
-  return physicalDirection < 0 ? x * 100 : (1 - x) * 100
+function actualXPercent(canonicalX: number, physicalDirection: number): number {
+  return physicalDirection < 0 ? canonicalX * 100 : (1 - canonicalX) * 100
+}
+
+function reflectPoint(point: PaperCurlPoint, lineA: PaperCurlPoint, lineB: PaperCurlPoint): PaperCurlPoint {
+  const dx = lineB.x - lineA.x
+  const dy = lineB.y - lineA.y
+  const lengthSquared = dx * dx + dy * dy
+  if (lengthSquared <= 1e-8) return {...point}
+
+  const t = ((point.x - lineA.x) * dx + (point.y - lineA.y) * dy) / lengthSquared
+  const projectionX = lineA.x + t * dx
+  const projectionY = lineA.y + t * dy
+
+  return {
+    x: projectionX * 2 - point.x,
+    y: projectionY * 2 - point.y,
+  }
 }
 
 /**
- * Dynamic page-curl edge based on the same geometric idea used by Android
- * page-curl readers: the fold line passes through the current drag point and is
- * perpendicular to the vector from the grabbed free edge to that point.
+ * Dynamic page-curl geometry adapted from the classic two-point fold model.
  *
- * Komga permits a swipe to start anywhere, so horizontal travel is normalized
- * to page progress (the virtual free edge starts at x=1). The real start/current
- * finger Y coordinates are retained, which makes diagonal/corner turns fully
- * continuous instead of selecting one of a few canned shapes.
+ * The fold line passes through the virtual drag point and is perpendicular to
+ * the vector from the grabbed free edge to that point. The current page is
+ * clipped on the bound side of this line. The free-edge polygon is then
+ * reflected across the same line to become the physical backside of the page;
+ * this reflection is what vacates space for the next page underneath.
  *
- * Coordinates returned here are percentages in the reader's actual LTR/RTL
- * coordinate system. A completed turn always collapses exactly to the opposite
- * page edge so settlement remains compatible with the flash-free renderer.
+ * Komga permits a swipe to begin anywhere, so horizontal travel comes from the
+ * existing normalized Follow-finger progress while the actual live start/current
+ * finger Y positions control the fold angle. `heightOverWidth` keeps the maths
+ * in real screen proportions instead of treating the viewport as a square.
  */
 export function paperCurlDynamicGeometry(
   progress: number,
   startY: number,
   currentY: number,
   physicalDirection: number,
+  heightOverWidth = 1,
 ): PaperCurlDynamicGeometry {
   const p = clamp01(progress)
   const direction = Math.sign(physicalDirection || -1)
+  const aspect = Math.max(0.05, heightOverWidth)
 
-  if (p <= 0.0001) {
-    const edge = direction < 0 ? 100 : 0
-    return {seamTop: edge, seamBottom: edge, shadowTop: edge, shadowBottom: edge}
+  const endpointGeometry = (canonicalEdge: number): PaperCurlDynamicGeometry => {
+    const edge = actualXPercent(canonicalEdge, direction)
+    return {
+      seamTop: edge,
+      seamBottom: edge,
+      shadowTop: edge,
+      shadowBottom: edge,
+      backPolygon: [
+        {x: edge, y: 0},
+        {x: edge, y: 0},
+        {x: edge, y: 100},
+        {x: edge, y: 100},
+      ],
+    }
   }
 
-  if (p >= 0.9999) {
-    const edge = direction < 0 ? 0 : 100
-    return {seamTop: edge, seamBottom: edge, shadowTop: edge, shadowBottom: edge}
+  if (p <= 0.0001) return endpointGeometry(1)
+  if (p >= 0.9999) return endpointGeometry(0)
+
+  const startYPx = clamp01(startY) * aspect
+  const currentYPx = clamp01(currentY) * aspect
+  const currentPoint = {x: 1 - p, y: currentYPx}
+
+  const vectorX = 1 - currentPoint.x
+  const vectorY = startYPx - currentPoint.y
+  const lineDirection = {x: -vectorY, y: vectorX}
+
+  // Intersections of the infinite fold line with the top and bottom page edges.
+  const topT = -currentPoint.y / lineDirection.y
+  const bottomT = (aspect - currentPoint.y) / lineDirection.y
+  const rawTop = currentPoint.x + lineDirection.x * topT
+  const rawBottom = currentPoint.x + lineDirection.x * bottomT
+
+  // Match the reference implementation: never let the curl detach past the
+  // spine, but permit intersections beyond the free edge so corner curls can
+  // naturally collapse against that side.
+  const topCurl = {x: Math.max(0, rawTop), y: 0}
+  const bottomCurl = {x: Math.max(0, rawBottom), y: aspect}
+
+  let sideY = currentPoint.y
+  if (Math.abs(lineDirection.x) > 1e-8) {
+    sideY = currentPoint.y + lineDirection.y * (1 - currentPoint.x) / lineDirection.x
+  }
+  const sideIntersection = {x: 1, y: sideY}
+
+  const sourcePolygon: PaperCurlPoint[] = []
+  if (topCurl.x < 1) {
+    sourcePolygon.push(topCurl, {x: 1, y: 0})
+  } else {
+    sourcePolygon.push(sideIntersection, sideIntersection)
   }
 
-  const sy = clamp01(startY)
-  const cy = clamp01(currentY)
+  if (bottomCurl.x < 1) {
+    sourcePolygon.push({x: 1, y: aspect}, bottomCurl)
+  } else {
+    sourcePolygon.push(sideIntersection, sideIntersection)
+  }
 
-  // Canonical space always turns from the right edge toward the left. The
-  // virtual finger/fold point moves horizontally with progress while retaining
-  // the real vertical finger position.
-  const currentX = 1 - p
-  const anchorDeltaY = sy - cy
+  const reflected = sourcePolygon.map(point => reflectPoint(point, topCurl, bottomCurl))
+  const toPercentPoint = (point: PaperCurlPoint): PaperCurlPoint => ({
+    x: actualXPercent(point.x, direction),
+    y: point.y / aspect * 100,
+  })
 
-  // The fold line direction is the free-edge vector rotated by 90 degrees.
-  // Solving that line at y=0 and y=1 gives its intersections with the page.
-  const topCanonical = currentX + anchorDeltaY * cy / p
-  const bottomCanonical = currentX - anchorDeltaY * (1 - cy) / p
+  const seamTop = actualXPercent(topCurl.x, direction)
+  const seamBottom = actualXPercent(bottomCurl.x, direction)
 
-  const seamTop = actualPercent(topCanonical, direction)
-  const seamBottom = actualPercent(bottomCanonical, direction)
-
-  // Cast the paper shadow onto the newly revealed page, on the free-edge side
-  // of the fold. It grows around the middle of the turn and vanishes cleanly at
-  // both endpoints.
   const shadowWidth = Math.sin(p * Math.PI) * 8
   const shadowSign = direction < 0 ? 1 : -1
 
   return {
     seamTop,
     seamBottom,
-    shadowTop: Math.max(0, Math.min(100, seamTop + shadowSign * shadowWidth)),
-    shadowBottom: Math.max(0, Math.min(100, seamBottom + shadowSign * shadowWidth)),
+    shadowTop: seamTop + shadowSign * shadowWidth,
+    shadowBottom: seamBottom + shadowSign * shadowWidth,
+    backPolygon: reflected.map(toPercentPoint),
   }
 }
