@@ -13,7 +13,12 @@ export function pageCurlVariantForStart(startY: number, height: number): PageCur
   return 'middle'
 }
 
+/**
+ * Rotate a page around its spine while keeping the projected free edge aligned
+ * with the finger's horizontal travel: cos(theta) = 1 - progress.
+ */
 export function pageCurlRotation(progress: number, physicalDirection: number): number {
   const clamped = Math.max(0, Math.min(1, progress))
-  return clamped * 168 * Math.sign(physicalDirection || 1)
+  const degrees = Math.acos(1 - clamped) * 180 / Math.PI
+  return degrees * Math.sign(physicalDirection || 1)
 }
