@@ -12,7 +12,7 @@ import App from './App.vue'
 import actuator from './plugins/actuator.plugin'
 import httpPlugin from './plugins/http.plugin'
 import offlineLibrary from './plugins/offline-library.plugin'
-import offlineKomgaAdapter, {getOfflineSessionUser} from './plugins/offline-komga-adapter.plugin'
+import offlineKomgaAdapter, {getOfflineLibraries, getOfflineSessionUser} from './plugins/offline-komga-adapter.plugin'
 import komgaBooks from './plugins/komga-books.plugin'
 import komgaClaim from './plugins/komga-claim.plugin'
 import komgaCollections from './plugins/komga-collections.plugin'
@@ -153,13 +153,16 @@ if ('serviceWorker' in navigator) {
 async function bootstrap() {
   await Vue.prototype.$offline.whenReady()
 
-  // Komga normally keeps the current user only in Vuex memory. Restore the last
-  // successful identity/roles before Vue Router performs its initial auth guard,
-  // but only when the app is intentionally local-only or the network is absent.
-  if (!store.getters.authenticated &&
-    (Vue.prototype.$offline.state.offlineMode || !Vue.prototype.$offline.state.online)) {
-    const cachedUser = await getOfflineSessionUser()
-    if (cachedUser) store.commit('setMe', cachedUser)
+  // Komga normally keeps the current user and libraries only in Vuex memory.
+  // Restore the last successful local snapshot before Vue Router performs its
+  // initial auth/library guards when the server cannot intentionally be used.
+  if (Vue.prototype.$offline.state.offlineMode || !Vue.prototype.$offline.state.online) {
+    if (!store.getters.authenticated) {
+      const cachedUser = await getOfflineSessionUser()
+      if (cachedUser) store.commit('setMe', cachedUser)
+    }
+    const cachedLibraries = await getOfflineLibraries()
+    if (cachedLibraries.length > 0) store.commit('setLibraries', cachedLibraries)
   }
 
   new Vue({
