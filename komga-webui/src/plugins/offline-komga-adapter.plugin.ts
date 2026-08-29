@@ -1,9 +1,10 @@
 import _Vue from 'vue'
 import {BookDto, PageDto, ReadProgressUpdateDto} from '@/types/komga-books'
 import {BookSearch, SearchConditionSeriesId, SearchOperatorIs, SeriesSearch} from '@/types/komga-search'
-import {SeriesDto} from '@/types/komga-series'
+import {GroupCountDto, SeriesDto} from '@/types/komga-series'
 import {UserDto} from '@/types/komga-users'
 import {LibraryDto} from '@/types/komga-libraries'
+import {NameValue} from '@/types/filter'
 import {handleDates} from '@/plugins/http.plugin'
 import {OFFLINE_STORES, offlineDelete, offlineGet, offlinePut} from '@/services/offline-db'
 
@@ -18,6 +19,10 @@ interface CachedSetting<T> {
 function rehydrate<T>(value: T): T {
   handleDates(value)
   return value
+}
+
+function uniqueValues<T>(values: T[]): T[] {
+  return Array.from(new Set(values.filter(value => value !== undefined && value !== null && value !== '') as T[]))
 }
 
 export async function getOfflineSessionUser(): Promise<UserDto | undefined> {
@@ -37,10 +42,23 @@ export default {
     const series = Vue.prototype.$komgaSeries as any
     const users = Vue.prototype.$komgaUsers as any
     const libraries = Vue.prototype.$komgaLibraries as any
+    const referential = Vue.prototype.$komgaReferential as any
     if (!offline || !books || !series || books.__offlineAdapterInstalled) return
     books.__offlineAdapterInstalled = true
 
     const localOnly = () => offline.state.offlineMode || !offline.state.online
+
+    const cachedSeriesForLibraries = async (libraryIds?: string[]): Promise<SeriesDto[]> => {
+      const page = await offline.getCachedSeriesPage({}, {unpaged: true})
+      const items = page.content as SeriesDto[]
+      return libraryIds?.length ? items.filter(item => libraryIds.includes(item.libraryId)) : items
+    }
+
+    const cachedBooksForLibraries = async (libraryIds?: string[]): Promise<BookDto[]> => {
+      const page = await offline.getCachedBooksPage({}, {unpaged: true})
+      const items = page.content as BookDto[]
+      return libraryIds?.length ? items.filter(item => libraryIds.includes(item.libraryId)) : items
+    }
 
     if (users && !users.__offlineAdapterInstalled) {
       users.__offlineAdapterInstalled = true
@@ -248,6 +266,100 @@ export default {
         const cached = rehydrate(await offline.getCachedSeriesPage(search, pageRequest))
         if (cached.totalElements > 0) return cached
         throw e
+      }
+    }
+
+    const localAlphabeticalGroups = async (search: SeriesSearch): Promise<GroupCountDto[]> => {
+      const page = await offline.getCachedSeriesPage(search, {unpaged: true})
+      const groups = new Map<string, number>()
+      ;(page.content as SeriesDto[]).forEach(item => {
+        const title = `${item.metadata?.titleSort || item.metadata?.title || item.name || ''}`.trim().toLocaleLowerCase()
+        if (!title) return
+        const group = title.charAt(0)
+        groups.set(group, (groups.get(group) || 0) + 1)
+      })
+      return Array.from(groups.entries()).map(([group, count]) => ({group, count}))
+    }
+
+    const originalGetSeriesListByAlphabeticalGroups = series.getSeriesListByAlphabeticalGroups.bind(series)
+    series.getSeriesListByAlphabeticalGroups = async (search: SeriesSearch): Promise<GroupCountDto[]> => {
+      if (localOnly()) return localAlphabeticalGroups(search)
+      try {
+        return await originalGetSeriesListByAlphabeticalGroups(search)
+      } catch (e) {
+        const cached = await localAlphabeticalGroups(search)
+        if (cached.length > 0) return cached
+        throw e
+      }
+    }
+
+    if (referential && !referential.__offlineAdapterInstalled) {
+      referential.__offlineAdapterInstalled = true
+
+      const wrapStringList = (methodName: string, local: (...args: any[]) => Promise<string[]>) => {
+        const original = referential[methodName].bind(referential)
+        referential[methodName] = async (...args: any[]): Promise<string[]> => {
+          if (localOnly()) return local(...args)
+          try {
+            return await original(...args)
+          } catch (e) {
+            const cached = await local(...args)
+            if (cached.length > 0) return cached
+            throw e
+          }
+        }
+      }
+
+      wrapStringList('getGenres', async (libraryIds?: string[]) => {
+        const items = await cachedSeriesForLibraries(libraryIds)
+        return uniqueValues(items.flatMap(item => item.metadata?.genres || []))
+      })
+
+      wrapStringList('getSeriesAndBookTags', async (libraryIds?: string[]) => {
+        const [seriesItems, bookItems] = await Promise.all([
+          cachedSeriesForLibraries(libraryIds),
+          cachedBooksForLibraries(libraryIds),
+        ])
+        return uniqueValues([
+          ...seriesItems.flatMap(item => item.metadata?.tags || []),
+          ...bookItems.flatMap(item => item.metadata?.tags || []),
+        ])
+      })
+
+      wrapStringList('getPublishers', async (libraryIds?: string[]) => {
+        const items = await cachedSeriesForLibraries(libraryIds)
+        return uniqueValues(items.map(item => item.metadata?.publisher))
+      })
+
+      wrapStringList('getAgeRatings', async (libraryIds?: string[]) => {
+        const items = await cachedSeriesForLibraries(libraryIds)
+        return uniqueValues(items.map(item => item.metadata?.ageRating).filter(value => value !== undefined).map(value => `${value}`))
+      })
+
+      wrapStringList('getSeriesReleaseDates', async (libraryIds?: string[]) => {
+        const items = await cachedSeriesForLibraries(libraryIds)
+        return uniqueValues(items.map(item => item.booksMetadata?.releaseDate))
+      })
+
+      wrapStringList('getSharingLabels', async (libraryIds?: string[]) => {
+        const items = await cachedSeriesForLibraries(libraryIds)
+        return uniqueValues(items.flatMap(item => item.metadata?.sharingLabels || []))
+      })
+
+      const originalGetLanguages = referential.getLanguages.bind(referential)
+      const localLanguages = async (libraryIds?: string[]): Promise<NameValue[]> => {
+        const items = await cachedSeriesForLibraries(libraryIds)
+        return uniqueValues(items.map(item => item.metadata?.language)).map(code => ({name: code, value: code}))
+      }
+      referential.getLanguages = async (libraryIds?: string[], collectionId?: string): Promise<NameValue[]> => {
+        if (localOnly()) return localLanguages(libraryIds)
+        try {
+          return await originalGetLanguages(libraryIds, collectionId)
+        } catch (e) {
+          const cached = await localLanguages(libraryIds)
+          if (cached.length > 0) return cached
+          throw e
+        }
       }
     }
   },
