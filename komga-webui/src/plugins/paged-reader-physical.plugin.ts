@@ -303,6 +303,24 @@ export function installPhysicalPagedReader(): void {
       ? {...this.backContentStyle, filter: 'none'}
       : this.backContentStyle
 
+    // paper-back-content is spatially reflected across the live crease. That is
+    // correct for normal Paper Curl, where it represents the current page seen
+    // through the reverse of the same sheet. Physical Comic places a different,
+    // real page on that reverse face, so pre-mirror the artwork once. The crease
+    // reflection then cancels that mirror and leaves text/artwork readable while
+    // the page is turning, exactly as on a printed comic leaf.
+    const backArtwork = physical
+      ? h('div', {
+        staticClass: 'physical-comic-back-artwork',
+        style: {
+          position: 'absolute',
+          inset: '0',
+          transform: 'scaleX(-1)',
+          transformOrigin: 'center center',
+        },
+      }, [spread(reflectedSpread)])
+      : spread(reflectedSpread)
+
     return h('div', {
       staticClass: 'paper-sheet',
       attrs: {'aria-hidden': 'true'},
@@ -324,7 +342,7 @@ export function installPhysicalPagedReader(): void {
         h('div', {
           staticClass: 'paper-back-content',
           style: backContentStyle,
-        }, [spread(reflectedSpread)]),
+        }, [backArtwork]),
       ]),
       h('div', {staticClass: 'paper-shadow', style: this.shadowStyle}),
       h('div', {staticClass: 'paper-edge', style: this.edgeStyle}),
