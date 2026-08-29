@@ -81,6 +81,7 @@ i18n.mergeLocaleMessage('en', {
     download_failed: 'Download failed',
     save_offline: 'Save for offline reading',
     save_series_offline: 'Save entire series offline',
+    update_series_offline: 'Update offline series',
     download_series_remaining: 'Download remaining books ({downloaded}/{total})',
     downloading_series: 'Downloading series ({downloaded}/{total})',
     remove_series_downloads: 'Remove series offline copies',
