@@ -7,6 +7,13 @@
         </v-btn>
       </template>
       <v-list dense>
+        <template v-if="isPwa">
+          <v-list-item :to="{name: 'offline-downloads'}">
+            <v-list-item-icon><v-icon small>mdi-download-multiple</v-icon></v-list-item-icon>
+            <v-list-item-title>{{ $t('offline.manage_downloads') }}</v-list-item-title>
+          </v-list-item>
+          <v-divider/>
+        </template>
         <v-list-item @click="reorder">
           <v-list-item-title>{{ $t('common.reorder') }}</v-list-item-title>
         </v-list-item>
@@ -34,6 +41,7 @@
 <script lang="ts">
 import Vue from 'vue'
 import ConfirmationDialog from '@/components/dialogs/ConfirmationDialog.vue'
+import {isStandalonePwa} from '@/functions/pwa'
 
 export default Vue.extend({
   name: 'LibrariesActionsMenu',
@@ -44,6 +52,9 @@ export default Vue.extend({
     }
   },
   computed: {
+    isPwa(): boolean {
+      return isStandalonePwa()
+    },
     isAdmin(): boolean {
       return this.$store.getters.meAdmin
     },

@@ -22,37 +22,24 @@ const i18n = new VueI18n({
   messages: loadLocaleMessages(),
   pluralizationRules: {
     /**
-     * @param choice {number} a choice index given by the input to $tc: `$tc('path.to.rule', choiceIndex)`
+     * @param choice {number} a choice index given by the input to `$tc('path.to.rule', choiceIndex)`
      * @param choicesLength {number} an overall amount of choices
      * @returns a final choice index to select plural word by
      */
     'pl': function (choice, choicesLength) {
-      // brak stron
-      if (choice === 0) {
-        return 0
-      }
-
-      // 1 strona
-      if (choice === 1) {
-        return 1
-      }
+      if (choice === 0) return 0
+      if (choice === 1) return 1
 
       const betweenTwoAndFour = ((choice % 10) >= 2 && (choice % 10) <= 4)
       const lessThanTen = choice < 10
       const moreThanTwenty = choice > 20
-
-      // 2 strony, 3 strony, 4 strony, 22 strony ...
-      if (betweenTwoAndFour && (lessThanTen || moreThanTwenty)) {
-        return 2
-      }
-
-      // other cases, 5 stron, 67 stron, 259 stron and so on
+      if (betweenTwoAndFour && (lessThanTen || moreThanTwenty)) return 2
       return (choicesLength < 4) ? 2 : 3
     },
   },
 })
 
-// Fork-only reader settings use English fallback until they are moved into Weblate.
+// Fork-only features use English fallback until they are moved into Weblate.
 i18n.mergeLocaleMessage('en', {
   bookreader: {
     settings: {
@@ -74,6 +61,48 @@ i18n.mergeLocaleMessage('en', {
       webtoon_smooth_scroll: 'Smooth page scrolling',
       webtoon_page_navigation: 'Tap page navigation',
     },
+  },
+  offline: {
+    downloads: 'Downloads',
+    downloads_subtitle: 'Books stored locally on this device',
+    offline_mode: 'Offline mode',
+    offline_mode_description: 'Offline mode blocks Komga API and page streaming. Only locally cached metadata and downloaded pages are used.',
+    offline_launch_ready: 'Offline launch ready',
+    offline_launch_ready_description: 'The active service worker has a cached Komga application shell. The installed app should be able to cold-start without a connection.',
+    offline_launch_not_ready: 'Offline launch is not ready yet',
+    offline_launch_not_ready_description: 'Komga does not yet have a verified cached application shell for this installed app. Keep the server reachable and prepare it before testing a cold offline launch.',
+    prepare_offline_launch: 'Prepare offline launch',
+    offline_worker_details: 'Worker: {version} · controlled page: {controlled}',
+    storage: 'Offline storage',
+    storage_unavailable: 'Storage estimate unavailable',
+    storage_used: '{usage} used by Komga',
+    browser_quota: 'Browser quota: {quota}',
+    browser_headroom: 'reported origin headroom: {available}',
+    device_storage_warning: 'Browser quota is not the same as free device storage. Web apps cannot read the phone’s actual remaining storage, so downloads can run out of space before this quota is reached.',
+    browser_quota_insufficient: 'Not enough browser storage quota for this download. Estimated need: {required}; reported headroom: {available}.',
+    device_storage_full: 'Offline download stopped because browser or device storage is full. Free device storage or remove offline books, then retry.',
+    catalog_cached: '{books} books and {series} series cached locally',
+    downloading: 'Downloading',
+    updating: 'Updating offline copy',
+    old_copy_kept: 'current copy stays readable until complete',
+    available_offline: 'Available offline',
+    update_available: 'Update available',
+    update_copy: 'Update',
+    source_missing: 'No longer on server',
+    update_failed_kept: 'Update failed; existing offline copy was kept',
+    download_failed: 'Download failed',
+    save_offline: 'Save for offline reading',
+    save_series_offline: 'Save entire series offline',
+    update_series_offline: 'Update offline series',
+    download_series_remaining: 'Download remaining books ({downloaded}/{total})',
+    downloading_series: 'Downloading series ({downloaded}/{total})',
+    remove_series_downloads: 'Remove series offline copies',
+    retry_download: 'Retry offline download',
+    remove_download: 'Remove offline copy',
+    manage_downloads: 'Manage downloads',
+    no_downloads: 'No offline books yet',
+    no_downloads_description: 'Use a book or series action menu to save titles for offline reading.',
+    unavailable_offline: 'This book is not downloaded on this device.',
   },
 })
 

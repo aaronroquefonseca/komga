@@ -85,6 +85,15 @@
             </v-list-item-action>
           </v-list-item>
 
+          <v-list-item v-if="isPwa" :to="{name: 'offline-downloads'}">
+            <v-list-item-icon>
+              <v-icon>mdi-download-box-multiple</v-icon>
+            </v-list-item-icon>
+            <v-list-item-content>
+              <v-list-item-title>{{ $t('offline.downloads') }}</v-list-item-title>
+            </v-list-item-content>
+          </v-list-item>
+
           <!--   PINNED LIBRARIES     -->
           <v-list-item v-for="(l, index) in librariesPinned"
                        :key="index"
@@ -393,6 +402,7 @@ import {BookSearch, SearchConditionAnyOfBook, SearchConditionMediaStatus, Search
 import LibrariesActionsMenu from '@/components/menus/LibrariesActionsMenu.vue'
 import ReorderLibraries from '@/components/ReorderLibraries.vue'
 import urls from '@/functions/urls'
+import {isStandalonePwa} from '@/functions/pwa'
 
 export default Vue.extend({
   name: 'HomeView',
@@ -460,6 +470,9 @@ export default Vue.extend({
     },
     isAdmin(): boolean {
       return this.$store.getters.meAdmin
+    },
+    isPwa(): boolean {
+      return isStandalonePwa()
     },
     themes(): object[] {
       return [

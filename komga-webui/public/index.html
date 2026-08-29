@@ -19,6 +19,26 @@
         window.resourceBaseUrl = /*[(<%="$"%>{"'" + baseUrl + "'"})]*/ '/'
         /*]]>*/
     </script>
+    <script>
+        // Register before the application bundles execute. This is intentionally
+        // independent from Vue bootstrap so an installed PWA can acquire an
+        // active worker even if a later API/bootstrap request fails.
+        (function () {
+            if (!('serviceWorker' in navigator)) return
+            var base = window.resourceBaseUrl || '/'
+            if (base.charAt(base.length - 1) !== '/') base += '/'
+            var workerUrl = new URL('service-worker.js', window.location.origin + base).href
+            window.__komgaServiceWorkerRegistration = navigator.serviceWorker.register(workerUrl, {scope: base})
+                .then(function (registration) {
+                    // Explicitly check for updated worker code whenever Komga is
+                    // opened online; installed PWAs otherwise may retain an old
+                    // worker longer than expected.
+                    registration.update().catch(function () {})
+                    return registration
+                })
+                .catch(function () { return undefined })
+        })()
+    </script>
 </head>
 <body>
 <noscript>
