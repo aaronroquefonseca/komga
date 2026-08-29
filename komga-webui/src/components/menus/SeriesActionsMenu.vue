@@ -15,12 +15,15 @@
             </v-list-item-title>
           </v-list-item>
           <v-list-item
-            v-else-if="!seriesAllDownloaded"
+            v-else-if="!seriesAllDownloaded || seriesNeedsUpdate"
             :disabled="!$offline.state.online || $offline.state.offlineMode"
             @click="downloadSeries"
           >
-            <v-list-item-icon><v-icon small>mdi-download-multiple</v-icon></v-list-item-icon>
-            <v-list-item-title v-if="downloadedBookCount === 0">
+            <v-list-item-icon><v-icon small>{{ seriesNeedsUpdate ? 'mdi-update' : 'mdi-download-multiple' }}</v-icon></v-list-item-icon>
+            <v-list-item-title v-if="seriesAllDownloaded && seriesNeedsUpdate">
+              {{ $t('offline.update_series_offline') }}
+            </v-list-item-title>
+            <v-list-item-title v-else-if="downloadedBookCount === 0">
               {{ $t('offline.save_series_offline') }}
             </v-list-item-title>
             <v-list-item-title v-else>
@@ -110,6 +113,10 @@ export default Vue.extend({
     },
     seriesAllDownloaded(): boolean {
       return this.series.booksCount > 0 && this.downloadedBookCount >= this.series.booksCount
+    },
+    seriesNeedsUpdate(): boolean {
+      return this.$offline.state.downloads
+        .some(record => record.book?.seriesId === this.series.id && record.updateAvailable === true && !record.sourceMissing)
     },
   },
   methods: {
