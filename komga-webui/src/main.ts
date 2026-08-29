@@ -183,6 +183,7 @@ declare module 'vue/types/vue' {
     $_: LoDashStatic;
     $eventHub: Vue;
   }
+}
 
 declare global {
   interface Window {
