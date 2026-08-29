@@ -102,6 +102,33 @@ router.addRoute('home', {
   component: OfflineDownloads,
 })
 
+router.beforeEach(async (to, from, next) => {
+  await Vue.prototype.$offline.whenReady()
+  if (to.name === 'read-book' &&
+    (Vue.prototype.$offline.state.offlineMode || !Vue.prototype.$offline.state.online) &&
+    !Vue.prototype.$offline.isDownloaded(to.params.bookId)) {
+    next({name: 'offline-downloads'})
+    return
+  }
+  next()
+})
+
+let catalogSyncScheduled = false
+const syncOfflineState = () => {
+  if (!store.getters.authenticated || catalogSyncScheduled) return
+  catalogSyncScheduled = true
+  Vue.prototype.$offline.flushProgressQueue()
+    .then(() => Vue.prototype.$offline.syncCatalogMetadata())
+    .catch(() => undefined)
+    .finally(() => { catalogSyncScheduled = false })
+}
+
+router.afterEach(() => syncOfflineState())
+window.addEventListener('focus', syncOfflineState)
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'visible') syncOfflineState()
+})
+
 if ('serviceWorker' in navigator) {
   window.addEventListener('load', () => {
     navigator.serviceWorker.register(`${urls.base}service-worker.js`, {scope: urls.base})
