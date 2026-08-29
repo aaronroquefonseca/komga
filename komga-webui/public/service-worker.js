@@ -1,6 +1,6 @@
 /* global self, caches, indexedDB, Response, Request, URL */
 
-const SHELL_CACHE = 'komga-shell-v2'
+const SHELL_CACHE = 'komga-shell-v3'
 const SHELL_CACHE_PREFIX = 'komga-shell-'
 const OFFLINE_SHELL_PATH = '__komga_offline_shell__'
 const LEGACY_MEDIA_CACHE = 'komga-offline-media-v1'
@@ -149,15 +149,23 @@ async function prepareOfflineShell(pageUrl, assets) {
   return shellReady
 }
 
+async function offlineStatus() {
+  const cache = await caches.open(SHELL_CACHE)
+  return {
+    version: SHELL_CACHE,
+    scope: self.registration.scope,
+    shellReady: !!(await cache.match(offlineShellUrl())),
+  }
+}
+
 self.addEventListener('install', event => {
   event.waitUntil((async () => {
-    // This remains a best-effort first attempt. Once the already-loaded app can
-    // talk to this worker it sends KOMGA_PREPARE_OFFLINE_SHELL, which performs a
-    // verified authenticated shell+asset cache pass.
+    // The worker itself attempts to cache the SPA shell before activation. The
+    // already-loaded page performs a second pass with every discovered asset.
     try {
       await prepareOfflineShell(scopeRootUrl(), [])
     } catch (_) {
-      // The page-side preparation pass will retry once Komga has loaded online.
+      // Page-side preparation will retry after Komga has loaded online.
     }
     await self.skipWaiting()
   })())
@@ -165,8 +173,6 @@ self.addEventListener('install', event => {
 
 self.addEventListener('activate', event => {
   event.waitUntil((async () => {
-    // Per-book caches are versioned snapshots and must not be deleted here.
-    // Delete only superseded application-shell caches and the pre-v2 media cache.
     const names = await caches.keys()
     await Promise.all(names
       .filter(name => name.startsWith(SHELL_CACHE_PREFIX) && name !== SHELL_CACHE)
@@ -189,6 +195,8 @@ self.addEventListener('message', event => {
     event.waitUntil(prepareOfflineShell(event.data.pageUrl, event.data.assets))
   } else if (event.data.type === 'KOMGA_CACHE_ASSETS') {
     event.waitUntil(cacheShellAssets(event.data.assets))
+  } else if (event.data.type === 'KOMGA_OFFLINE_STATUS' && event.ports && event.ports[0]) {
+    event.waitUntil(offlineStatus().then(status => event.ports[0].postMessage(status)))
   }
 })
 
@@ -260,8 +268,8 @@ self.addEventListener('fetch', event => {
         }
         return response
       } catch (_) {
-        // Every Vue route uses the same HTML entry point. The canonical shell is
-        // therefore the most reliable fallback for PWA cold starts and deep links.
+        // Every Vue route uses the same HTML entry point. Always prefer the
+        // canonical shell for cold starts/deep links, then exact/root fallbacks.
         return (await cache.match(offlineShellUrl())) ||
           (await cache.match(request)) ||
           (await cache.match(scopeRootUrl())) ||
@@ -274,8 +282,6 @@ self.addEventListener('fetch', event => {
     return
   }
 
-  // Cache application JS/CSS/fonts/icons as they are used. Explicit shell
-  // preparation also caches assets that loaded before this worker took control.
   event.respondWith((async () => {
     const cache = await caches.open(SHELL_CACHE)
     const cached = await cache.match(request)
