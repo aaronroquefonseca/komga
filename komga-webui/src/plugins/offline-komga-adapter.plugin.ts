@@ -2,11 +2,25 @@ import _Vue from 'vue'
 import {BookDto, PageDto, ReadProgressUpdateDto} from '@/types/komga-books'
 import {BookSearch, SearchConditionSeriesId, SearchOperatorIs, SeriesSearch} from '@/types/komga-search'
 import {SeriesDto} from '@/types/komga-series'
+import {UserDto} from '@/types/komga-users'
 import {handleDates} from '@/plugins/http.plugin'
+import {OFFLINE_STORES, offlineDelete, offlineGet, offlinePut} from '@/services/offline-db'
+
+export const OFFLINE_SESSION_KEY = 'sessionUser'
+
+interface CachedSession {
+  key: string
+  value: UserDto
+}
 
 function rehydrate<T>(value: T): T {
   handleDates(value)
   return value
+}
+
+export async function getOfflineSessionUser(): Promise<UserDto | undefined> {
+  const cached = await offlineGet<CachedSession>(OFFLINE_STORES.settings, OFFLINE_SESSION_KEY)
+  return cached?.value ? rehydrate(cached.value) : undefined
 }
 
 export default {
@@ -14,10 +28,49 @@ export default {
     const offline = Vue.prototype.$offline
     const books = Vue.prototype.$komgaBooks as any
     const series = Vue.prototype.$komgaSeries as any
+    const users = Vue.prototype.$komgaUsers as any
     if (!offline || !books || !series || books.__offlineAdapterInstalled) return
     books.__offlineAdapterInstalled = true
 
     const localOnly = () => offline.state.offlineMode || !offline.state.online
+
+    if (users && !users.__offlineAdapterInstalled) {
+      users.__offlineAdapterInstalled = true
+      const originalGetMe = users.getMe.bind(users)
+      const originalGetMeWithAuth = users.getMeWithAuth.bind(users)
+      const originalLogout = users.logout.bind(users)
+
+      users.getMe = async (): Promise<UserDto> => {
+        if (localOnly()) {
+          const cached = await getOfflineSessionUser()
+          if (cached) return cached
+          throw new Error('No authenticated Komga session has been cached for offline use')
+        }
+        try {
+          const user = await originalGetMe()
+          await offlinePut(OFFLINE_STORES.settings, {key: OFFLINE_SESSION_KEY, value: user} as CachedSession)
+          return user
+        } catch (e) {
+          const cached = await getOfflineSessionUser()
+          if (cached) return cached
+          throw e
+        }
+      }
+
+      users.getMeWithAuth = async (login: string, password: string, rememberMe: boolean): Promise<UserDto> => {
+        const user = await originalGetMeWithAuth(login, password, rememberMe)
+        await offlinePut(OFFLINE_STORES.settings, {key: OFFLINE_SESSION_KEY, value: user} as CachedSession)
+        return user
+      }
+
+      users.logout = async (): Promise<void> => {
+        try {
+          await originalLogout()
+        } finally {
+          await offlineDelete(OFFLINE_STORES.settings, OFFLINE_SESSION_KEY)
+        }
+      }
+    }
 
     const originalGetBook = books.getBook.bind(books)
     books.getBook = async (bookId: string): Promise<BookDto> => {
