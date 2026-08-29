@@ -146,7 +146,7 @@ if ('serviceWorker' in navigator) {
     navigator.serviceWorker.register(`${urls.base}service-worker.js`, {scope: urls.base})
       .then(() => Vue.prototype.$offline.whenReady())
       .then(() => Vue.prototype.$offline.setOfflineMode(Vue.prototype.$offline.state.offlineMode))
-      .catch(error => console.warn('Komga offline service worker registration failed', error))
+      .catch(error => Vue.prototype.$warn('Komga offline service worker registration failed', error))
   })
 }
 
@@ -175,7 +175,7 @@ async function bootstrap() {
 }
 
 bootstrap().catch(error => {
-  console.error('Komga bootstrap failed', error)
+  Vue.prototype.$err('Komga bootstrap failed', error)
 })
 
 declare module 'vue/types/vue' {
