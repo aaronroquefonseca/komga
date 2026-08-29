@@ -15,10 +15,14 @@
           <v-list-item-icon><v-icon small>mdi-download-box-outline</v-icon></v-list-item-icon>
           <v-list-item-title>{{ $t('offline.save_offline') }}</v-list-item-title>
         </v-list-item>
-        <v-list-item v-else-if="downloadRecord && downloadRecord.status === 'downloading'" disabled>
+        <v-list-item
+          v-else-if="downloadRecord && (downloadRecord.status === 'downloading' || downloadRecord.status === 'updating')"
+          disabled
+        >
           <v-list-item-icon><v-icon small>mdi-download</v-icon></v-list-item-icon>
           <v-list-item-title>
-            {{ $t('offline.downloading') }} {{ downloadRecord.completedPages }} / {{ downloadRecord.totalPages }}
+            {{ $t(downloadRecord.status === 'updating' ? 'offline.updating' : 'offline.downloading') }}
+            {{ downloadRecord.completedPages }} / {{ downloadRecord.totalPages }}
           </v-list-item-title>
         </v-list-item>
         <v-list-item
@@ -29,10 +33,20 @@
           <v-list-item-icon><v-icon small>mdi-refresh</v-icon></v-list-item-icon>
           <v-list-item-title>{{ $t('offline.retry_download') }}</v-list-item-title>
         </v-list-item>
-        <v-list-item v-else-if="downloadRecord && downloadRecord.status === 'downloaded'" @click="removeOffline">
-          <v-list-item-icon><v-icon small>mdi-download-box</v-icon></v-list-item-icon>
-          <v-list-item-title>{{ $t('offline.remove_download') }}</v-list-item-title>
-        </v-list-item>
+        <template v-else-if="downloadRecord && downloadRecord.status === 'downloaded'">
+          <v-list-item
+            v-if="downloadRecord.updateAvailable && !downloadRecord.sourceMissing"
+            :disabled="!$offline.state.online || $offline.state.offlineMode"
+            @click="downloadOffline"
+          >
+            <v-list-item-icon><v-icon small>mdi-update</v-icon></v-list-item-icon>
+            <v-list-item-title>{{ $t('offline.update_copy') }}</v-list-item-title>
+          </v-list-item>
+          <v-list-item @click="removeOffline">
+            <v-list-item-icon><v-icon small>mdi-download-box</v-icon></v-list-item-icon>
+            <v-list-item-title>{{ $t('offline.remove_download') }}</v-list-item-title>
+          </v-list-item>
+        </template>
         <v-list-item :to="{name: 'offline-downloads'}">
           <v-list-item-icon><v-icon small>mdi-download-multiple</v-icon></v-list-item-icon>
           <v-list-item-title>{{ $t('offline.manage_downloads') }}</v-list-item-title>
@@ -70,11 +84,9 @@ import {OfflineDownloadRecord} from '@/services/offline-library.service'
 
 export default Vue.extend({
   name: 'BookActionsMenu',
-  data: () => {
-    return {
-      menuState: false,
-    }
-  },
+  data: () => ({
+    menuState: false,
+  }),
   props: {
     book: {
       type: Object as () => BookDto,
@@ -86,53 +98,53 @@ export default Vue.extend({
     },
   },
   watch: {
-    menuState (val) {
+    menuState(val) {
       this.$emit('update:menu', val)
     },
   },
   computed: {
-    isAdmin (): boolean {
+    isAdmin(): boolean {
       return this.$store.getters.meAdmin
     },
-    isRead (): boolean {
+    isRead(): boolean {
       return getReadProgress(this.book) === ReadStatus.READ
     },
-    isUnread (): boolean {
+    isUnread(): boolean {
       return getReadProgress(this.book) === ReadStatus.UNREAD
     },
-    canOfflineDownload (): boolean {
+    canOfflineDownload(): boolean {
       return this.book.media?.status === MediaStatus.READY && this.$store.getters.mePageStreaming
     },
-    downloadRecord (): OfflineDownloadRecord | undefined {
+    downloadRecord(): OfflineDownloadRecord | undefined {
       return this.$offline.getDownload(this.book.id)
     },
   },
   methods: {
-    analyze () {
+    analyze() {
       this.$komgaBooks.analyzeBook(this.book)
     },
-    refreshMetadata () {
+    refreshMetadata() {
       this.$komgaBooks.refreshMetadata(this.book)
     },
-    addToReadList () {
+    addToReadList() {
       this.$store.dispatch('dialogAddBooksToReadList', [this.book.id])
     },
-    async markRead () {
-      const readProgress = { completed: true } as ReadProgressUpdateDto
+    async markRead() {
+      const readProgress = {completed: true} as ReadProgressUpdateDto
       await this.$komgaBooks.updateReadProgress(this.book.id, readProgress)
     },
-    async markUnread () {
+    async markUnread() {
       await this.$komgaBooks.deleteReadProgress(this.book.id)
     },
-    async downloadOffline () {
+    async downloadOffline() {
       this.menuState = false
       await this.$offline.downloadBook(this.book.id)
     },
-    async removeOffline () {
+    async removeOffline() {
       this.menuState = false
       await this.$offline.removeDownload(this.book.id)
     },
-    promptDeleteBook () {
+    promptDeleteBook() {
       this.$store.dispatch('dialogDeleteBook', this.book)
     },
   },
