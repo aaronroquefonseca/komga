@@ -41,9 +41,23 @@
           height="8"
           rounded
         />
-        <div class="text-caption text--secondary mt-2">
+        <div v-if="storage.quota > 0" class="text-caption text--secondary mt-2">
+          {{ $t('offline.browser_quota', {quota: formatBytes(storage.quota)}) }}
+          ·
+          {{ $t('offline.browser_headroom', {available: formatBytes(storageHeadroom)}) }}
+        </div>
+        <div class="text-caption text--secondary mt-1">
           {{ $t('offline.catalog_cached', {books: $offline.state.cachedBooks, series: $offline.state.cachedSeries}) }}
         </div>
+        <v-alert
+          v-if="storage.quota > 0"
+          type="warning"
+          text
+          dense
+          class="mt-3 mb-0 text-caption"
+        >
+          {{ $t('offline.device_storage_warning') }}
+        </v-alert>
       </v-card-text>
     </v-card>
 
@@ -208,9 +222,12 @@ export default Vue.extend({
       if (!this.storage.quota) return 0
       return Math.min(100, this.storage.usage / this.storage.quota * 100)
     },
+    storageHeadroom(): number {
+      return Math.max(0, this.storage.quota - this.storage.usage)
+    },
     storageText(): string {
       if (!this.storage.quota) return this.$t('offline.storage_unavailable').toString()
-      return `${this.formatBytes(this.storage.usage)} / ${this.formatBytes(this.storage.quota)}`
+      return this.$t('offline.storage_used', {usage: this.formatBytes(this.storage.usage)}).toString()
     },
   },
   async created() {
