@@ -3,14 +3,16 @@ import {BookDto, PageDto, ReadProgressUpdateDto} from '@/types/komga-books'
 import {BookSearch, SearchConditionSeriesId, SearchOperatorIs, SeriesSearch} from '@/types/komga-search'
 import {SeriesDto} from '@/types/komga-series'
 import {UserDto} from '@/types/komga-users'
+import {LibraryDto} from '@/types/komga-libraries'
 import {handleDates} from '@/plugins/http.plugin'
 import {OFFLINE_STORES, offlineDelete, offlineGet, offlinePut} from '@/services/offline-db'
 
 export const OFFLINE_SESSION_KEY = 'sessionUser'
+export const OFFLINE_LIBRARIES_KEY = 'libraries'
 
-interface CachedSession {
+interface CachedSetting<T> {
   key: string
-  value: UserDto
+  value: T
 }
 
 function rehydrate<T>(value: T): T {
@@ -19,8 +21,13 @@ function rehydrate<T>(value: T): T {
 }
 
 export async function getOfflineSessionUser(): Promise<UserDto | undefined> {
-  const cached = await offlineGet<CachedSession>(OFFLINE_STORES.settings, OFFLINE_SESSION_KEY)
+  const cached = await offlineGet<CachedSetting<UserDto>>(OFFLINE_STORES.settings, OFFLINE_SESSION_KEY)
   return cached?.value ? rehydrate(cached.value) : undefined
+}
+
+export async function getOfflineLibraries(): Promise<LibraryDto[]> {
+  const cached = await offlineGet<CachedSetting<LibraryDto[]>>(OFFLINE_STORES.settings, OFFLINE_LIBRARIES_KEY)
+  return cached?.value ? rehydrate(cached.value) : []
 }
 
 export default {
@@ -29,6 +36,7 @@ export default {
     const books = Vue.prototype.$komgaBooks as any
     const series = Vue.prototype.$komgaSeries as any
     const users = Vue.prototype.$komgaUsers as any
+    const libraries = Vue.prototype.$komgaLibraries as any
     if (!offline || !books || !series || books.__offlineAdapterInstalled) return
     books.__offlineAdapterInstalled = true
 
@@ -48,7 +56,7 @@ export default {
         }
         try {
           const user = await originalGetMe()
-          await offlinePut(OFFLINE_STORES.settings, {key: OFFLINE_SESSION_KEY, value: user} as CachedSession)
+          await offlinePut(OFFLINE_STORES.settings, {key: OFFLINE_SESSION_KEY, value: user} as CachedSetting<UserDto>)
           return user
         } catch (e) {
           const cached = await getOfflineSessionUser()
@@ -59,7 +67,7 @@ export default {
 
       users.getMeWithAuth = async (login: string, password: string, rememberMe: boolean): Promise<UserDto> => {
         const user = await originalGetMeWithAuth(login, password, rememberMe)
-        await offlinePut(OFFLINE_STORES.settings, {key: OFFLINE_SESSION_KEY, value: user} as CachedSession)
+        await offlinePut(OFFLINE_STORES.settings, {key: OFFLINE_SESSION_KEY, value: user} as CachedSetting<UserDto>)
         return user
       }
 
@@ -68,6 +76,40 @@ export default {
           await originalLogout()
         } finally {
           await offlineDelete(OFFLINE_STORES.settings, OFFLINE_SESSION_KEY)
+        }
+      }
+    }
+
+    if (libraries && !libraries.__offlineAdapterInstalled) {
+      libraries.__offlineAdapterInstalled = true
+      const originalGetLibraries = libraries.getLibraries.bind(libraries)
+      const originalGetLibrary = libraries.getLibrary.bind(libraries)
+
+      libraries.getLibraries = async (): Promise<LibraryDto[]> => {
+        if (localOnly()) return getOfflineLibraries()
+        try {
+          const items = await originalGetLibraries()
+          await offlinePut(OFFLINE_STORES.settings, {key: OFFLINE_LIBRARIES_KEY, value: items} as CachedSetting<LibraryDto[]>)
+          return items
+        } catch (e) {
+          const cached = await getOfflineLibraries()
+          if (cached.length > 0) return cached
+          throw e
+        }
+      }
+
+      libraries.getLibrary = async (libraryId: string): Promise<LibraryDto> => {
+        if (localOnly()) {
+          const item = (await getOfflineLibraries()).find(x => x.id === libraryId)
+          if (item) return item
+          throw new Error('Library is not available in the offline catalog')
+        }
+        try {
+          return await originalGetLibrary(libraryId)
+        } catch (e) {
+          const item = (await getOfflineLibraries()).find(x => x.id === libraryId)
+          if (item) return item
+          throw e
         }
       }
     }
