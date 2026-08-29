@@ -21,8 +21,8 @@ function rehydrate<T>(value: T): T {
   return value
 }
 
-function uniqueValues<T>(values: T[]): T[] {
-  return Array.from(new Set(values.filter(value => value !== undefined && value !== null && value !== '') as T[]))
+function uniqueStrings(values: Array<string | undefined | null>): string[] {
+  return Array.from(new Set(values.filter((value): value is string => !!value)))
 }
 
 export async function getOfflineSessionUser(): Promise<UserDto | undefined> {
@@ -293,6 +293,17 @@ export default {
       }
     }
 
+    const originalGetCollections = series.getCollections.bind(series)
+    series.getCollections = async (seriesId: string): Promise<any[]> => {
+      if (localOnly()) return []
+      try {
+        return await originalGetCollections(seriesId)
+      } catch (e) {
+        if (!offline.state.online) return []
+        throw e
+      }
+    }
+
     if (referential && !referential.__offlineAdapterInstalled) {
       referential.__offlineAdapterInstalled = true
 
@@ -312,7 +323,7 @@ export default {
 
       wrapStringList('getGenres', async (libraryIds?: string[]) => {
         const items = await cachedSeriesForLibraries(libraryIds)
-        return uniqueValues(items.flatMap(item => item.metadata?.genres || []))
+        return uniqueStrings(items.flatMap(item => item.metadata?.genres || []))
       })
 
       wrapStringList('getSeriesAndBookTags', async (libraryIds?: string[]) => {
@@ -320,7 +331,7 @@ export default {
           cachedSeriesForLibraries(libraryIds),
           cachedBooksForLibraries(libraryIds),
         ])
-        return uniqueValues([
+        return uniqueStrings([
           ...seriesItems.flatMap(item => item.metadata?.tags || []),
           ...bookItems.flatMap(item => item.metadata?.tags || []),
         ])
@@ -328,28 +339,45 @@ export default {
 
       wrapStringList('getPublishers', async (libraryIds?: string[]) => {
         const items = await cachedSeriesForLibraries(libraryIds)
-        return uniqueValues(items.map(item => item.metadata?.publisher))
+        return uniqueStrings(items.map(item => item.metadata?.publisher))
       })
 
       wrapStringList('getAgeRatings', async (libraryIds?: string[]) => {
         const items = await cachedSeriesForLibraries(libraryIds)
-        return uniqueValues(items.map(item => item.metadata?.ageRating).filter(value => value !== undefined).map(value => `${value}`))
+        return uniqueStrings(items.map(item => item.metadata?.ageRating === undefined ? undefined : `${item.metadata.ageRating}`))
       })
 
       wrapStringList('getSeriesReleaseDates', async (libraryIds?: string[]) => {
         const items = await cachedSeriesForLibraries(libraryIds)
-        return uniqueValues(items.map(item => item.booksMetadata?.releaseDate))
+        return uniqueStrings(items.map(item => item.booksMetadata?.releaseDate))
       })
 
       wrapStringList('getSharingLabels', async (libraryIds?: string[]) => {
         const items = await cachedSeriesForLibraries(libraryIds)
-        return uniqueValues(items.flatMap(item => item.metadata?.sharingLabels || []))
+        return uniqueStrings(items.flatMap(item => item.metadata?.sharingLabels || []))
       })
+
+      const originalGetBookTags = referential.getBookTags.bind(referential)
+      const localBookTags = async (seriesId?: string, _readListId?: string, libraryIds?: string[]): Promise<string[]> => {
+        let items = await cachedBooksForLibraries(libraryIds)
+        if (seriesId) items = items.filter(item => item.seriesId === seriesId)
+        return uniqueStrings(items.flatMap(item => item.metadata?.tags || []))
+      }
+      referential.getBookTags = async (seriesId?: string, readListId?: string, libraryIds?: string[]): Promise<string[]> => {
+        if (localOnly()) return localBookTags(seriesId, readListId, libraryIds)
+        try {
+          return await originalGetBookTags(seriesId, readListId, libraryIds)
+        } catch (e) {
+          const cached = await localBookTags(seriesId, readListId, libraryIds)
+          if (cached.length > 0) return cached
+          throw e
+        }
+      }
 
       const originalGetLanguages = referential.getLanguages.bind(referential)
       const localLanguages = async (libraryIds?: string[]): Promise<NameValue[]> => {
         const items = await cachedSeriesForLibraries(libraryIds)
-        return uniqueValues(items.map(item => item.metadata?.language)).map(code => ({name: code, value: code}))
+        return uniqueStrings(items.map(item => item.metadata?.language)).map(code => ({name: code, value: code}))
       }
       referential.getLanguages = async (libraryIds?: string[], collectionId?: string): Promise<NameValue[]> => {
         if (localOnly()) return localLanguages(libraryIds)
