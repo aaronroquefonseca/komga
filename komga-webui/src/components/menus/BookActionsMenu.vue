@@ -138,6 +138,9 @@ export default Vue.extend({
     },
     async downloadOffline() {
       this.menuState = false
+      // Force Vue CLI's lazy reader chunk (and its CSS/dependencies) through the
+      // active service worker before the device can lose connectivity.
+      await import(/* webpackChunkName: "read-book" */ '@/views/DivinaReader.vue')
       await this.$offline.downloadBook(this.book.id)
     },
     async removeOffline() {
