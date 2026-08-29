@@ -11,6 +11,8 @@ import {sync} from 'vuex-router-sync'
 import App from './App.vue'
 import actuator from './plugins/actuator.plugin'
 import httpPlugin from './plugins/http.plugin'
+import offlineLibrary from './plugins/offline-library.plugin'
+import offlineKomgaAdapter from './plugins/offline-komga-adapter.plugin'
 import komgaBooks from './plugins/komga-books.plugin'
 import komgaClaim from './plugins/komga-claim.plugin'
 import komgaCollections from './plugins/komga-collections.plugin'
@@ -42,6 +44,7 @@ import './assets/paged-reader-compositor.css'
 import router from './router'
 import store from './store'
 import i18n from './i18n'
+import urls from './functions/urls'
 
 Vue.prototype.$_ = _
 Vue.prototype.$eventHub = new Vue()
@@ -50,9 +53,7 @@ Chartkick.options = {
   colors: [
     '#7eb0d5', '#fd7f6f', '#b2e061', '#ffb55a',
     '#8bd3c7', '#ffee65', '#bd7ebe', '#fdcce5',
-    '#beb9db', '#ea5545', '#f46a9b', '#ef9b20',
-    '#edbf33', '#ede15b', '#bdcf32', '#87bc45',
-    '#27aeef', '#b33dc6',
+    '#beb9db', '#ea5545', '#f46a9b', '#ef9b20', '#edbf33', '#ede15b', '#bdcf32', '#87bc45', '#27aeef', '#b33dc6',
   ],
 }
 
@@ -62,6 +63,7 @@ Vue.use(Chartkick.use(Chart))
 
 Vue.use(httpPlugin)
 Vue.use(logger)
+Vue.use(offlineLibrary, {http: Vue.prototype.$http})
 Vue.use(komgaSettings, {store: store, http: Vue.prototype.$http})
 Vue.use(komgaFileSystem, {http: Vue.prototype.$http})
 Vue.use(komgaSeries, {http: Vue.prototype.$http})
@@ -85,12 +87,22 @@ Vue.use(komgaHistory, {http: Vue.prototype.$http})
 Vue.use(komgaAnnouncements, {http: Vue.prototype.$http})
 Vue.use(komgaReleases, {http: Vue.prototype.$http})
 Vue.use(komgaFonts, {http: Vue.prototype.$http})
+Vue.use(offlineKomgaAdapter)
 
 Vue.config.productionTip = false
 
 installPhysicalPagedReader()
 installPhysicalPagedReaderSettlementGuard()
 sync(store, router)
+
+if ('serviceWorker' in navigator) {
+  window.addEventListener('load', () => {
+    navigator.serviceWorker.register(`${urls.base}service-worker.js`, {scope: urls.base})
+      .then(() => Vue.prototype.$offline.whenReady())
+      .then(() => Vue.prototype.$offline.setOfflineMode(Vue.prototype.$offline.state.offlineMode))
+      .catch(error => console.warn('Komga offline service worker registration failed', error))
+  })
+}
 
 new Vue({
   router,
