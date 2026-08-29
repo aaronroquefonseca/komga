@@ -322,6 +322,19 @@ export default Vue.extend({
         worker.postMessage({type: 'KOMGA_OFFLINE_STATUS'}, [channel.port2])
       })
     },
+    waitForServiceWorkerReady(timeoutMs: number = 6000): Promise<ServiceWorkerRegistration | undefined> {
+      return new Promise(resolve => {
+        let settled = false
+        const finish = (registration?: ServiceWorkerRegistration) => {
+          if (settled) return
+          settled = true
+          window.clearTimeout(timer)
+          resolve(registration)
+        }
+        const timer = window.setTimeout(() => finish(undefined), timeoutMs)
+        navigator.serviceWorker.ready.then(registration => finish(registration), () => finish(undefined))
+      })
+    },
     async refreshOfflineLaunchStatus() {
       if (!('serviceWorker' in navigator)) {
         this.offlineLaunch = {...this.offlineLaunch, supported: false}
@@ -348,13 +361,16 @@ export default Vue.extend({
       }
       this.preparingLaunch = true
       try {
-        const registration = await navigator.serviceWorker.ready
-        try {
-          await registration.update()
-        } catch (_) {
-          // The currently active worker can still prepare the shell.
+        let registration = await navigator.serviceWorker.getRegistration()
+        if (!registration?.active) registration = await this.waitForServiceWorkerReady()
+        if (registration) {
+          try {
+            await registration.update()
+          } catch (_) {
+            // The currently active worker can still prepare the shell.
+          }
         }
-        const worker = registration.active
+        const worker = registration?.active
         if (worker) {
           worker.postMessage({
             type: 'KOMGA_PREPARE_OFFLINE_SHELL',
