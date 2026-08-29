@@ -124,7 +124,7 @@
               @click="retry(download.bookId)"
             >
               <v-icon left>mdi-refresh</v-icon>
-              {{ $t('common.retry') }}
+              {{ $t('offline.retry_download') }}
             </v-btn>
             <v-spacer/>
             <v-btn
