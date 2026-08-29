@@ -103,6 +103,58 @@ export function paperCurlReflectionMatrix(
   }
 }
 
+function rawCurlEdgeIntersections(
+  progress: number,
+  startYPx: number,
+  currentYPx: number,
+  aspect: number,
+): {top: number; bottom: number} {
+  const currentX = 1 - progress
+  const verticalDelta = currentYPx - startYPx
+  const lineY = Math.max(1e-8, progress)
+
+  return {
+    top: currentX - verticalDelta * currentYPx / lineY,
+    bottom: currentX + verticalDelta * (aspect - currentYPx) / lineY,
+  }
+}
+
+/**
+ * A physical crease may reach either bound/spine corner, but it cannot continue
+ * rotating through that edge of the sheet. The old implementation clamped a
+ * negative top/bottom intersection to zero after computing the line, which made
+ * the rendered crease differ from the line used to derive the drag and could
+ * reflect part of the flap through the crease at extreme angles.
+ *
+ * Saturate only the vertical component of the drag at the first point where the
+ * intended crease touches the spine. Horizontal progress remains untouched, so
+ * the turn still follows the finger while the topology stays physically valid.
+ */
+function constrainCurlYToSpine(
+  progress: number,
+  startYPx: number,
+  requestedYPx: number,
+  aspect: number,
+): number {
+  const requested = Math.max(0, Math.min(aspect, requestedYPx))
+  const requestedEdges = rawCurlEdgeIntersections(progress, startYPx, requested, aspect)
+  if (requestedEdges.top >= 0 && requestedEdges.bottom >= 0) return requested
+
+  // At the gesture's start Y the crease is always valid. Binary-search along
+  // the requested vertical movement until one edge lands exactly on the spine.
+  let validT = 0
+  let invalidT = 1
+  for (let i = 0; i < 28; i++) {
+    const t = (validT + invalidT) / 2
+    const candidate = startYPx + (requested - startYPx) * t
+    const edges = rawCurlEdgeIntersections(progress, startYPx, candidate, aspect)
+    if (edges.top >= 0 && edges.bottom >= 0) validT = t
+    else invalidT = t
+  }
+
+  return startYPx + (requested - startYPx) * validT
+}
+
 /**
  * Dynamic page-curl geometry adapted from the classic two-point fold model.
  *
@@ -148,7 +200,8 @@ export function paperCurlDynamicGeometry(
   if (p >= 0.9999) return endpointGeometry(0)
 
   const startYPx = clamp01(startY) * aspect
-  const currentYPx = clamp01(currentY) * aspect
+  const requestedYPx = clamp01(currentY) * aspect
+  const currentYPx = constrainCurlYToSpine(p, startYPx, requestedYPx, aspect)
   const currentPoint = {x: 1 - p, y: currentYPx}
 
   const vectorX = 1 - currentPoint.x
@@ -156,16 +209,11 @@ export function paperCurlDynamicGeometry(
   const lineDirection = {x: -vectorY, y: vectorX}
 
   // Intersections of the infinite fold line with the top and bottom page edges.
-  const topT = -currentPoint.y / lineDirection.y
-  const bottomT = (aspect - currentPoint.y) / lineDirection.y
-  const rawTop = currentPoint.x + lineDirection.x * topT
-  const rawBottom = currentPoint.x + lineDirection.x * bottomT
-
-  // Match the reference implementation: never let the curl detach past the
-  // spine, but permit intersections beyond the free edge so corner curls can
-  // naturally collapse against that side.
-  const topCurl = {x: Math.max(0, rawTop), y: 0}
-  const bottomCurl = {x: Math.max(0, rawBottom), y: aspect}
+  // constrainCurlYToSpine guarantees neither can pass through the bound edge;
+  // Math.max only absorbs tiny floating-point error at the exact corner.
+  const rawEdges = rawCurlEdgeIntersections(p, startYPx, currentYPx, aspect)
+  const topCurl = {x: Math.max(0, rawEdges.top), y: 0}
+  const bottomCurl = {x: Math.max(0, rawEdges.bottom), y: aspect}
 
   let sideY = currentPoint.y
   if (Math.abs(lineDirection.x) > 1e-8) {
