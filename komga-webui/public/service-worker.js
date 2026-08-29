@@ -1,11 +1,14 @@
 /* global self, caches, indexedDB, Response, URL */
 
 const SHELL_CACHE = 'komga-shell-v1'
-const MEDIA_CACHE = 'komga-offline-media-v1'
+const LEGACY_MEDIA_CACHE = 'komga-offline-media-v1'
+const BOOK_CACHE_PREFIX = 'komga-offline-book-v2-'
 const DB_NAME = 'komga-offline'
 const DB_VERSION = 1
 const SETTINGS_STORE = 'settings'
+const DOWNLOADS_STORE = 'downloads'
 let offlineMode
+const activeDownloads = new Map()
 
 function openDatabase() {
   return new Promise((resolve, reject) => {
@@ -15,7 +18,7 @@ function openDatabase() {
       if (!db.objectStoreNames.contains('books')) db.createObjectStore('books', {keyPath: 'id'})
       if (!db.objectStoreNames.contains('series')) db.createObjectStore('series', {keyPath: 'id'})
       if (!db.objectStoreNames.contains('pages')) db.createObjectStore('pages', {keyPath: 'bookId'})
-      if (!db.objectStoreNames.contains('downloads')) db.createObjectStore('downloads', {keyPath: 'bookId'})
+      if (!db.objectStoreNames.contains(DOWNLOADS_STORE)) db.createObjectStore(DOWNLOADS_STORE, {keyPath: 'bookId'})
       if (!db.objectStoreNames.contains('progress')) db.createObjectStore('progress', {keyPath: 'bookId'})
       if (!db.objectStoreNames.contains(SETTINGS_STORE)) db.createObjectStore(SETTINGS_STORE, {keyPath: 'key'})
     }
@@ -24,37 +27,60 @@ function openDatabase() {
   })
 }
 
+async function readStore(storeName, key) {
+  const db = await openDatabase()
+  return new Promise(resolve => {
+    const tx = db.transaction(storeName, 'readonly')
+    const request = tx.objectStore(storeName).get(key)
+    request.onsuccess = () => resolve(request.result)
+    request.onerror = () => resolve(undefined)
+  })
+}
+
 async function readOfflineMode() {
   if (typeof offlineMode === 'boolean') return offlineMode
   try {
-    const db = await openDatabase()
-    offlineMode = await new Promise(resolve => {
-      const tx = db.transaction(SETTINGS_STORE, 'readonly')
-      const request = tx.objectStore(SETTINGS_STORE).get('offlineMode')
-      request.onsuccess = () => resolve(request.result && request.result.value === true)
-      request.onerror = () => resolve(false)
-    })
+    const setting = await readStore(SETTINGS_STORE, 'offlineMode')
+    offlineMode = !!(setting && setting.value === true)
   } catch (_) {
     offlineMode = false
   }
   return offlineMode
 }
 
+async function downloadRecord(bookId) {
+  if (activeDownloads.has(bookId)) return activeDownloads.get(bookId)
+  const record = await readStore(DOWNLOADS_STORE, bookId)
+  activeDownloads.set(bookId, record || null)
+  return record
+}
+
 function isApiRequest(url) {
   return url.pathname.includes('/api/')
 }
 
-function isBookPage(url) {
-  return /\/api\/v1\/books\/[^/]+\/pages\/\d+\/?$/.test(url.pathname)
+function bookIdFromPage(url) {
+  const match = url.pathname.match(/\/api\/v1\/books\/([^/]+)\/pages\/\d+\/?$/)
+  return match ? decodeURIComponent(match[1]) : null
 }
 
-function isOfflineThumbnail(url) {
-  return /\/api\/v1\/(books|series)\/[^/]+\/thumbnail\/?$/.test(url.pathname)
+function bookIdFromThumbnail(url) {
+  const match = url.pathname.match(/\/api\/v1\/books\/([^/]+)\/thumbnail\/?$/)
+  return match ? decodeURIComponent(match[1]) : null
 }
 
-async function cachedMedia(request) {
-  const cache = await caches.open(MEDIA_CACHE)
+async function cachedBookMedia(bookId, request) {
+  const record = await downloadRecord(bookId)
+  if (!record || !record.cacheName) return undefined
+  const cache = await caches.open(record.cacheName)
   return cache.match(request, {ignoreSearch: true})
+}
+
+async function unavailablePage() {
+  return new Response('This page is not downloaded for offline reading.', {
+    status: 503,
+    headers: {'Content-Type': 'text/plain; charset=utf-8'},
+  })
 }
 
 self.addEventListener('install', event => {
@@ -71,18 +97,23 @@ self.addEventListener('install', event => {
 
 self.addEventListener('activate', event => {
   event.waitUntil((async () => {
-    const keep = new Set([SHELL_CACHE, MEDIA_CACHE])
-    const names = await caches.keys()
-    await Promise.all(names.filter(name => name.startsWith('komga-') && !keep.has(name)).map(name => caches.delete(name)))
+    // Per-book caches are versioned snapshots and must not be deleted here.
+    // The page-side offline service deletes superseded/orphaned revisions only
+    // after a replacement has committed successfully.
+    await caches.delete(LEGACY_MEDIA_CACHE)
     await self.clients.claim()
     offlineMode = undefined
+    activeDownloads.clear()
     await readOfflineMode()
   })())
 })
 
 self.addEventListener('message', event => {
-  if (event.data && event.data.type === 'KOMGA_OFFLINE_MODE') {
+  if (!event.data) return
+  if (event.data.type === 'KOMGA_OFFLINE_MODE') {
     offlineMode = event.data.enabled === true
+  } else if (event.data.type === 'KOMGA_DOWNLOAD_CHANGED' && event.data.bookId) {
+    activeDownloads.delete(event.data.bookId)
   }
 })
 
@@ -93,27 +124,32 @@ self.addEventListener('fetch', event => {
   const url = new URL(request.url)
   if (url.origin !== self.location.origin) return
 
-  if (isBookPage(url)) {
+  const pageBookId = bookIdFromPage(url)
+  if (pageBookId) {
     event.respondWith((async () => {
-      const cached = await cachedMedia(request)
+      const cached = await cachedBookMedia(pageBookId, request)
       if (cached) return cached
-      if (await readOfflineMode()) {
-        return new Response('This page is not downloaded for offline reading.', {
-          status: 503,
-          headers: {'Content-Type': 'text/plain; charset=utf-8'},
-        })
+      if (await readOfflineMode()) return unavailablePage()
+      try {
+        return await fetch(request)
+      } catch (_) {
+        return unavailablePage()
       }
-      return fetch(request)
     })())
     return
   }
 
-  if (isOfflineThumbnail(url)) {
+  const thumbnailBookId = bookIdFromThumbnail(url)
+  if (thumbnailBookId) {
     event.respondWith((async () => {
-      const cached = await cachedMedia(request)
+      const cached = await cachedBookMedia(thumbnailBookId, request)
       if (cached) return cached
       if (await readOfflineMode()) return new Response('', {status: 503})
-      return fetch(request)
+      try {
+        return await fetch(request)
+      } catch (_) {
+        return new Response('', {status: 503})
+      }
     })())
     return
   }
@@ -126,7 +162,14 @@ self.addEventListener('fetch', event => {
           headers: {'Content-Type': 'application/json'},
         })
       }
-      return fetch(request)
+      try {
+        return await fetch(request)
+      } catch (_) {
+        return new Response(JSON.stringify({message: 'Komga server is unavailable'}), {
+          status: 503,
+          headers: {'Content-Type': 'application/json'},
+        })
+      }
     })())
     return
   }
