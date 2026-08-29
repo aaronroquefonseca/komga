@@ -25,6 +25,67 @@ function uniqueStrings(values: Array<string | undefined | null>): string[] {
   return Array.from(new Set(values.filter((value): value is string => !!value)))
 }
 
+function getPath(value: any, path: string): any {
+  return path.split('.').reduce((current, part) => current == null ? undefined : current[part], value)
+}
+
+function pageFromItems<T>(items: T[], pageRequest?: any): Page<T> {
+  const sort = Array.isArray(pageRequest?.sort) ? pageRequest.sort : []
+  const sorted = [...items]
+  if (sort.length > 0) {
+    const [field, direction = 'asc'] = `${sort[0]}`.split(',')
+    sorted.sort((a: any, b: any) => {
+      const av = getPath(a, field)
+      const bv = getPath(b, field)
+      if (av == null && bv == null) return 0
+      if (av == null) return 1
+      if (bv == null) return -1
+      const result = typeof av === 'string'
+        ? av.localeCompare(`${bv}`, undefined, {numeric: true, sensitivity: 'base'})
+        : av < bv ? -1 : av > bv ? 1 : 0
+      return direction.toLowerCase() === 'desc' ? -result : result
+    })
+  }
+
+  const unpaged = pageRequest?.unpaged === true
+  const size = unpaged ? Math.max(1, sorted.length) : Math.max(1, Number(pageRequest?.size ?? 20))
+  const requestedNumber = unpaged ? 0 : Math.max(0, Number(pageRequest?.page ?? 0))
+  const totalPages = sorted.length === 0 ? 0 : Math.ceil(sorted.length / size)
+  // A page number persisted while online may no longer exist in a smaller
+  // offline result set. Clamp it instead of rendering an apparently empty library.
+  const number = totalPages > 0 ? Math.min(requestedNumber, totalPages - 1) : 0
+  const start = unpaged ? 0 : number * size
+  const content = unpaged ? sorted : sorted.slice(start, start + size)
+
+  return {
+    content,
+    totalElements: sorted.length,
+    totalPages,
+    number,
+    size,
+    first: number === 0,
+    last: unpaged || number >= totalPages - 1,
+    empty: content.length === 0,
+    numberOfElements: content.length,
+  } as Page<T>
+}
+
+function conditionUsesOnlyLibrarySelection(condition: any): boolean {
+  if (!condition || Object.keys(condition).length === 0) return true
+  if (Array.isArray(condition.allOf)) return condition.allOf.every(conditionUsesOnlyLibrarySelection)
+  if (Array.isArray(condition.anyOf)) return condition.anyOf.every(conditionUsesOnlyLibrarySelection)
+  return Object.keys(condition).every(key => key === 'libraryId')
+}
+
+function libraryIdsFromCondition(condition: any): string[] {
+  if (!condition) return []
+  if (Array.isArray(condition.allOf)) return uniqueStrings(condition.allOf.flatMap(libraryIdsFromCondition))
+  if (Array.isArray(condition.anyOf)) return uniqueStrings(condition.anyOf.flatMap(libraryIdsFromCondition))
+  const operator = condition.libraryId
+  if (operator?.operator !== 'is' || operator.value == null) return []
+  return [`${operator.value}`]
+}
+
 export async function getOfflineSessionUser(): Promise<UserDto | undefined> {
   const cached = await offlineGet<CachedSetting<UserDto>>(OFFLINE_STORES.settings, OFFLINE_SESSION_KEY)
   return cached?.value ? rehydrate(cached.value) : undefined
@@ -48,16 +109,45 @@ export default {
 
     const localOnly = () => offline.state.offlineMode || !offline.state.online
 
-    const cachedSeriesForLibraries = async (libraryIds?: string[]): Promise<SeriesDto[]> => {
+    const allCachedSeries = async (): Promise<SeriesDto[]> => {
       const page = await offline.getCachedSeriesPage({}, {unpaged: true})
-      const items = page.content as SeriesDto[]
-      return libraryIds?.length ? items.filter(item => libraryIds.includes(item.libraryId)) : items
+      return page.content as SeriesDto[]
+    }
+
+    const allCachedBooks = async (): Promise<BookDto[]> => {
+      const page = await offline.getCachedBooksPage({}, {unpaged: true})
+      return page.content as BookDto[]
+    }
+
+    const cachedSeriesForLibraries = async (libraryIds?: string[]): Promise<SeriesDto[]> => {
+      const items = await allCachedSeries()
+      if (!libraryIds?.length) return items
+
+      // Normally SeriesDto.libraryId is enough. Cached books provide a second,
+      // independent membership index so an incomplete/stale series row cannot
+      // make an otherwise-cached library appear empty.
+      const bookItems = await allCachedBooks()
+      const seriesIdsFromBooks = new Set(bookItems
+        .filter(item => libraryIds.includes(item.libraryId))
+        .map(item => item.seriesId))
+
+      return items.filter(item => libraryIds.includes(item.libraryId) || seriesIdsFromBooks.has(item.id))
     }
 
     const cachedBooksForLibraries = async (libraryIds?: string[]): Promise<BookDto[]> => {
-      const page = await offline.getCachedBooksPage({}, {unpaged: true})
-      const items = page.content as BookDto[]
+      const items = await allCachedBooks()
       return libraryIds?.length ? items.filter(item => libraryIds.includes(item.libraryId)) : items
+    }
+
+    const localSeriesPage = async (search: SeriesSearch = {}, pageRequest?: PageRequest): Promise<Page<SeriesDto>> => {
+      const normal = rehydrate(await offline.getCachedSeriesPage(search, pageRequest))
+      if (normal.totalElements > 0 || !conditionUsesOnlyLibrarySelection(search.condition)) return normal
+
+      const libraryIds = libraryIdsFromCondition(search.condition)
+      if (libraryIds.length === 0) return normal
+
+      const recovered = await cachedSeriesForLibraries(libraryIds)
+      return rehydrate(pageFromItems(recovered, pageRequest))
     }
 
     if (users && !users.__offlineAdapterInstalled) {
@@ -257,20 +347,20 @@ export default {
 
     const originalGetSeriesList = series.getSeriesList.bind(series)
     series.getSeriesList = async (search: SeriesSearch, pageRequest?: PageRequest): Promise<Page<SeriesDto>> => {
-      if (localOnly()) return rehydrate(await offline.getCachedSeriesPage(search, pageRequest))
+      if (localOnly()) return localSeriesPage(search, pageRequest)
       try {
         const page = await originalGetSeriesList(search, pageRequest)
         await offline.cacheSeries(page.content || [])
         return page
       } catch (e) {
-        const cached = rehydrate(await offline.getCachedSeriesPage(search, pageRequest))
+        const cached = await localSeriesPage(search, pageRequest)
         if (cached.totalElements > 0) return cached
         throw e
       }
     }
 
     const localAlphabeticalGroups = async (search: SeriesSearch): Promise<GroupCountDto[]> => {
-      const page = await offline.getCachedSeriesPage(search, {unpaged: true})
+      const page = await localSeriesPage(search, {unpaged: true})
       const groups = new Map<string, number>()
       ;(page.content as SeriesDto[]).forEach(item => {
         const title = `${item.metadata?.titleSort || item.metadata?.title || item.name || ''}`.trim().toLocaleLowerCase()
