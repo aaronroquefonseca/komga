@@ -114,6 +114,34 @@ describe('paged reader transitions', () => {
     expect(right.shadowTop).toBeLessThan(right.seamTop)
   })
 
+  test('extreme corner drag saturates when the crease reaches the spine', () => {
+    const extreme = paperCurlDynamicGeometry(0.5, 0.1, 0.95, -1)
+    const farther = paperCurlDynamicGeometry(0.5, 0.1, 1, -1)
+
+    expect(extreme.seamTop).toBeCloseTo(0, 5)
+    expect(farther.seamTop).toBeCloseTo(0, 5)
+    expect(farther.seamBottom).toBeCloseTo(extreme.seamBottom, 4)
+
+    // Once the top crease endpoint has reached the bound corner, pushing the
+    // finger farther vertically cannot rotate the fold through the spine.
+    extreme.backPolygon.forEach(point => {
+      expect(Number.isFinite(point.x)).toBe(true)
+      expect(Number.isFinite(point.y)).toBe(true)
+    })
+  })
+
+  test('constrained reflected flap remains on the folded side of the crease', () => {
+    const fold = paperCurlDynamicGeometry(0.5, 0.1, 1, -1)
+    const dx = fold.seamBottom - fold.seamTop
+
+    fold.backPolygon.forEach(point => {
+      // Cross product against the top->bottom crease vector. For a leftward
+      // turn the reflected flap must stay on the non-negative/folded side.
+      const side = dx * point.y - 100 * (point.x - fold.seamTop)
+      expect(side).toBeGreaterThanOrEqual(-0.001)
+    })
+  })
+
   test('dynamic fold collapses exactly at both settled endpoints', () => {
     const start = paperCurlDynamicGeometry(0, 0.1, 0.9, -1)
     const end = paperCurlDynamicGeometry(1, 0.1, 0.9, -1)
