@@ -22,31 +22,18 @@ const i18n = new VueI18n({
   messages: loadLocaleMessages(),
   pluralizationRules: {
     /**
-     * @param choice {number} a choice index given by the input to $tc: `$tc('path.to.rule', choiceIndex)`
+     * @param choice {number} a choice index given by the input to `$tc('path.to.rule', choiceIndex)`
      * @param choicesLength {number} an overall amount of choices
      * @returns a final choice index to select plural word by
      */
     'pl': function (choice, choicesLength) {
-      // brak stron
-      if (choice === 0) {
-        return 0
-      }
-
-      // 1 strona
-      if (choice === 1) {
-        return 1
-      }
+      if (choice === 0) return 0
+      if (choice === 1) return 1
 
       const betweenTwoAndFour = ((choice % 10) >= 2 && (choice % 10) <= 4)
       const lessThanTen = choice < 10
       const moreThanTwenty = choice > 20
-
-      // 2 strony, 3 strony, 4 strony, 22 strony ...
-      if (betweenTwoAndFour && (lessThanTen || moreThanTwenty)) {
-        return 2
-      }
-
-      // other cases, 5 stron, 67 stron, 259 stron and so on
+      if (betweenTwoAndFour && (lessThanTen || moreThanTwenty)) return 2
       return (choicesLength < 4) ? 2 : 3
     },
   },
@@ -93,11 +80,15 @@ i18n.mergeLocaleMessage('en', {
     update_failed_kept: 'Update failed; existing offline copy was kept',
     download_failed: 'Download failed',
     save_offline: 'Save for offline reading',
+    save_series_offline: 'Save entire series offline',
+    download_series_remaining: 'Download remaining books ({downloaded}/{total})',
+    downloading_series: 'Downloading series ({downloaded}/{total})',
+    remove_series_downloads: 'Remove series offline copies',
     retry_download: 'Retry offline download',
     remove_download: 'Remove offline copy',
     manage_downloads: 'Manage downloads',
     no_downloads: 'No offline books yet',
-    no_downloads_description: 'Use a book action menu and choose “Save for offline reading”.',
+    no_downloads_description: 'Use a book or series action menu to save titles for offline reading.',
     unavailable_offline: 'This book is not downloaded on this device.',
   },
 })
