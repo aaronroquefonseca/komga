@@ -68,6 +68,7 @@ i18n.mergeLocaleMessage('en', {
         fade: 'Fade',
         soft_wipe: 'Soft Wipe',
         paper_curl: 'Paper Curl',
+        physical_comic: 'Physical Comic',
         none: 'None',
       },
       webtoon_smooth_scroll: 'Smooth page scrolling',
