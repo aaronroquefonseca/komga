@@ -7,51 +7,53 @@
         </v-btn>
       </template>
       <v-list dense>
-        <v-list-item
-          v-if="canOfflineDownload && !downloadRecord"
-          :disabled="!$offline.state.online || $offline.state.offlineMode"
-          @click="downloadOffline"
-        >
-          <v-list-item-icon><v-icon small>mdi-download-box-outline</v-icon></v-list-item-icon>
-          <v-list-item-title>{{ $t('offline.save_offline') }}</v-list-item-title>
-        </v-list-item>
-        <v-list-item
-          v-else-if="downloadRecord && (downloadRecord.status === 'downloading' || downloadRecord.status === 'updating')"
-          disabled
-        >
-          <v-list-item-icon><v-icon small>mdi-download</v-icon></v-list-item-icon>
-          <v-list-item-title>
-            {{ $t(downloadRecord.status === 'updating' ? 'offline.updating' : 'offline.downloading') }}
-            {{ downloadRecord.completedPages }} / {{ downloadRecord.totalPages }}
-          </v-list-item-title>
-        </v-list-item>
-        <v-list-item
-          v-else-if="downloadRecord && downloadRecord.status === 'error'"
-          :disabled="!$offline.state.online || $offline.state.offlineMode"
-          @click="downloadOffline"
-        >
-          <v-list-item-icon><v-icon small>mdi-refresh</v-icon></v-list-item-icon>
-          <v-list-item-title>{{ $t('offline.retry_download') }}</v-list-item-title>
-        </v-list-item>
-        <template v-else-if="downloadRecord && downloadRecord.status === 'downloaded'">
+        <template v-if="isPwa">
           <v-list-item
-            v-if="downloadRecord.updateAvailable && !downloadRecord.sourceMissing"
+            v-if="canOfflineDownload && !downloadRecord"
             :disabled="!$offline.state.online || $offline.state.offlineMode"
             @click="downloadOffline"
           >
-            <v-list-item-icon><v-icon small>mdi-update</v-icon></v-list-item-icon>
-            <v-list-item-title>{{ $t('offline.update_copy') }}</v-list-item-title>
+            <v-list-item-icon><v-icon small>mdi-download-box-outline</v-icon></v-list-item-icon>
+            <v-list-item-title>{{ $t('offline.save_offline') }}</v-list-item-title>
           </v-list-item>
-          <v-list-item @click="removeOffline">
-            <v-list-item-icon><v-icon small>mdi-download-box</v-icon></v-list-item-icon>
-            <v-list-item-title>{{ $t('offline.remove_download') }}</v-list-item-title>
+          <v-list-item
+            v-else-if="downloadRecord && (downloadRecord.status === 'downloading' || downloadRecord.status === 'updating')"
+            disabled
+          >
+            <v-list-item-icon><v-icon small>mdi-download</v-icon></v-list-item-icon>
+            <v-list-item-title>
+              {{ $t(downloadRecord.status === 'updating' ? 'offline.updating' : 'offline.downloading') }}
+              {{ downloadRecord.completedPages }} / {{ downloadRecord.totalPages }}
+            </v-list-item-title>
           </v-list-item>
+          <v-list-item
+            v-else-if="downloadRecord && downloadRecord.status === 'error'"
+            :disabled="!$offline.state.online || $offline.state.offlineMode"
+            @click="downloadOffline"
+          >
+            <v-list-item-icon><v-icon small>mdi-refresh</v-icon></v-list-item-icon>
+            <v-list-item-title>{{ $t('offline.retry_download') }}</v-list-item-title>
+          </v-list-item>
+          <template v-else-if="downloadRecord && downloadRecord.status === 'downloaded'">
+            <v-list-item
+              v-if="downloadRecord.updateAvailable && !downloadRecord.sourceMissing"
+              :disabled="!$offline.state.online || $offline.state.offlineMode"
+              @click="downloadOffline"
+            >
+              <v-list-item-icon><v-icon small>mdi-update</v-icon></v-list-item-icon>
+              <v-list-item-title>{{ $t('offline.update_copy') }}</v-list-item-title>
+            </v-list-item>
+            <v-list-item @click="removeOffline">
+              <v-list-item-icon><v-icon small>mdi-download-box</v-icon></v-list-item-icon>
+              <v-list-item-title>{{ $t('offline.remove_download') }}</v-list-item-title>
+            </v-list-item>
+          </template>
+          <v-list-item :to="{name: 'offline-downloads'}">
+            <v-list-item-icon><v-icon small>mdi-download-multiple</v-icon></v-list-item-icon>
+            <v-list-item-title>{{ $t('offline.manage_downloads') }}</v-list-item-title>
+          </v-list-item>
+          <v-divider/>
         </template>
-        <v-list-item :to="{name: 'offline-downloads'}">
-          <v-list-item-icon><v-icon small>mdi-download-multiple</v-icon></v-list-item-icon>
-          <v-list-item-title>{{ $t('offline.manage_downloads') }}</v-list-item-title>
-        </v-list-item>
-        <v-divider/>
 
         <v-list-item @click="analyze" v-if="isAdmin">
           <v-list-item-title>{{ $t('menu.analyze') }}</v-list-item-title>
@@ -77,6 +79,7 @@
 </template>
 <script lang="ts">
 import {getReadProgress} from '@/functions/book-progress'
+import {isStandalonePwa} from '@/functions/pwa'
 import {MediaStatus, ReadStatus} from '@/types/enum-books'
 import Vue from 'vue'
 import {BookDto, ReadProgressUpdateDto} from '@/types/komga-books'
@@ -103,6 +106,9 @@ export default Vue.extend({
     },
   },
   computed: {
+    isPwa(): boolean {
+      return isStandalonePwa()
+    },
     isAdmin(): boolean {
       return this.$store.getters.meAdmin
     },
