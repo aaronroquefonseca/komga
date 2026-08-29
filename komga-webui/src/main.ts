@@ -33,6 +33,7 @@ import komgaAnnouncements from './plugins/komga-announcements.plugin'
 import komgaReleases from './plugins/komga-releases.plugin'
 import komgaSettings from './plugins/komga-settings.plugin'
 import komgaFonts from './plugins/komga-fonts.plugin'
+import {installPhysicalPagedReader} from './plugins/paged-reader-physical.plugin'
 import vuetify from './plugins/vuetify'
 import logger from './plugins/logger.plugin'
 import './public-path'
@@ -86,6 +87,7 @@ Vue.use(komgaFonts, {http: Vue.prototype.$http})
 
 Vue.config.productionTip = false
 
+installPhysicalPagedReader()
 sync(store, router)
 
 new Vue({
