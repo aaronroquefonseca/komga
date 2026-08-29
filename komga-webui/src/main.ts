@@ -113,20 +113,30 @@ router.beforeEach(async (to, from, next) => {
   next()
 })
 
+const CATALOG_SYNC_INTERVAL = 5 * 60 * 1000
+let lastCatalogSync = 0
 let catalogSyncScheduled = false
-const syncOfflineState = () => {
-  if (!store.getters.authenticated || catalogSyncScheduled) return
+
+const syncOfflineState = (forceCatalog: boolean = false) => {
+  if (!store.getters.authenticated || catalogSyncScheduled || !Vue.prototype.$offline.state.online) return
   catalogSyncScheduled = true
-  // Reconcile the downloaded snapshot against the server before flushing
-  // progress that may have been recorded against an older page numbering.
-  Vue.prototype.$offline.syncCatalogMetadata()
+
+  const shouldSyncCatalog = forceCatalog || Date.now() - lastCatalogSync >= CATALOG_SYNC_INTERVAL
+  const reconcile = shouldSyncCatalog
+    ? Vue.prototype.$offline.syncCatalogMetadata().then(() => { lastCatalogSync = Date.now() })
+    : Promise.resolve()
+
+  // Reconcile downloaded revisions before flushing progress that may have been
+  // recorded against an older page numbering.
+  reconcile
     .then(() => Vue.prototype.$offline.flushProgressQueue())
     .catch(() => undefined)
     .finally(() => { catalogSyncScheduled = false })
 }
 
 router.afterEach(() => syncOfflineState())
-window.addEventListener('focus', syncOfflineState)
+window.addEventListener('focus', () => syncOfflineState())
+window.addEventListener('online', () => syncOfflineState(true))
 document.addEventListener('visibilitychange', () => {
   if (document.visibilityState === 'visible') syncOfflineState()
 })
@@ -153,7 +163,6 @@ declare module 'vue/types/vue' {
     $_: LoDashStatic;
     $eventHub: Vue;
   }
-}
 
 declare global {
   interface Window {
