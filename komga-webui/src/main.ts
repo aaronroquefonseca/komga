@@ -117,6 +117,56 @@ const CATALOG_SYNC_INTERVAL = 5 * 60 * 1000
 let lastCatalogSync = 0
 let catalogSyncScheduled = false
 
+function getOfflineShellAssets(): string[] {
+  const assets = new Set<string>()
+  document.querySelectorAll<HTMLScriptElement>('script[src]').forEach(element => assets.add(element.src))
+  document.querySelectorAll<HTMLLinkElement>('link[href]').forEach(element => {
+    const rel = element.rel.toLocaleLowerCase()
+    if (['stylesheet', 'icon', 'apple-touch-icon', 'manifest', 'preload', 'modulepreload'].includes(rel)) {
+      assets.add(element.href)
+    }
+  })
+  return Array.from(assets)
+}
+
+let serviceWorkerRegistration: Promise<ServiceWorkerRegistration | undefined> = Promise.resolve(undefined)
+
+function prepareOfflineShell(): void {
+  if (!('serviceWorker' in navigator) || !Vue.prototype.$offline.state.online) return
+  serviceWorkerRegistration
+    .then(registration => {
+      const worker = registration?.active
+      if (!worker) return
+      worker.postMessage({
+        type: 'KOMGA_PREPARE_OFFLINE_SHELL',
+        pageUrl: window.location.href,
+        assets: getOfflineShellAssets(),
+      })
+    })
+    .catch(error => Vue.prototype.$warn('Komga offline shell preparation failed', error))
+}
+
+if ('serviceWorker' in navigator) {
+  // Register immediately instead of waiting for window.load. On the first
+  // online visit this gives the worker as much time as possible to activate and
+  // claim the current page before the user installs/leaves the PWA.
+  serviceWorkerRegistration = navigator.serviceWorker.register(`${urls.base}service-worker.js`, {scope: urls.base})
+    .then(() => navigator.serviceWorker.ready)
+    .then(async registration => {
+      await Vue.prototype.$offline.whenReady()
+      await Vue.prototype.$offline.setOfflineMode(Vue.prototype.$offline.state.offlineMode)
+      return registration
+    })
+    .catch(error => {
+      Vue.prototype.$warn('Komga offline service worker registration failed', error)
+      return undefined
+    })
+
+  const prepareWhenLoaded = () => prepareOfflineShell()
+  if (document.readyState === 'complete') prepareWhenLoaded()
+  else window.addEventListener('load', prepareWhenLoaded, {once: true})
+}
+
 const syncOfflineState = (forceCatalog: boolean = false) => {
   if (!store.getters.authenticated || catalogSyncScheduled || !Vue.prototype.$offline.state.online) return
   catalogSyncScheduled = true
@@ -136,19 +186,13 @@ const syncOfflineState = (forceCatalog: boolean = false) => {
 
 router.afterEach(() => syncOfflineState())
 window.addEventListener('focus', () => syncOfflineState())
-window.addEventListener('online', () => syncOfflineState(true))
+window.addEventListener('online', () => {
+  syncOfflineState(true)
+  prepareOfflineShell()
+})
 document.addEventListener('visibilitychange', () => {
   if (document.visibilityState === 'visible') syncOfflineState()
 })
-
-if ('serviceWorker' in navigator) {
-  window.addEventListener('load', () => {
-    navigator.serviceWorker.register(`${urls.base}service-worker.js`, {scope: urls.base})
-      .then(() => Vue.prototype.$offline.whenReady())
-      .then(() => Vue.prototype.$offline.setOfflineMode(Vue.prototype.$offline.state.offlineMode))
-      .catch(error => Vue.prototype.$warn('Komga offline service worker registration failed', error))
-  })
-}
 
 async function bootstrap() {
   await Vue.prototype.$offline.whenReady()
