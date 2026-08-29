@@ -16,13 +16,15 @@
     </div>
 
     <!--  clickable zone: top  -->
-    <div @click="prev()"
+    <div v-if="pageNavigation"
+         @click="prev()"
          class="top-quarter"
          style="z-index: 1;"
     />
 
     <!--  clickable zone: bottom  -->
-    <div @click="next()"
+    <div v-if="pageNavigation"
+         @click="next()"
          class="bottom-quarter"
          style="z-index: 1;"
     />
@@ -56,9 +58,13 @@ export default Vue.extend({
       type: Array as () => PageDtoWithUrl[],
       required: true,
     },
-    animations: {
+    smoothScroll: {
       type: Boolean,
       required: true,
+    },
+    pageNavigation: {
+      type: Boolean,
+      default: true,
     },
     page: {
       type: Number,
@@ -117,7 +123,7 @@ export default Vue.extend({
       return this.offsetTop + this.$vuetify.breakpoint.height < this.totalHeight
     },
     goToOptions(): object | undefined {
-      if (this.animations) return undefined
+      if (this.smoothScroll) return undefined
       return {duration: 0}
     },
     totalSidePadding(): number {

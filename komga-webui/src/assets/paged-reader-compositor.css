@@ -1,0 +1,30 @@
+.paged-reader-root .transition-layer {
+  transform: translateZ(0);
+  -webkit-transform: translateZ(0);
+  contain: layout style paint;
+}
+
+.paged-reader-root .transition-spread {
+  /* Keep the same compositor layer alive before, during, and after a drag.
+     Tearing this promotion down at settlement caused a one-frame rerasterization
+     of the committed page on touch browsers. */
+  visibility: visible !important;
+  will-change: transform, opacity, filter;
+  backface-visibility: hidden;
+  -webkit-backface-visibility: hidden;
+  transform-style: preserve-3d;
+  -webkit-transform-style: preserve-3d;
+  contain: layout style paint;
+}
+
+.paged-reader-root .transition-spread img {
+  backface-visibility: hidden;
+  -webkit-backface-visibility: hidden;
+}
+
+/* Normal Paper Curl deliberately washes the reflected front artwork out to
+   suggest ink showing through paper. Physical Comic renders a real different
+   page on that sheet face, so the translucency overlay must not be applied. */
+.paged-reader-root .physical-comic-paper-back::after {
+  display: none !important;
+}

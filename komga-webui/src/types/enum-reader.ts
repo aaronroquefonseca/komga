@@ -19,5 +19,19 @@ export enum PagedReaderLayout {
   DOUBLE_NO_COVER = 'bookreader.paged_reader_layout.double_no_cover'
 }
 
+export enum PagedReaderTransition {
+  DEFAULT = 'default',
+  PUSH = 'push',
+  COVER = 'cover',
+  REVEAL = 'reveal',
+  PARALLAX = 'parallax',
+  PAGE_TURN = 'page_turn',
+  FADE = 'fade',
+  SOFT_WIPE = 'soft_wipe',
+  PAPER_CURL = 'paper_curl',
+  PHYSICAL_COMIC = 'physical_comic',
+  NONE = 'none'
+}
+
 export const PaddingPercentage: number[] = [0, 5, 10, 15, 20, 25, 30, 35, 40]
 export const MarginValues: number[] = [0, 5, 10, 15]
