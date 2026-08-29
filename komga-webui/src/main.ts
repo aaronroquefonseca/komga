@@ -45,6 +45,7 @@ import router from './router'
 import store from './store'
 import i18n from './i18n'
 import urls from './functions/urls'
+import OfflineDownloads from './views/OfflineDownloads.vue'
 
 Vue.prototype.$_ = _
 Vue.prototype.$eventHub = new Vue()
@@ -94,6 +95,12 @@ Vue.config.productionTip = false
 installPhysicalPagedReader()
 installPhysicalPagedReaderSettlementGuard()
 sync(store, router)
+
+router.addRoute('home', {
+  path: '/downloads',
+  name: 'offline-downloads',
+  component: OfflineDownloads,
+})
 
 if ('serviceWorker' in navigator) {
   window.addEventListener('load', () => {
