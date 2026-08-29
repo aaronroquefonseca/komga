@@ -45,6 +45,7 @@ import router from './router'
 import store from './store'
 import i18n from './i18n'
 import urls from './functions/urls'
+import {isStandalonePwa} from './functions/pwa'
 import OfflineDownloads from './views/OfflineDownloads.vue'
 
 Vue.prototype.$_ = _
@@ -96,15 +97,20 @@ installPhysicalPagedReader()
 installPhysicalPagedReaderSettlementGuard()
 sync(store, router)
 
-router.addRoute('home', {
-  path: '/downloads',
-  name: 'offline-downloads',
-  component: OfflineDownloads,
-})
+const installedPwa = isStandalonePwa()
+
+if (installedPwa) {
+  router.addRoute('home', {
+    path: '/downloads',
+    name: 'offline-downloads',
+    component: OfflineDownloads,
+  })
+}
 
 router.beforeEach(async (to, from, next) => {
   await Vue.prototype.$offline.whenReady()
-  if (to.name === 'read-book' &&
+  if (installedPwa &&
+    to.name === 'read-book' &&
     (Vue.prototype.$offline.state.offlineMode || !Vue.prototype.$offline.state.online) &&
     !Vue.prototype.$offline.isDownloaded(to.params.bookId)) {
     next({name: 'offline-downloads'})
