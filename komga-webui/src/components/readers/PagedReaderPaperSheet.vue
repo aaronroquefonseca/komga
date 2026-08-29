@@ -18,10 +18,18 @@
       />
     </div>
 
-    <!-- The free part of the paper is reflected across the curl line. Its back
-         is intentionally plain white for now; the area it vacates reveals the
-         destination page underneath. -->
-    <div class="paper-layer paper-back" :style="backStyle" />
+    <!-- The folded flap is the same page reflected across the live crease. The
+         outer layer clips it to the reflected free-edge polygon; the inner layer
+         carries the artwork through the exact same affine reflection. -->
+    <div class="paper-layer paper-back" :style="backStyle">
+      <div class="paper-back-content" :style="backContentStyle">
+        <paged-reader-spread
+          :spread="frontSpread"
+          :flip-direction="flipDirection"
+          :scale="scale"
+        />
+      </div>
+    </div>
 
     <div class="paper-shadow" :style="shadowStyle" />
     <div class="paper-edge" :style="edgeStyle" />
@@ -37,6 +45,7 @@ import {
   PaperCurlDynamicGeometry,
   PaperCurlPoint,
   paperCurlDynamicGeometry,
+  paperCurlReflectionMatrix,
 } from '@/functions/paged-reader-transition'
 import {pagedReaderTouchSnapshot} from '@/functions/paged-reader-touch'
 
@@ -240,6 +249,23 @@ export default Vue.extend({
         opacity: '1',
       }
     },
+    backContentStyle(): Record<string, string> {
+      if (!this.pageBoundsReady) return {opacity: '0'}
+
+      const {seamTop, seamBottom} = this.geometry
+      const top = this.pageBounds.top
+      const bottom = top + this.pageBounds.height
+      const matrix = paperCurlReflectionMatrix(
+        {x: this.paperX(seamTop), y: top},
+        {x: this.paperX(seamBottom), y: bottom},
+      )
+
+      return {
+        transformOrigin: '0 0',
+        transform: `matrix(${matrix.a}, ${matrix.b}, ${matrix.c}, ${matrix.d}, ${matrix.e}, ${matrix.f})`,
+        opacity: '1',
+      }
+    },
     shadowStyle(): Record<string, string> {
       if (!this.pageBoundsReady) return {opacity: '0'}
       const arch = Math.sin(clamp01(this.progress) * Math.PI)
@@ -371,7 +397,8 @@ export default Vue.extend({
 
 .paper-layer,
 .paper-shadow,
-.paper-edge {
+.paper-edge,
+.paper-back-content {
   position: absolute;
   inset: 0;
 }
@@ -388,8 +415,23 @@ export default Vue.extend({
 .paper-back {
   z-index: 5;
   background: #fff;
+  overflow: hidden;
   will-change: clip-path;
   filter: drop-shadow(0 0 8px rgba(0, 0, 0, 0.22));
+}
+
+.paper-back-content {
+  transform-origin: 0 0;
+  will-change: transform;
+  filter: brightness(0.82) saturate(0.72);
+}
+
+.paper-back::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: rgba(255, 255, 255, 0.28);
+  pointer-events: none;
 }
 
 .paper-shadow {
