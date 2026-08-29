@@ -117,8 +117,10 @@ let catalogSyncScheduled = false
 const syncOfflineState = () => {
   if (!store.getters.authenticated || catalogSyncScheduled) return
   catalogSyncScheduled = true
-  Vue.prototype.$offline.flushProgressQueue()
-    .then(() => Vue.prototype.$offline.syncCatalogMetadata())
+  // Reconcile the downloaded snapshot against the server before flushing
+  // progress that may have been recorded against an older page numbering.
+  Vue.prototype.$offline.syncCatalogMetadata()
+    .then(() => Vue.prototype.$offline.flushProgressQueue())
     .catch(() => undefined)
     .finally(() => { catalogSyncScheduled = false })
 }
