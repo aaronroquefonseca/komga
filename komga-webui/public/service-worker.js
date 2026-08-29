@@ -1,6 +1,8 @@
-/* global self, caches, indexedDB, Response, URL */
+/* global self, caches, indexedDB, Response, Request, URL */
 
-const SHELL_CACHE = 'komga-shell-v1'
+const SHELL_CACHE = 'komga-shell-v2'
+const SHELL_CACHE_PREFIX = 'komga-shell-'
+const OFFLINE_SHELL_PATH = '__komga_offline_shell__'
 const LEGACY_MEDIA_CACHE = 'komga-offline-media-v1'
 const BOOK_CACHE_PREFIX = 'komga-offline-book-v2-'
 const DB_NAME = 'komga-offline'
@@ -9,6 +11,14 @@ const SETTINGS_STORE = 'settings'
 const DOWNLOADS_STORE = 'downloads'
 let offlineMode
 const activeDownloads = new Map()
+
+function offlineShellUrl() {
+  return new URL(OFFLINE_SHELL_PATH, self.registration.scope).href
+}
+
+function scopeRootUrl() {
+  return new URL('./', self.registration.scope).href
+}
 
 function openDatabase() {
   return new Promise((resolve, reject) => {
@@ -83,13 +93,71 @@ async function unavailablePage() {
   })
 }
 
+function isHtmlResponse(response) {
+  return response && response.ok && (response.headers.get('content-type') || '').includes('text/html')
+}
+
+async function cacheCanonicalShell(cache, response) {
+  if (!isHtmlResponse(response)) return false
+  await cache.put(new Request(offlineShellUrl()), response.clone())
+  return true
+}
+
+async function fetchAndCacheShell(url) {
+  const cache = await caches.open(SHELL_CACHE)
+  const request = new Request(url, {
+    credentials: 'include',
+    cache: 'no-store',
+    redirect: 'follow',
+  })
+  const response = await fetch(request)
+  if (!isHtmlResponse(response)) return false
+  await cacheCanonicalShell(cache, response)
+  await cache.put(new Request(url, {credentials: 'include'}), response.clone())
+  return true
+}
+
+async function cacheShellAssets(urls) {
+  const cache = await caches.open(SHELL_CACHE)
+  for (const assetUrl of urls || []) {
+    try {
+      const url = new URL(assetUrl, self.registration.scope)
+      if (url.origin !== self.location.origin) continue
+      const request = new Request(url.href, {credentials: 'include', cache: 'no-store'})
+      const response = await fetch(request)
+      if (response.ok) await cache.put(new Request(url.href, {credentials: 'include'}), response)
+    } catch (_) {
+      // One optional icon/font/chunk must not prevent the rest of the shell being cached.
+    }
+  }
+}
+
+async function prepareOfflineShell(pageUrl, assets) {
+  let shellReady = false
+  const candidates = [pageUrl, scopeRootUrl()].filter(Boolean)
+  for (const candidate of candidates) {
+    try {
+      if (await fetchAndCacheShell(candidate)) {
+        shellReady = true
+        break
+      }
+    } catch (_) {
+      // Try the next known SPA URL.
+    }
+  }
+  await cacheShellAssets(assets)
+  return shellReady
+}
+
 self.addEventListener('install', event => {
   event.waitUntil((async () => {
-    const cache = await caches.open(SHELL_CACHE)
+    // This remains a best-effort first attempt. Once the already-loaded app can
+    // talk to this worker it sends KOMGA_PREPARE_OFFLINE_SHELL, which performs a
+    // verified authenticated shell+asset cache pass.
     try {
-      await cache.add(new URL('./', self.registration.scope).href)
+      await prepareOfflineShell(scopeRootUrl(), [])
     } catch (_) {
-      // Runtime asset caching below will still make an already-opened PWA usable.
+      // The page-side preparation pass will retry once Komga has loaded online.
     }
     await self.skipWaiting()
   })())
@@ -98,8 +166,11 @@ self.addEventListener('install', event => {
 self.addEventListener('activate', event => {
   event.waitUntil((async () => {
     // Per-book caches are versioned snapshots and must not be deleted here.
-    // The page-side offline service deletes superseded/orphaned revisions only
-    // after a replacement has committed successfully.
+    // Delete only superseded application-shell caches and the pre-v2 media cache.
+    const names = await caches.keys()
+    await Promise.all(names
+      .filter(name => name.startsWith(SHELL_CACHE_PREFIX) && name !== SHELL_CACHE)
+      .map(name => caches.delete(name)))
     await caches.delete(LEGACY_MEDIA_CACHE)
     await self.clients.claim()
     offlineMode = undefined
@@ -114,6 +185,10 @@ self.addEventListener('message', event => {
     offlineMode = event.data.enabled === true
   } else if (event.data.type === 'KOMGA_DOWNLOAD_CHANGED' && event.data.bookId) {
     activeDownloads.delete(event.data.bookId)
+  } else if (event.data.type === 'KOMGA_PREPARE_OFFLINE_SHELL') {
+    event.waitUntil(prepareOfflineShell(event.data.pageUrl, event.data.assets))
+  } else if (event.data.type === 'KOMGA_CACHE_ASSETS') {
+    event.waitUntil(cacheShellAssets(event.data.assets))
   }
 })
 
@@ -179,11 +254,17 @@ self.addEventListener('fetch', event => {
       const cache = await caches.open(SHELL_CACHE)
       try {
         const response = await fetch(request)
-        if (response.ok) await cache.put(request, response.clone())
+        if (response.ok) {
+          await cache.put(request, response.clone())
+          await cacheCanonicalShell(cache, response)
+        }
         return response
       } catch (_) {
-        return (await cache.match(request)) ||
-          (await cache.match(new URL('./', self.registration.scope).href)) ||
+        // Every Vue route uses the same HTML entry point. The canonical shell is
+        // therefore the most reliable fallback for PWA cold starts and deep links.
+        return (await cache.match(offlineShellUrl())) ||
+          (await cache.match(request)) ||
+          (await cache.match(scopeRootUrl())) ||
           new Response('Komga is unavailable offline until it has been opened online once.', {
             status: 503,
             headers: {'Content-Type': 'text/plain; charset=utf-8'},
@@ -193,8 +274,8 @@ self.addEventListener('fetch', event => {
     return
   }
 
-  // Cache application JS/CSS/fonts/icons as they are used. This avoids needing
-  // to know Vue CLI's hashed filenames ahead of time and works with context paths.
+  // Cache application JS/CSS/fonts/icons as they are used. Explicit shell
+  // preparation also caches assets that loaded before this worker took control.
   event.respondWith((async () => {
     const cache = await caches.open(SHELL_CACHE)
     const cached = await cache.match(request)
