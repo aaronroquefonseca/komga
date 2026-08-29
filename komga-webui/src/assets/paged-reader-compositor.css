@@ -21,3 +21,10 @@
   backface-visibility: hidden;
   -webkit-backface-visibility: hidden;
 }
+
+/* Normal Paper Curl deliberately washes the reflected front artwork out to
+   suggest ink showing through paper. Physical Comic renders a real different
+   page on that sheet face, so the translucency overlay must not be applied. */
+.paged-reader-root .physical-comic-paper-back::after {
+  display: none !important;
+}
