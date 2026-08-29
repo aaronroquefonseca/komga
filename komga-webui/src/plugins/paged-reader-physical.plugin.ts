@@ -71,10 +71,12 @@ export function installPhysicalPagedReader(): void {
 
   // The normal paper curl reflects the current artwork and keeps the requested
   // destination flat underneath. Physical Comic instead treats the destination
-  // as the back face of the sheet being turned, while the following spread sits
-  // flat underneath. During the final third of the curl that following spread
-  // slides away, revealing the requested destination already mounted below it.
-  // This overlaps both phases and avoids a visual snap when the drag settles.
+  // as the actual back face of the sheet being turned, while the following
+  // spread sits flat underneath. The physical backside is rendered at full
+  // fidelity: unlike normal Paper Curl it gets no paper-translucency tint.
+  // During the final third of the curl the following spread slides away,
+  // revealing the requested destination already mounted below it. This overlaps
+  // both phases and avoids a visual snap when the drag settles.
   paperOptions.render = function (this: any, h: CreateElement): VNode {
     const parent = this.$parent as any
     const physical = parent &&
@@ -99,6 +101,10 @@ export function installPhysicalPagedReader(): void {
         : 'none',
     } : undefined
 
+    const backContentStyle = physical
+      ? {...this.backContentStyle, filter: 'none'}
+      : this.backContentStyle
+
     const spread = (value: PageDtoWithUrl[]) => h('paged-reader-spread', {
       props: {
         spread: value,
@@ -120,12 +126,14 @@ export function installPhysicalPagedReader(): void {
         style: this.currentStyle,
       }, [spread(this.frontSpread)]),
       h('div', {
-        staticClass: 'paper-layer paper-back',
+        staticClass: physical
+          ? 'paper-layer paper-back physical-comic-paper-back'
+          : 'paper-layer paper-back',
         style: this.backStyle,
       }, [
         h('div', {
           staticClass: 'paper-back-content',
-          style: this.backContentStyle,
+          style: backContentStyle,
         }, [spread(reflectedSpread)]),
       ]),
       h('div', {staticClass: 'paper-shadow', style: this.shadowStyle}),
