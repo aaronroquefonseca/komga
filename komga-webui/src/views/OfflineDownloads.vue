@@ -27,6 +27,37 @@
       {{ $t('offline.offline_mode_description') }}
     </v-alert>
 
+    <v-alert
+      :type="offlineLaunchReady ? 'success' : 'warning'"
+      text
+      dense
+      class="mt-4"
+    >
+      <div class="font-weight-medium">
+        {{ $t(offlineLaunchReady ? 'offline.offline_launch_ready' : 'offline.offline_launch_not_ready') }}
+      </div>
+      <div class="text-caption mt-1">
+        {{ $t(offlineLaunchReady ? 'offline.offline_launch_ready_description' : 'offline.offline_launch_not_ready_description') }}
+      </div>
+      <div v-if="offlineLaunch.active" class="text-caption mt-1">
+        {{ $t('offline.offline_worker_details', {
+          version: offlineLaunch.version || 'unknown',
+          controlled: offlineLaunch.controlled ? 'yes' : 'no'
+        }) }}
+      </div>
+      <v-btn
+        v-if="!offlineLaunchReady && $offline.state.online"
+        small
+        text
+        class="mt-2"
+        :loading="preparingLaunch"
+        @click="prepareOfflineLaunch"
+      >
+        <v-icon left small>mdi-cloud-download-outline</v-icon>
+        {{ $t('offline.prepare_offline_launch') }}
+      </v-btn>
+    </v-alert>
+
     <v-card outlined class="my-4">
       <v-card-text>
         <div class="d-flex align-center mb-2">
@@ -208,15 +239,37 @@ import {OfflineDownloadRecord} from '@/services/offline-library.service'
 import {bookThumbnailUrl} from '@/functions/urls'
 import {getBookReadRouteFromMedia} from '@/functions/book-format'
 
+interface OfflineLaunchState {
+  supported: boolean
+  registered: boolean
+  active: boolean
+  controlled: boolean
+  shellReady: boolean
+  version: string
+}
+
 export default Vue.extend({
   name: 'OfflineDownloads',
   data: () => ({
     changingMode: false,
+    preparingLaunch: false,
     storage: {usage: 0, quota: 0},
+    offlineLaunch: {
+      supported: 'serviceWorker' in navigator,
+      registered: false,
+      active: false,
+      controlled: false,
+      shellReady: false,
+      version: '',
+    } as OfflineLaunchState,
   }),
   computed: {
     downloads(): OfflineDownloadRecord[] {
       return this.$offline.state.downloads
+    },
+    offlineLaunchReady(): boolean {
+      return this.offlineLaunch.supported && this.offlineLaunch.registered &&
+        this.offlineLaunch.active && this.offlineLaunch.shellReady
     },
     storagePercent(): number {
       if (!this.storage.quota) return 0
@@ -233,6 +286,8 @@ export default Vue.extend({
   async created() {
     await this.$offline.whenReady()
     await this.refreshStorage()
+    if (this.$offline.state.online) await this.prepareOfflineLaunch()
+    else await this.refreshOfflineLaunchStatus()
   },
   methods: {
     thumbnail(bookId: string): string {
@@ -244,6 +299,74 @@ export default Vue.extend({
       const index = Math.min(units.length - 1, Math.floor(Math.log(bytes) / Math.log(1024)))
       const value = bytes / Math.pow(1024, index)
       return `${value >= 10 || index === 0 ? value.toFixed(0) : value.toFixed(1)} ${units[index]}`
+    },
+    shellAssets(): string[] {
+      const assets = new Set<string>()
+      document.querySelectorAll<HTMLScriptElement>('script[src]').forEach(element => assets.add(element.src))
+      document.querySelectorAll<HTMLLinkElement>('link[href]').forEach(element => {
+        const rel = element.rel.toLocaleLowerCase()
+        if (['stylesheet', 'icon', 'apple-touch-icon', 'manifest', 'preload', 'modulepreload'].includes(rel)) {
+          assets.add(element.href)
+        }
+      })
+      return Array.from(assets)
+    },
+    workerStatus(worker: ServiceWorker): Promise<any> {
+      return new Promise(resolve => {
+        const channel = new MessageChannel()
+        const timer = window.setTimeout(() => resolve(undefined), 1500)
+        channel.port1.onmessage = event => {
+          window.clearTimeout(timer)
+          resolve(event.data)
+        }
+        worker.postMessage({type: 'KOMGA_OFFLINE_STATUS'}, [channel.port2])
+      })
+    },
+    async refreshOfflineLaunchStatus() {
+      if (!('serviceWorker' in navigator)) {
+        this.offlineLaunch = {...this.offlineLaunch, supported: false}
+        return
+      }
+
+      const registration = await navigator.serviceWorker.getRegistration()
+      const active = registration?.active
+      let status: any
+      if (active) status = await this.workerStatus(active)
+      this.offlineLaunch = {
+        supported: true,
+        registered: !!registration,
+        active: !!active,
+        controlled: !!navigator.serviceWorker.controller,
+        shellReady: status?.shellReady === true,
+        version: status?.version || '',
+      }
+    },
+    async prepareOfflineLaunch() {
+      if (!('serviceWorker' in navigator) || !this.$offline.state.online) {
+        await this.refreshOfflineLaunchStatus()
+        return
+      }
+      this.preparingLaunch = true
+      try {
+        const registration = await navigator.serviceWorker.ready
+        try {
+          await registration.update()
+        } catch (_) {
+          // The currently active worker can still prepare the shell.
+        }
+        const worker = registration.active
+        if (worker) {
+          worker.postMessage({
+            type: 'KOMGA_PREPARE_OFFLINE_SHELL',
+            pageUrl: window.location.href,
+            assets: this.shellAssets(),
+          })
+          await new Promise(resolve => window.setTimeout(resolve, 800))
+        }
+        await this.refreshOfflineLaunchStatus()
+      } finally {
+        this.preparingLaunch = false
+      }
     },
     async refreshStorage() {
       this.storage = await this.$offline.storageEstimate()
