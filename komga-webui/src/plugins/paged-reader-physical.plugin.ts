@@ -14,12 +14,17 @@ function clamp01(value: number): number {
   return Math.max(0, Math.min(1, value))
 }
 
-function physicalLeafImageStyle(scale: ScaleType): Record<string, string> {
+type LeafAlignment = 'left' | 'right'
+
+function physicalLeafImageStyle(scale: ScaleType, alignment: LeafAlignment): Record<string, string> {
   const common = {
     objectFit: 'contain',
-    objectPosition: 'center',
+    objectPosition: `${alignment} center`,
     display: 'block',
-    margin: 'auto',
+    marginTop: 'auto',
+    marginBottom: 'auto',
+    marginLeft: alignment === 'left' ? '0' : 'auto',
+    marginRight: alignment === 'right' ? '0' : 'auto',
   }
 
   switch (scale) {
@@ -239,13 +244,20 @@ export function installPhysicalPagedReader(): void {
             ? `drop-shadow(${-direction * 7}px 0 ${6 + arch * 10}px rgba(0,0,0,${0.10 + arch * 0.14}))`
             : `${paperTint} drop-shadow(${-direction * 7}px 0 ${6 + arch * 10}px rgba(0,0,0,${0.10 + arch * 0.14}))`,
         }
-        const imageStyle = physicalLeafImageStyle(this.scale)
-        const pageImage = (page: PageDtoWithUrl) => h('img', {
+
+        // The leaf container rotates around the viewport spine. The painted
+        // image inside that container must touch the same edge, otherwise
+        // object-fit letterboxing makes the visible page appear to rotate around
+        // empty margin. The back face is aligned to the opposite local edge
+        // because its own rotateY(180deg) mirrors it before the parent leaf turn.
+        const frontAlignment: LeafAlignment = startsRight ? 'left' : 'right'
+        const backAlignment: LeafAlignment = startsRight ? 'right' : 'left'
+        const pageImage = (page: PageDtoWithUrl, alignment: LeafAlignment) => h('img', {
           attrs: {
             src: page.url,
             alt: `Page ${page.number}`,
           },
-          style: imageStyle,
+          style: physicalLeafImageStyle(this.scale, alignment),
         })
 
         return h('div', {
@@ -258,8 +270,8 @@ export function installPhysicalPagedReader(): void {
             style: {zIndex: '1'},
           }, [spread(plan.baseSpread)]),
           h('div', {staticClass: 'double-page-leaf', style: leafStyle}, [
-            h('div', {staticClass: 'double-page-leaf-front', style: frontStyle}, [pageImage(plan.front)]),
-            h('div', {staticClass: 'double-page-leaf-back', style: backStyle}, [pageImage(plan.back)]),
+            h('div', {staticClass: 'double-page-leaf-front', style: frontStyle}, [pageImage(plan.front, frontAlignment)]),
+            h('div', {staticClass: 'double-page-leaf-back', style: backStyle}, [pageImage(plan.back, backAlignment)]),
           ]),
         ])
       }
