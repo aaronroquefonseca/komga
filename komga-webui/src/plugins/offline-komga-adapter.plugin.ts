@@ -2,6 +2,12 @@ import _Vue from 'vue'
 import {BookDto, PageDto, ReadProgressUpdateDto} from '@/types/komga-books'
 import {BookSearch, SearchConditionSeriesId, SearchOperatorIs, SeriesSearch} from '@/types/komga-search'
 import {SeriesDto} from '@/types/komga-series'
+import {handleDates} from '@/plugins/http.plugin'
+
+function rehydrate<T>(value: T): T {
+  handleDates(value)
+  return value
+}
 
 export default {
   install(Vue: typeof _Vue) {
@@ -11,11 +17,13 @@ export default {
     if (!offline || !books || !series || books.__offlineAdapterInstalled) return
     books.__offlineAdapterInstalled = true
 
+    const localOnly = () => offline.state.offlineMode || !offline.state.online
+
     const originalGetBook = books.getBook.bind(books)
     books.getBook = async (bookId: string): Promise<BookDto> => {
-      if (offline.state.offlineMode) {
+      if (localOnly()) {
         const cached = await offline.getCachedBook(bookId)
-        if (cached) return cached
+        if (cached) return rehydrate(cached)
         throw new Error('This book is not available in the offline catalog')
       }
       try {
@@ -24,16 +32,16 @@ export default {
         return book
       } catch (e) {
         const cached = await offline.getCachedBook(bookId)
-        if (cached) return cached
+        if (cached) return rehydrate(cached)
         throw e
       }
     }
 
     const originalGetBookPages = books.getBookPages.bind(books)
     books.getBookPages = async (bookId: string): Promise<PageDto[]> => {
-      if (offline.state.offlineMode) {
+      if (localOnly()) {
         const cached = await offline.getCachedPages(bookId)
-        if (cached) return cached
+        if (cached) return rehydrate(cached)
         throw new Error('Page metadata for this book is not available offline')
       }
       try {
@@ -42,20 +50,20 @@ export default {
         return pages
       } catch (e) {
         const cached = await offline.getCachedPages(bookId)
-        if (cached) return cached
+        if (cached) return rehydrate(cached)
         throw e
       }
     }
 
     const originalGetBooksList = books.getBooksList.bind(books)
     books.getBooksList = async (search: BookSearch, pageRequest?: PageRequest): Promise<Page<BookDto>> => {
-      if (offline.state.offlineMode) return offline.getCachedBooksPage(search, pageRequest)
+      if (localOnly()) return rehydrate(await offline.getCachedBooksPage(search, pageRequest))
       try {
         const page = await originalGetBooksList(search, pageRequest)
         await offline.cacheBooks(page.content || [])
         return page
       } catch (e) {
-        const cached = await offline.getCachedBooksPage(search, pageRequest)
+        const cached = rehydrate(await offline.getCachedBooksPage(search, pageRequest))
         if (cached.totalElements > 0) return cached
         throw e
       }
@@ -63,13 +71,13 @@ export default {
 
     const originalGetBooksOnDeck = books.getBooksOnDeck.bind(books)
     books.getBooksOnDeck = async (libraryIds?: string[], pageRequest?: PageRequest): Promise<Page<BookDto>> => {
-      if (offline.state.offlineMode) return offline.getCachedOnDeck(libraryIds, pageRequest)
+      if (localOnly()) return rehydrate(await offline.getCachedOnDeck(libraryIds, pageRequest))
       try {
         const page = await originalGetBooksOnDeck(libraryIds, pageRequest)
         await offline.cacheBooks(page.content || [])
         return page
       } catch (e) {
-        const cached = await offline.getCachedOnDeck(libraryIds, pageRequest)
+        const cached = rehydrate(await offline.getCachedOnDeck(libraryIds, pageRequest))
         if (cached.totalElements > 0) return cached
         throw e
       }
@@ -78,9 +86,10 @@ export default {
     const cachedSibling = async (bookId: string, delta: number): Promise<BookDto> => {
       const current = await offline.getCachedBook(bookId)
       if (!current) throw new Error('Book is not available in the offline catalog')
-      const siblings = await offline.getCachedBooksPage({
+      rehydrate(current)
+      const siblings = rehydrate(await offline.getCachedBooksPage({
         condition: new SearchConditionSeriesId(new SearchOperatorIs(current.seriesId)),
-      }, {unpaged: true, sort: ['metadata.numberSort']})
+      }, {unpaged: true, sort: ['metadata.numberSort']}))
       const index = siblings.content.findIndex((x: BookDto) => x.id === bookId)
       const sibling = siblings.content[index + delta]
       if (!sibling) throw new Error('No sibling book available offline')
@@ -89,7 +98,7 @@ export default {
 
     const originalNext = books.getBookSiblingNext.bind(books)
     books.getBookSiblingNext = async (bookId: string): Promise<BookDto> => {
-      if (offline.state.offlineMode) return cachedSibling(bookId, 1)
+      if (localOnly()) return cachedSibling(bookId, 1)
       try {
         const book = await originalNext(bookId)
         await offline.cacheBook(book)
@@ -101,7 +110,7 @@ export default {
 
     const originalPrevious = books.getBookSiblingPrevious.bind(books)
     books.getBookSiblingPrevious = async (bookId: string): Promise<BookDto> => {
-      if (offline.state.offlineMode) return cachedSibling(bookId, -1)
+      if (localOnly()) return cachedSibling(bookId, -1)
       try {
         const book = await originalPrevious(bookId)
         await offline.cacheBook(book)
@@ -117,9 +126,9 @@ export default {
 
     const originalGetOneSeries = series.getOneSeries.bind(series)
     series.getOneSeries = async (seriesId: string): Promise<SeriesDto> => {
-      if (offline.state.offlineMode) {
+      if (localOnly()) {
         const cached = await offline.getCachedSeries(seriesId)
-        if (cached) return cached
+        if (cached) return rehydrate(cached)
         throw new Error('This series is not available in the offline catalog')
       }
       try {
@@ -128,20 +137,20 @@ export default {
         return item
       } catch (e) {
         const cached = await offline.getCachedSeries(seriesId)
-        if (cached) return cached
+        if (cached) return rehydrate(cached)
         throw e
       }
     }
 
     const originalGetSeriesList = series.getSeriesList.bind(series)
     series.getSeriesList = async (search: SeriesSearch, pageRequest?: PageRequest): Promise<Page<SeriesDto>> => {
-      if (offline.state.offlineMode) return offline.getCachedSeriesPage(search, pageRequest)
+      if (localOnly()) return rehydrate(await offline.getCachedSeriesPage(search, pageRequest))
       try {
         const page = await originalGetSeriesList(search, pageRequest)
         await offline.cacheSeries(page.content || [])
         return page
       } catch (e) {
-        const cached = await offline.getCachedSeriesPage(search, pageRequest)
+        const cached = rehydrate(await offline.getCachedSeriesPage(search, pageRequest))
         if (cached.totalElements > 0) return cached
         throw e
       }
