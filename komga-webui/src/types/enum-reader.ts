@@ -29,6 +29,7 @@ export enum PagedReaderTransition {
   FADE = 'fade',
   SOFT_WIPE = 'soft_wipe',
   PAPER_CURL = 'paper_curl',
+  PHYSICAL_COMIC = 'physical_comic',
   NONE = 'none'
 }
 
