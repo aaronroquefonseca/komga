@@ -8,6 +8,10 @@ import {
 } from '@/functions/paged-reader-physical'
 import {PageDtoWithUrl} from '@/types/komga-books'
 
+function clamp01(value: number): number {
+  return Math.max(0, Math.min(1, value))
+}
+
 /**
  * Fork-local augmentation for the physical-comic transition.
  *
@@ -48,7 +52,7 @@ export function installPhysicalPagedReader(): void {
     if (this.transition !== PagedReaderTransition.PHYSICAL_COMIC) {
       return originalTransitionDuration.call(this)
     }
-    return this.effectiveTransition() === PagedReaderTransition.PAPER_CURL ? 320 : 220
+    return this.effectiveTransition() === PagedReaderTransition.PAPER_CURL ? 340 : 220
   }
 
   readerOptions.computed.physicalComicUnderSpread = function (): PageDtoWithUrl[] {
@@ -68,7 +72,9 @@ export function installPhysicalPagedReader(): void {
   // The normal paper curl reflects the current artwork and keeps the requested
   // destination flat underneath. Physical Comic instead treats the destination
   // as the back face of the sheet being turned, while the following spread sits
-  // flat underneath. The rest of the geometry/shadow implementation is reused.
+  // flat underneath. During the final third of the curl that following spread
+  // slides away, revealing the requested destination already mounted below it.
+  // This overlaps both phases and avoids a visual snap when the drag settles.
   paperOptions.render = function (h: CreateElement): VNode {
     const parent = this.$parent as any
     const physical = parent &&
@@ -80,6 +86,18 @@ export function installPhysicalPagedReader(): void {
       ? parent.physicalComicUnderSpread
       : this.backSpread
     const reflectedSpread = physical ? this.backSpread : this.frontSpread
+
+    const slideRaw = physical ? clamp01((this.progress - 0.66) / 0.34) : 0
+    const slideProgress = 1 - Math.pow(1 - slideRaw, 3)
+    const axisSize = Math.max(1, parent?.drag?.axisSize || window.innerWidth)
+    const direction = Math.sign(this.physicalDirection || -1)
+    const targetStyle = physical ? {
+      transform: `translate3d(${direction * axisSize * slideProgress}px, 0, 0)`,
+      willChange: 'transform',
+      filter: slideProgress > 0
+        ? `drop-shadow(${-direction * 10}px 0 12px rgba(0, 0, 0, ${0.12 + slideProgress * 0.12}))`
+        : 'none',
+    } : undefined
 
     const spread = (value: PageDtoWithUrl[]) => h('paged-reader-spread', {
       props: {
@@ -93,7 +111,10 @@ export function installPhysicalPagedReader(): void {
       staticClass: 'paper-sheet',
       attrs: {'aria-hidden': 'true'},
     }, [
-      h('div', {staticClass: 'paper-layer paper-target'}, [spread(targetSpread)]),
+      h('div', {
+        staticClass: 'paper-layer paper-target',
+        style: targetStyle,
+      }, [spread(targetSpread)]),
       h('div', {
         staticClass: 'paper-layer paper-current',
         style: this.currentStyle,
