@@ -52,7 +52,7 @@ const i18n = new VueI18n({
   },
 })
 
-// Fork-only reader settings use English fallback until they are moved into Weblate.
+// Fork-only features use English fallback until they are moved into Weblate.
 i18n.mergeLocaleMessage('en', {
   bookreader: {
     settings: {
@@ -74,6 +74,25 @@ i18n.mergeLocaleMessage('en', {
       webtoon_smooth_scroll: 'Smooth page scrolling',
       webtoon_page_navigation: 'Tap page navigation',
     },
+  },
+  offline: {
+    downloads: 'Downloads',
+    downloads_subtitle: 'Books stored locally on this device',
+    offline_mode: 'Offline mode',
+    offline_mode_description: 'Offline mode blocks Komga API and page streaming. Only locally cached metadata and downloaded pages are used.',
+    storage: 'Offline storage',
+    storage_unavailable: 'Storage estimate unavailable',
+    catalog_cached: '{books} books and {series} series cached locally',
+    downloading: 'Downloading',
+    available_offline: 'Available offline',
+    download_failed: 'Download failed',
+    save_offline: 'Save for offline reading',
+    retry_download: 'Retry offline download',
+    remove_download: 'Remove offline copy',
+    manage_downloads: 'Manage downloads',
+    no_downloads: 'No offline books yet',
+    no_downloads_description: 'Use a book action menu and choose “Save for offline reading”.',
+    unavailable_offline: 'This book is not downloaded on this device.',
   },
 })
 
