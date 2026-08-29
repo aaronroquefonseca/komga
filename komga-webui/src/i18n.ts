@@ -73,6 +73,8 @@ i18n.mergeLocaleMessage('en', {
     browser_quota: 'Browser quota: {quota}',
     browser_headroom: 'reported origin headroom: {available}',
     device_storage_warning: 'Browser quota is not the same as free device storage. Web apps cannot read the phone’s actual remaining storage, so downloads can run out of space before this quota is reached.',
+    browser_quota_insufficient: 'Not enough browser storage quota for this download. Estimated need: {required}; reported headroom: {available}.',
+    device_storage_full: 'Offline download stopped because browser or device storage is full. Free device storage or remove offline books, then retry.',
     catalog_cached: '{books} books and {series} series cached locally',
     downloading: 'Downloading',
     updating: 'Updating offline copy',
