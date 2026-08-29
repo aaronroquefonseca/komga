@@ -29,7 +29,7 @@ export function installPhysicalPagedReader(): void {
   readerOptions.__physicalComicInstalled = true
 
   const originalEffectiveTransition = readerOptions.methods.effectiveTransition
-  readerOptions.methods.effectiveTransition = function (): PagedReaderTransition {
+  readerOptions.methods.effectiveTransition = function (this: any): PagedReaderTransition {
     if (this.transition !== PagedReaderTransition.PHYSICAL_COMIC) {
       return originalEffectiveTransition.call(this)
     }
@@ -48,14 +48,14 @@ export function installPhysicalPagedReader(): void {
   }
 
   const originalTransitionDuration = readerOptions.computed.transitionDuration
-  readerOptions.computed.transitionDuration = function (): number {
+  readerOptions.computed.transitionDuration = function (this: any): number {
     if (this.transition !== PagedReaderTransition.PHYSICAL_COMIC) {
       return originalTransitionDuration.call(this)
     }
     return this.effectiveTransition() === PagedReaderTransition.PAPER_CURL ? 340 : 220
   }
 
-  readerOptions.computed.physicalComicUnderSpread = function (): PageDtoWithUrl[] {
+  readerOptions.computed.physicalComicUnderSpread = function (this: any): PageDtoWithUrl[] {
     if (this.transition !== PagedReaderTransition.PHYSICAL_COMIC) return []
     const index = physicalComicUnderSpreadIndex(
       this.drag.targetIndex,
@@ -75,7 +75,7 @@ export function installPhysicalPagedReader(): void {
   // flat underneath. During the final third of the curl that following spread
   // slides away, revealing the requested destination already mounted below it.
   // This overlaps both phases and avoids a visual snap when the drag settles.
-  paperOptions.render = function (h: CreateElement): VNode {
+  paperOptions.render = function (this: any, h: CreateElement): VNode {
     const parent = this.$parent as any
     const physical = parent &&
       parent.transition === PagedReaderTransition.PHYSICAL_COMIC &&
