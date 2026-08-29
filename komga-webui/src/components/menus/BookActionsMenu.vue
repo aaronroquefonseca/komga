@@ -7,6 +7,38 @@
         </v-btn>
       </template>
       <v-list dense>
+        <v-list-item
+          v-if="canOfflineDownload && !downloadRecord"
+          :disabled="!$offline.state.online || $offline.state.offlineMode"
+          @click="downloadOffline"
+        >
+          <v-list-item-icon><v-icon small>mdi-download-box-outline</v-icon></v-list-item-icon>
+          <v-list-item-title>{{ $t('offline.save_offline') }}</v-list-item-title>
+        </v-list-item>
+        <v-list-item v-else-if="downloadRecord && downloadRecord.status === 'downloading'" disabled>
+          <v-list-item-icon><v-icon small>mdi-download</v-icon></v-list-item-icon>
+          <v-list-item-title>
+            {{ $t('offline.downloading') }} {{ downloadRecord.completedPages }} / {{ downloadRecord.totalPages }}
+          </v-list-item-title>
+        </v-list-item>
+        <v-list-item
+          v-else-if="downloadRecord && downloadRecord.status === 'error'"
+          :disabled="!$offline.state.online || $offline.state.offlineMode"
+          @click="downloadOffline"
+        >
+          <v-list-item-icon><v-icon small>mdi-refresh</v-icon></v-list-item-icon>
+          <v-list-item-title>{{ $t('offline.retry_download') }}</v-list-item-title>
+        </v-list-item>
+        <v-list-item v-else-if="downloadRecord && downloadRecord.status === 'downloaded'" @click="removeOffline">
+          <v-list-item-icon><v-icon small>mdi-download-box</v-icon></v-list-item-icon>
+          <v-list-item-title>{{ $t('offline.remove_download') }}</v-list-item-title>
+        </v-list-item>
+        <v-list-item :to="{name: 'offline-downloads'}">
+          <v-list-item-icon><v-icon small>mdi-download-multiple</v-icon></v-list-item-icon>
+          <v-list-item-title>{{ $t('offline.manage_downloads') }}</v-list-item-title>
+        </v-list-item>
+        <v-divider/>
+
         <v-list-item @click="analyze" v-if="isAdmin">
           <v-list-item-title>{{ $t('menu.analyze') }}</v-list-item-title>
         </v-list-item>
@@ -31,9 +63,10 @@
 </template>
 <script lang="ts">
 import {getReadProgress} from '@/functions/book-progress'
-import {ReadStatus} from '@/types/enum-books'
+import {MediaStatus, ReadStatus} from '@/types/enum-books'
 import Vue from 'vue'
 import {BookDto, ReadProgressUpdateDto} from '@/types/komga-books'
+import {OfflineDownloadRecord} from '@/services/offline-library.service'
 
 export default Vue.extend({
   name: 'BookActionsMenu',
@@ -67,6 +100,12 @@ export default Vue.extend({
     isUnread (): boolean {
       return getReadProgress(this.book) === ReadStatus.UNREAD
     },
+    canOfflineDownload (): boolean {
+      return this.book.media?.status === MediaStatus.READY && this.$store.getters.mePageStreaming
+    },
+    downloadRecord (): OfflineDownloadRecord | undefined {
+      return this.$offline.getDownload(this.book.id)
+    },
   },
   methods: {
     analyze () {
@@ -84,6 +123,14 @@ export default Vue.extend({
     },
     async markUnread () {
       await this.$komgaBooks.deleteReadProgress(this.book.id)
+    },
+    async downloadOffline () {
+      this.menuState = false
+      await this.$offline.downloadBook(this.book.id)
+    },
+    async removeOffline () {
+      this.menuState = false
+      await this.$offline.removeDownload(this.book.id)
     },
     promptDeleteBook () {
       this.$store.dispatch('dialogDeleteBook', this.book)
