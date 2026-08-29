@@ -14,9 +14,9 @@ import {
   openOfflineDatabase,
 } from '@/services/offline-db'
 
-export const OFFLINE_MEDIA_CACHE = 'komga-offline-media-v1'
+export const OFFLINE_BOOK_CACHE_PREFIX = 'komga-offline-book-v2-'
 
-export type OfflineDownloadStatus = 'downloading' | 'downloaded' | 'error'
+export type OfflineDownloadStatus = 'downloading' | 'updating' | 'downloaded' | 'error'
 
 export interface OfflineDownloadRecord {
   bookId: string
@@ -27,6 +27,13 @@ export interface OfflineDownloadRecord {
   bytes: number
   downloadedAt?: string
   error?: string
+  cacheName?: string
+  manifestRevision?: string
+  sourceLastModified?: string
+  updateAvailable?: boolean
+  remoteManifestRevision?: string
+  remotePages?: PageDto[]
+  sourceMissing?: boolean
 }
 
 interface CachedPages {
@@ -40,6 +47,7 @@ interface QueuedProgress {
   progress: ReadProgressUpdateDto
   updatedAt: string
   pending: boolean
+  revision?: string
 }
 
 interface OfflineSetting<T> {
@@ -92,10 +100,10 @@ function operatorMatches(actual: any, operator: any): boolean {
   }
 }
 
-function conditionMatches(item: any, condition: any, series: boolean): boolean {
+function conditionMatches(item: any, condition: any): boolean {
   if (!condition || Object.keys(condition).length === 0) return true
-  if (Array.isArray(condition.allOf)) return condition.allOf.every((x: any) => conditionMatches(item, x, series))
-  if (Array.isArray(condition.anyOf)) return condition.anyOf.some((x: any) => conditionMatches(item, x, series))
+  if (Array.isArray(condition.allOf)) return condition.allOf.every((x: any) => conditionMatches(item, x))
+  if (Array.isArray(condition.anyOf)) return condition.anyOf.some((x: any) => conditionMatches(item, x))
 
   return Object.entries(condition).every(([key, operator]) => {
     switch (key) {
@@ -116,9 +124,7 @@ function conditionMatches(item: any, condition: any, series: boolean): boolean {
       case 'sharingLabel': return operatorMatches(item.metadata?.sharingLabels || [], operator)
       case 'titleSort': return operatorMatches(item.metadata?.titleSort || item.metadata?.title, operator)
       default:
-        // Unknown filters are left permissive offline. This is preferable to
-        // hiding cached entries because a newly-added server filter has no local
-        // implementation yet.
+        // Unknown filters stay permissive offline rather than hiding cached data.
         return true
     }
   })
@@ -176,6 +182,62 @@ function pageFromItems<T>(items: T[], pageRequest?: any): Page<T> {
   } as Page<T>
 }
 
+function stableHash(value: string): string {
+  let hash = 0x811c9dc5
+  for (let i = 0; i < value.length; i++) {
+    hash ^= value.charCodeAt(i)
+    hash = Math.imul(hash, 0x01000193)
+  }
+  return (hash >>> 0).toString(16).padStart(8, '0')
+}
+
+function manifestRevision(pages: PageDto[]): string {
+  // Deliberately excludes archive/container details. A CBR -> CBZ conversion
+  // with identical extracted pages therefore does not force a media redownload.
+  const manifest = pages.map(page => [
+    page.number,
+    page.fileName,
+    page.mediaType,
+    page.width || 0,
+    page.height || 0,
+    page.sizeBytes || 0,
+  ].join(':')).join('|')
+  return `${pages.length}-${stableHash(manifest)}`
+}
+
+function pageIdentity(page: PageDto): string {
+  return [page.fileName, page.mediaType, page.width || 0, page.height || 0, page.sizeBytes || 0].join(':')
+}
+
+function contentIdentity(page: PageDto): string {
+  return [page.mediaType, page.width || 0, page.height || 0, page.sizeBytes || 0].join(':')
+}
+
+function remapPage(oldPages: PageDto[], newPages: PageDto[], oldPageNumber: number): number {
+  if (newPages.length === 0) return 1
+  const source = oldPages.find(page => page.number === oldPageNumber) || oldPages[oldPageNumber - 1]
+  if (!source) return Math.max(1, Math.min(newPages.length, oldPageNumber))
+
+  const exact = newPages.find(page => pageIdentity(page) === pageIdentity(source))
+  if (exact) return exact.number
+
+  // Translators/promotional pages are commonly removed without renaming the
+  // remaining artwork. If names did change, use dimensions+byte size only when
+  // that identity is unique in the new manifest.
+  const contentMatches = newPages.filter(page => contentIdentity(page) === contentIdentity(source))
+  if (contentMatches.length === 1) return contentMatches[0].number
+
+  // Last-resort fallback preserves approximate position while staying valid.
+  const ratio = oldPages.length > 1 ? (oldPageNumber - 1) / (oldPages.length - 1) : 0
+  return Math.max(1, Math.min(newPages.length, Math.round(ratio * Math.max(0, newPages.length - 1)) + 1))
+}
+
+function dateToken(value: any): string {
+  if (!value) return ''
+  const date = new Date(value)
+  return Number.isNaN(date.getTime()) ? `${value}` : date.toISOString()
+}
+
 export default class OfflineLibraryService {
   private http: AxiosInstance
   private ready: Promise<void>
@@ -201,7 +263,6 @@ export default class OfflineLibraryService {
 
   private handleOnline = () => {
     this.state.online = true
-    if (!this.state.offlineMode) this.flushProgressQueue()
   }
 
   private handleOffline = () => {
@@ -213,6 +274,7 @@ export default class OfflineLibraryService {
     const setting = await offlineGet<OfflineSetting<boolean>>(OFFLINE_STORES.settings, 'offlineMode')
     this.state.offlineMode = setting?.value === true
     await this.refreshState()
+    await this.cleanupOrphanedBookCaches()
     this.state.initialized = true
     this.notifyServiceWorker()
 
@@ -221,17 +283,17 @@ export default class OfflineLibraryService {
     } catch (_) {
       // Persistence is best-effort; browser storage still works without it.
     }
-
-    if (this.state.online && !this.state.offlineMode) this.flushProgressQueue()
   }
 
   async whenReady(): Promise<void> {
     await this.ready
   }
 
-  private notifyServiceWorker(): void {
+  private notifyServiceWorker(bookId?: string): void {
     if (!('serviceWorker' in navigator)) return
-    const message = {type: 'KOMGA_OFFLINE_MODE', enabled: this.state.offlineMode}
+    const message = bookId
+      ? {type: 'KOMGA_DOWNLOAD_CHANGED', bookId}
+      : {type: 'KOMGA_OFFLINE_MODE', enabled: this.state.offlineMode}
     navigator.serviceWorker.controller?.postMessage(message)
     navigator.serviceWorker.ready.then(registration => registration.active?.postMessage(message)).catch(() => undefined)
   }
@@ -241,11 +303,11 @@ export default class OfflineLibraryService {
     this.state.offlineMode = enabled
     await offlinePut(OFFLINE_STORES.settings, {key: 'offlineMode', value: enabled} as OfflineSetting<boolean>)
     this.notifyServiceWorker()
-    if (!enabled && this.state.online) this.flushProgressQueue()
   }
 
   isDownloaded(bookId: string): boolean {
-    return this.state.downloads.some(x => x.bookId === bookId && x.status === 'downloaded')
+    const download = this.getDownload(bookId)
+    return !!download?.cacheName && ['downloaded', 'updating'].includes(download.status)
   }
 
   getDownload(bookId: string): OfflineDownloadRecord | undefined {
@@ -263,9 +325,18 @@ export default class OfflineLibraryService {
     this.state.cachedSeries = series.length
   }
 
+  private async cleanupOrphanedBookCaches(): Promise<void> {
+    if (!('caches' in window)) return
+    const active = new Set(this.state.downloads.map(x => x.cacheName).filter((x): x is string => !!x))
+    const names = await caches.keys()
+    await Promise.all(names
+      .filter(name => name.startsWith(OFFLINE_BOOK_CACHE_PREFIX) && !active.has(name))
+      .map(name => caches.delete(name)))
+  }
+
   async cacheBook(book: BookDto): Promise<void> {
     await offlinePut(OFFLINE_STORES.books, clone(book))
-    this.state.cachedBooks = Math.max(this.state.cachedBooks, 1)
+    this.state.cachedBooks = (await offlineGetAll<BookDto>(OFFLINE_STORES.books)).length
   }
 
   async cacheBooks(books: BookDto[]): Promise<void> {
@@ -275,7 +346,7 @@ export default class OfflineLibraryService {
 
   async cacheSeriesItem(series: SeriesDto): Promise<void> {
     await offlinePut(OFFLINE_STORES.series, clone(series))
-    this.state.cachedSeries = Math.max(this.state.cachedSeries, 1)
+    this.state.cachedSeries = (await offlineGetAll<SeriesDto>(OFFLINE_STORES.series)).length
   }
 
   async cacheSeries(series: SeriesDto[]): Promise<void> {
@@ -292,15 +363,19 @@ export default class OfflineLibraryService {
   }
 
   async getCachedBook(bookId: string): Promise<BookDto | undefined> {
-    const book = await offlineGet<BookDto>(OFFLINE_STORES.books, bookId)
+    // An active download is a coherent snapshot. Prefer its BookDto over newer
+    // catalog metadata until that downloaded snapshot is atomically replaced.
+    const download = this.getDownload(bookId)
+    const book = download?.cacheName ? clone(download.book) : await offlineGet<BookDto>(OFFLINE_STORES.books, bookId)
     if (!book) return undefined
+
     const queued = await offlineGet<QueuedProgress>(OFFLINE_STORES.progress, bookId)
-    if (queued) {
+    if (queued?.progress.page) {
       const pagesCount = book.media?.pagesCount || 0
       ;(book as any).readProgress = {
         ...(book as any).readProgress,
         page: queued.progress.page,
-        completed: pagesCount > 0 && queued.progress.page >= pagesCount,
+        completed: queued.progress.completed === true || (pagesCount > 0 && queued.progress.page >= pagesCount),
         readDate: queued.updatedAt,
       }
     }
@@ -318,17 +393,13 @@ export default class OfflineLibraryService {
 
   async getCachedBooksPage(search: BookSearch = {}, pageRequest?: any): Promise<Page<BookDto>> {
     const books = await offlineGetAll<BookDto>(OFFLINE_STORES.books)
-    const matching = books.filter(book =>
-      conditionMatches(book, search.condition, false) && fullTextMatches(book, search.fullTextSearch),
-    )
+    const matching = books.filter(book => conditionMatches(book, search.condition) && fullTextMatches(book, search.fullTextSearch))
     return pageFromItems(matching, pageRequest)
   }
 
   async getCachedSeriesPage(search: SeriesSearch = {}, pageRequest?: any): Promise<Page<SeriesDto>> {
     const series = await offlineGetAll<SeriesDto>(OFFLINE_STORES.series)
-    const matching = series.filter(item =>
-      conditionMatches(item, search.condition, true) && fullTextMatches(item, search.fullTextSearch),
-    )
+    const matching = series.filter(item => conditionMatches(item, search.condition) && fullTextMatches(item, search.fullTextSearch))
     return pageFromItems(matching, pageRequest)
   }
 
@@ -347,27 +418,71 @@ export default class OfflineLibraryService {
     if (!this.state.online || this.state.offlineMode || this.state.syncingMetadata) return
     this.state.syncingMetadata = true
     try {
-      const [books, series] = await Promise.all([
+      const [booksResponse, seriesResponse] = await Promise.all([
         this.http.post('/api/v1/books/list', {}, {params: {unpaged: true}}),
         this.http.post('/api/v1/series/list', {}, {params: {unpaged: true}}),
       ])
-      await Promise.all([
-        this.cacheBooks(books.data.content || []),
-        this.cacheSeries(series.data.content || []),
-      ])
+      const books = (booksResponse.data.content || []) as BookDto[]
+      const series = (seriesResponse.data.content || []) as SeriesDto[]
+      await Promise.all([this.cacheBooks(books), this.cacheSeries(series)])
+      await this.checkDownloadUpdates(books)
     } finally {
       this.state.syncingMetadata = false
     }
   }
 
+  private async checkDownloadUpdates(serverBooks: BookDto[]): Promise<void> {
+    const byId = new Map(serverBooks.map(book => [book.id, book]))
+    for (const record of this.state.downloads.filter(x => !!x.cacheName)) {
+      const serverBook = byId.get(record.bookId)
+      if (!serverBook) {
+        if (!record.sourceMissing) {
+          record.sourceMissing = true
+          await this.updateDownload(record)
+        }
+        continue
+      }
+
+      record.sourceMissing = false
+      const modified = dateToken(serverBook.lastModified)
+      const coarseChanged = modified !== (record.sourceLastModified || '') ||
+        serverBook.media?.pagesCount !== record.totalPages
+      if (!coarseChanged) continue
+
+      try {
+        const response = await this.http.get(`/api/v1/books/${record.bookId}/pages`)
+        const pages = response.data as PageDto[]
+        const revision = manifestRevision(pages)
+        if (revision === record.manifestRevision) {
+          // Archive conversion or metadata/file timestamp changed, but the
+          // extracted comic pages are identical. No media redownload needed.
+          record.book = clone(serverBook)
+          record.sourceLastModified = modified
+          record.updateAvailable = false
+          delete record.remoteManifestRevision
+          delete record.remotePages
+          await this.updateDownload(record)
+        } else {
+          record.updateAvailable = true
+          record.remoteManifestRevision = revision
+          record.remotePages = clone(pages)
+          await this.updateDownload(record)
+        }
+      } catch (_) {
+        // Keep the current snapshot. A later catalog sync will retry the check.
+      }
+    }
+  }
+
   private downloadPageUrl(bookId: string, page: PageDto): string {
-    // Store the format Komga would normally hand to broadly-supported browsers.
-    // The service worker matches page cache entries ignoring the query string,
-    // so a cached converted response can still satisfy the reader's canonical URL.
     const directlySupported = ['image/jpeg', 'image/png', 'image/gif', 'image/webp', 'image/avif']
     return directlySupported.includes(page.mediaType)
       ? bookPageUrl(bookId, page.number)
       : bookPageUrl(bookId, page.number, 'jpeg')
+  }
+
+  private cacheName(bookId: string, revision: string): string {
+    return `${OFFLINE_BOOK_CACHE_PREFIX}${stableHash(bookId)}-${revision}`
   }
 
   private async updateDownload(record: OfflineDownloadRecord): Promise<void> {
@@ -375,6 +490,7 @@ export default class OfflineLibraryService {
     const index = this.state.downloads.findIndex(x => x.bookId === record.bookId)
     if (index >= 0) this.state.downloads.splice(index, 1, clone(record))
     else this.state.downloads.unshift(clone(record))
+    this.notifyServiceWorker(record.bookId)
   }
 
   async downloadBook(bookId: string): Promise<void> {
@@ -388,32 +504,64 @@ export default class OfflineLibraryService {
     ])
     const book = bookResponse.data as BookDto
     const pages = pagesResponse.data as PageDto[]
-    await Promise.all([this.cacheBook(book), this.cachePages(bookId, pages)])
+    const revision = manifestRevision(pages)
+    const existing = this.getDownload(bookId)
 
-    const record: OfflineDownloadRecord = {
-      bookId,
-      book: clone(book),
-      status: 'downloading',
-      totalPages: pages.length,
-      completedPages: 0,
-      bytes: 0,
+    // If only the container/archive changed (for example CBR -> CBZ) while the
+    // extracted page manifest is identical, update metadata without redownloading.
+    if (existing?.cacheName && existing.manifestRevision === revision) {
+      existing.book = clone(book)
+      existing.sourceLastModified = dateToken(book.lastModified)
+      existing.updateAvailable = false
+      existing.sourceMissing = false
+      delete existing.remoteManifestRevision
+      delete existing.remotePages
+      delete existing.error
+      await this.cacheBook(book)
+      await this.updateDownload(existing)
+      return
     }
+
+    const seriesResponse = await this.http.get(`/api/v1/series/${book.seriesId}`)
+    const series = seriesResponse.data as SeriesDto
+    const stagingCacheName = this.cacheName(bookId, revision)
+    await caches.delete(stagingCacheName)
+    const stagingCache = await caches.open(stagingCacheName)
+
+    const hadActiveSnapshot = !!existing?.cacheName
+    const oldCacheName = existing?.cacheName
+    const record: OfflineDownloadRecord = hadActiveSnapshot
+      ? {
+        ...clone(existing!),
+        status: 'updating',
+        totalPages: pages.length,
+        completedPages: 0,
+        bytes: 0,
+        updateAvailable: true,
+      }
+      : {
+        bookId,
+        book: clone(book),
+        status: 'downloading',
+        totalPages: pages.length,
+        completedPages: 0,
+        bytes: 0,
+      }
+    delete record.error
     await this.updateDownload(record)
 
-    const cache = await caches.open(OFFLINE_MEDIA_CACHE)
     let cursor = 0
     try {
       const workers = Array.from({length: Math.min(3, Math.max(1, pages.length))}, async () => {
         while (cursor < pages.length) {
           const page = pages[cursor++]
-          const url = this.downloadPageUrl(bookId, page)
-          const request = new Request(url, {credentials: 'include'})
+          const request = new Request(this.downloadPageUrl(bookId, page), {credentials: 'include'})
           const response = await fetch(request)
           if (!response.ok) throw new Error(`Could not download page ${page.number} (${response.status})`)
 
           const sizeHeader = Number(response.headers.get('content-length') || 0)
           const sizePromise = sizeHeader > 0 ? Promise.resolve(sizeHeader) : response.clone().blob().then(blob => blob.size)
-          await cache.put(request, response)
+          await stagingCache.put(request, response)
           record.bytes += await sizePromise
           record.completedPages += 1
           await this.updateDownload(record)
@@ -421,48 +569,74 @@ export default class OfflineLibraryService {
       })
       await Promise.all(workers)
 
-      // Keep the book poster available to the Downloads view while offline.
       try {
         const thumbnailRequest = new Request(bookThumbnailUrl(bookId), {credentials: 'include'})
         const thumbnail = await fetch(thumbnailRequest)
-        if (thumbnail.ok) await cache.put(thumbnailRequest, thumbnail)
+        if (thumbnail.ok) await stagingCache.put(thumbnailRequest, thumbnail)
       } catch (_) {
-        // A missing thumbnail should not invalidate an otherwise complete book.
+        // Poster failure does not invalidate a complete set of readable pages.
       }
 
+      // Atomic commit: only now does this revision become the one the service
+      // worker serves. Until this point the old cacheName remained active.
+      record.book = clone(book)
       record.status = 'downloaded'
+      record.cacheName = stagingCacheName
+      record.manifestRevision = revision
+      record.sourceLastModified = dateToken(book.lastModified)
       record.downloadedAt = new Date().toISOString()
+      record.updateAvailable = false
+      record.sourceMissing = false
+      delete record.remoteManifestRevision
+      delete record.remotePages
       delete record.error
+
+      await Promise.all([
+        this.cacheBook(book),
+        this.cacheSeriesItem(series),
+        this.cachePages(bookId, pages),
+      ])
       await this.updateDownload(record)
+
+      if (oldCacheName && oldCacheName !== stagingCacheName) await caches.delete(oldCacheName)
     } catch (e) {
-      record.status = 'error'
-      record.error = e instanceof Error ? e.message : `${e}`
-      await this.updateDownload(record)
+      await caches.delete(stagingCacheName)
+      if (hadActiveSnapshot && existing) {
+        const restored = clone(existing)
+        restored.status = 'downloaded'
+        restored.updateAvailable = true
+        restored.error = e instanceof Error ? e.message : `${e}`
+        await this.updateDownload(restored)
+      } else {
+        record.status = 'error'
+        delete record.cacheName
+        record.error = e instanceof Error ? e.message : `${e}`
+        await this.updateDownload(record)
+      }
       throw e
     }
   }
 
   async removeDownload(bookId: string): Promise<void> {
     await this.ready
-    const cache = await caches.open(OFFLINE_MEDIA_CACHE)
-    const pages = await this.getCachedPages(bookId) || []
-    for (const page of pages) {
-      await cache.delete(this.downloadPageUrl(bookId, page), {ignoreSearch: true})
-    }
-    await cache.delete(bookThumbnailUrl(bookId), {ignoreSearch: true})
+    const record = this.getDownload(bookId)
+    if (record?.cacheName) await caches.delete(record.cacheName)
     await offlineDelete(OFFLINE_STORES.downloads, bookId)
     this.state.downloads = this.state.downloads.filter(x => x.bookId !== bookId)
-    // Book/series/page metadata deliberately remains in IndexedDB. Removing a
-    // download removes only the large local media payloads.
+    this.notifyServiceWorker(bookId)
+    // Metadata deliberately remains. Removing a download removes only media.
   }
 
   async updateReadProgress(bookId: string, progress: ReadProgressUpdateDto): Promise<void> {
     await this.ready
+    const activeDownload = this.getDownload(bookId)
+    const fromOfflineSnapshot = (this.state.offlineMode || !this.state.online) && !!activeDownload?.cacheName
     const queued: QueuedProgress = {
       bookId,
       progress: clone(progress),
       updatedAt: new Date().toISOString(),
       pending: true,
+      revision: fromOfflineSnapshot ? activeDownload?.manifestRevision : undefined,
     }
     await offlinePut(OFFLINE_STORES.progress, queued)
 
@@ -472,7 +646,7 @@ export default class OfflineLibraryService {
       queued.pending = false
       await offlinePut(OFFLINE_STORES.progress, queued)
     } catch (_) {
-      // Remains queued and is retried on the next online/focus cycle.
+      // Remains queued and is retried after catalog/revision reconciliation.
     }
   }
 
@@ -484,11 +658,18 @@ export default class OfflineLibraryService {
       const entries = await offlineGetAll<QueuedProgress>(OFFLINE_STORES.progress)
       for (const entry of entries.filter(x => x.pending)) {
         try {
-          await this.http.patch(`/api/v1/books/${entry.bookId}/read-progress`, entry.progress)
+          const outgoing = clone(entry.progress)
+          const download = this.getDownload(entry.bookId)
+          if (outgoing.page && entry.revision && download?.manifestRevision === entry.revision &&
+            download.updateAvailable && download.remotePages?.length) {
+            const oldPages = await this.getCachedPages(entry.bookId) || []
+            outgoing.page = remapPage(oldPages, download.remotePages, outgoing.page)
+          }
+
+          await this.http.patch(`/api/v1/books/${entry.bookId}/read-progress`, outgoing)
           entry.pending = false
           await offlinePut(OFFLINE_STORES.progress, entry)
         } catch (_) {
-          // Stop after the first network failure. Another online/focus event will retry.
           break
         }
       }
