@@ -81,9 +81,13 @@
 import {getReadProgress} from '@/functions/book-progress'
 import {isStandalonePwa} from '@/functions/pwa'
 import {MediaStatus, ReadStatus} from '@/types/enum-books'
+import {ERROR} from '@/types/events'
 import Vue from 'vue'
 import {BookDto, ReadProgressUpdateDto} from '@/types/komga-books'
 import {OfflineDownloadRecord} from '@/services/offline-library.service'
+
+const STORAGE_RESERVE_BYTES = 64 * 1024 * 1024
+const DOWNLOAD_SIZE_MARGIN = 1.25
 
 export default Vue.extend({
   name: 'BookActionsMenu',
@@ -142,12 +146,50 @@ export default Vue.extend({
     async markUnread() {
       await this.$komgaBooks.deleteReadProgress(this.book.id)
     },
+    formatBytes(bytes: number): string {
+      if (!bytes) return '0 B'
+      const units = ['B', 'KB', 'MB', 'GB', 'TB']
+      const index = Math.min(units.length - 1, Math.floor(Math.log(bytes) / Math.log(1024)))
+      const value = bytes / Math.pow(1024, index)
+      return `${value >= 10 || index === 0 ? value.toFixed(0) : value.toFixed(1)} ${units[index]}`
+    },
+    async browserQuotaAllows(requiredBytes: number): Promise<boolean> {
+      if (requiredBytes <= 0) return true
+      const estimate = await this.$offline.storageEstimate()
+      if (!estimate.quota) return true
+
+      const available = Math.max(0, estimate.quota - estimate.usage)
+      const estimatedRequired = Math.ceil(requiredBytes * DOWNLOAD_SIZE_MARGIN) + STORAGE_RESERVE_BYTES
+      if (estimatedRequired <= available) return true
+
+      this.$eventHub.$emit(ERROR, {
+        message: this.$t('offline.browser_quota_insufficient', {
+          required: this.formatBytes(estimatedRequired),
+          available: this.formatBytes(available),
+        }).toString(),
+      })
+      return false
+    },
+    isStorageFullError(error: any): boolean {
+      const message = `${error?.message || error || ''}`
+      return error?.name === 'QuotaExceededError' || /quota.?exceeded|storage.{0,12}(full|space)/i.test(message)
+    },
     async downloadOffline() {
       this.menuState = false
-      // Force Vue CLI's lazy reader chunk (and its CSS/dependencies) through the
-      // active service worker before the device can lose connectivity.
-      await import(/* webpackChunkName: "read-book" */ '@/views/DivinaReader.vue')
-      await this.$offline.downloadBook(this.book.id)
+      if (!(await this.browserQuotaAllows(this.book.sizeBytes || 0))) return
+
+      try {
+        // Force Vue CLI's lazy reader chunk (and its CSS/dependencies) through the
+        // active service worker before the device can lose connectivity.
+        await import(/* webpackChunkName: "read-book" */ '@/views/DivinaReader.vue')
+        await this.$offline.downloadBook(this.book.id)
+      } catch (e) {
+        if (this.isStorageFullError(e)) {
+          this.$eventHub.$emit(ERROR, {message: this.$t('offline.device_storage_full').toString()})
+          return
+        }
+        throw e
+      }
     },
     async removeOffline() {
       this.menuState = false
