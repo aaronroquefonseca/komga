@@ -1,7 +1,7 @@
 import {CreateElement, VNode} from 'vue'
 import PagedReader from '@/components/readers/PagedReader.vue'
 import PagedReaderPaperSheet from '@/components/readers/PagedReaderPaperSheet.vue'
-import {PagedReaderTransition} from '@/types/enum-reader'
+import {PagedReaderLayout, PagedReaderTransition, ScaleType} from '@/types/enum-reader'
 import {
   physicalComicTransitionKind,
   physicalComicUnderSpreadIndex,
@@ -12,14 +12,47 @@ function clamp01(value: number): number {
   return Math.max(0, Math.min(1, value))
 }
 
+function blankPageLike(page?: PageDtoWithUrl): PageDtoWithUrl {
+  const width = Math.max(1, page?.width || 1000)
+  const height = Math.max(1, page?.height || 1500)
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}"></svg>`
+  return {
+    number: 0,
+    width,
+    height,
+    url: `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`,
+  } as PageDtoWithUrl
+}
+
+function physicalLeafImageStyle(scale: ScaleType): Record<string, string> {
+  const common = {
+    objectFit: 'contain',
+    objectPosition: 'center',
+    display: 'block',
+    margin: 'auto',
+  }
+
+  switch (scale) {
+    case ScaleType.ORIGINAL:
+      return {...common, maxWidth: '100%', maxHeight: '100%', width: 'auto', height: 'auto'}
+    case ScaleType.WIDTH_SHRINK_ONLY:
+      return {...common, maxWidth: '100%', maxHeight: '100%', width: '100%', height: 'auto'}
+    case ScaleType.WIDTH:
+      return {...common, width: '100%', minHeight: '100%', height: 'auto'}
+    case ScaleType.HEIGHT:
+      return {...common, width: 'auto', height: '100%', maxWidth: '100%'}
+    case ScaleType.SCREEN:
+    default:
+      return {...common, width: '100%', height: '100%'}
+  }
+}
+
 /**
  * Fork-local augmentation for the physical-comic transition.
  *
- * PagedReader is still the authoritative gesture/compositor implementation. We
- * only select which existing compositor effect applies to an adjacent edge and
- * change the two surfaces rendered by PagedReaderPaperSheet during a physical
- * curl. Keeping this here avoids duplicating the large reader component while
- * the animation is still experimental.
+ * Single-page mode reuses the curl compositor with different physical surfaces.
+ * Double-page mode gets a dedicated half-sheet compositor so an actual leaf
+ * starts on one side of the open book and settles on the other side.
  */
 export function installPhysicalPagedReader(): void {
   const readerOptions = (PagedReader as any).options
@@ -55,28 +88,64 @@ export function installPhysicalPagedReader(): void {
     return this.effectiveTransition() === PagedReaderTransition.PAPER_CURL ? 340 : 220
   }
 
-  readerOptions.computed.physicalComicUnderSpread = function (this: any): PageDtoWithUrl[] {
-    if (this.transition !== PagedReaderTransition.PHYSICAL_COMIC) return []
+  readerOptions.computed.physicalComicUnderSpread = function (this: any): PageDtoWithUrl[] | null {
+    if (this.transition !== PagedReaderTransition.PHYSICAL_COMIC) return null
     const index = physicalComicUnderSpreadIndex(
       this.drag.targetIndex,
       this.drag.navigationDelta,
       this.spreads.length,
     )
-    if (index !== null && this.spreads[index]) return this.spreads[index]
-    if (this.drag.targetIndex !== null && this.spreads[this.drag.targetIndex]) {
-      return this.spreads[this.drag.targetIndex]
-    }
-    return this.spreads[this.visualPage] || []
+    return index !== null && this.spreads[index] ? this.spreads[index] : null
   }
 
-  // The normal paper curl reflects the current artwork and keeps the requested
-  // destination flat underneath. Physical Comic instead treats the destination
-  // as the actual back face of the sheet being turned, while the following
-  // spread sits flat underneath. The physical backside is rendered at full
-  // fidelity: unlike normal Paper Curl it gets no paper-translucency tint.
-  // During the final third of the curl the following spread slides away,
-  // revealing the requested destination already mounted below it. This overlaps
-  // both phases and avoids a visual snap when the drag settles.
+  readerOptions.computed.physicalComicDoubleLeaf = function (this: any): boolean {
+    if (this.transition !== PagedReaderTransition.PHYSICAL_COMIC || this.vertical) return false
+    if (this.pageLayout !== PagedReaderLayout.DOUBLE_PAGES &&
+      this.pageLayout !== PagedReaderLayout.DOUBLE_NO_COVER) return false
+    if (!this.drag.prepared || this.drag.targetIndex === null) return false
+    const current = this.spreads[this.drag.currentIndex]
+    const target = this.spreads[this.drag.targetIndex]
+    return current?.length === 2 && target?.length === 2
+  }
+
+  const originalCustomSpreadStyle = readerOptions.methods.customSpreadStyle
+  readerOptions.methods.customSpreadStyle = function (this: any, spreadIndex: number): Record<string, string> {
+    const style = originalCustomSpreadStyle.call(this, spreadIndex)
+    if (this.transition !== PagedReaderTransition.PHYSICAL_COMIC ||
+      !this.drag.prepared ||
+      this.effectiveTransition() !== PagedReaderTransition.PAPER_CURL) {
+      return style
+    }
+
+    const isTarget = spreadIndex === this.drag.targetIndex
+    if (!isTarget) return style
+
+    // The dedicated double-page leaf already paints the exact intermediate open
+    // spread. Keep the final target spread hidden until settlement so it cannot
+    // leak through transparent placeholder pages.
+    if (this.physicalComicDoubleLeaf) {
+      return {...style, opacity: '0'}
+    }
+
+    // At book boundaries there is no physical sheet behind the curl. Hide the
+    // destination initially so returning to the cover exposes the reader's real
+    // background, then bring the requested page in quickly during the tail end.
+    if (!this.physicalComicUnderSpread) {
+      const raw = clamp01((this.transitionProgressValue - 0.66) / 0.34)
+      const eased = 1 - Math.pow(1 - raw, 3)
+      const direction = this.activePhysicalDirection || 1
+      const start = -direction * this.drag.axisSize * 0.22
+      return {
+        ...style,
+        transform: this.axisTranslate(start * (1 - eased)),
+        opacity: `${eased}`,
+        zIndex: '1',
+      }
+    }
+
+    return style
+  }
+
   paperOptions.render = function (this: any, h: CreateElement): VNode {
     const parent = this.$parent as any
     const physical = parent &&
@@ -84,16 +153,103 @@ export function installPhysicalPagedReader(): void {
       typeof parent.effectiveTransition === 'function' &&
       parent.effectiveTransition() === PagedReaderTransition.PAPER_CURL
 
-    const targetSpread = physical && parent.physicalComicUnderSpread?.length
-      ? parent.physicalComicUnderSpread
+    const spread = (value: PageDtoWithUrl[]) => h('paged-reader-spread', {
+      props: {
+        spread: value,
+        flipDirection: this.flipDirection,
+        scale: this.scale,
+      },
+    })
+
+    if (physical && parent.physicalComicDoubleLeaf) {
+      const current = parent.spreads[parent.drag.currentIndex] as PageDtoWithUrl[]
+      const target = parent.spreads[parent.drag.targetIndex] as PageDtoWithUrl[]
+      const forward = parent.drag.navigationDelta > 0
+      const front = forward ? current[1] : current[0]
+      const back = forward ? target[0] : target[1]
+      const baseSpread = forward
+        ? [current[0] || blankPageLike(front), target[1] || blankPageLike(back)]
+        : [target[0] || blankPageLike(back), current[1] || blankPageLike(front)]
+
+      const progress = clamp01(this.progress)
+      const direction = Math.sign(this.physicalDirection || -1)
+      const angle = direction * progress * 180
+      const arch = Math.sin(progress * Math.PI)
+      const verticalDelta = this.touchCaptured ? this.touchCurrentY - this.touchStartY : 0
+      const cornerTilt = verticalDelta * 10 * arch
+      const startsRight = direction < 0
+      const leafStyle: Record<string, string> = {
+        position: 'absolute',
+        top: '0',
+        bottom: '0',
+        width: '50%',
+        height: '100%',
+        left: startsRight ? '50%' : '0',
+        transformOrigin: startsRight ? 'left center' : 'right center',
+        transform: `perspective(1800px) rotateY(${angle}deg) rotateZ(${cornerTilt}deg)`,
+        transformStyle: 'preserve-3d',
+        willChange: 'transform',
+        zIndex: '6',
+      }
+      const faceStyle: Record<string, string> = {
+        position: 'absolute',
+        inset: '0',
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        backfaceVisibility: 'hidden',
+        WebkitBackfaceVisibility: 'hidden',
+        overflow: 'hidden',
+      }
+      const frontStyle = {
+        ...faceStyle,
+        filter: `drop-shadow(${direction * 9}px 0 ${8 + arch * 12}px rgba(0,0,0,${0.14 + arch * 0.18}))`,
+      }
+      const backStyle = {
+        ...faceStyle,
+        transform: 'rotateY(180deg)',
+        filter: `drop-shadow(${-direction * 7}px 0 ${6 + arch * 10}px rgba(0,0,0,${0.10 + arch * 0.14}))`,
+      }
+      const imageStyle = physicalLeafImageStyle(this.scale)
+      const pageImage = (page: PageDtoWithUrl) => h('img', {
+        attrs: {
+          src: page.url,
+          alt: `Page ${page.number}`,
+        },
+        style: imageStyle,
+      })
+
+      return h('div', {
+        staticClass: 'paper-sheet physical-comic-double-sheet',
+        attrs: {'aria-hidden': 'true'},
+        style: {overflow: 'visible'},
+      }, [
+        h('div', {
+          staticClass: 'paper-layer physical-comic-double-base',
+          style: {zIndex: '1'},
+        }, [spread(baseSpread)]),
+        h('div', {staticClass: 'physical-comic-leaf', style: leafStyle}, [
+          h('div', {staticClass: 'physical-comic-leaf-front', style: frontStyle}, [pageImage(front)]),
+          h('div', {staticClass: 'physical-comic-leaf-back', style: backStyle}, [pageImage(back)]),
+        ]),
+      ])
+    }
+
+    // Single-page physical curl: destination is the actual back face, while the
+    // following unread page sits underneath. At the beginning/end of the book
+    // that under-spread is intentionally absent, exposing the reader background.
+    const targetSpread = physical
+      ? (parent.physicalComicUnderSpread || [])
       : this.backSpread
     const reflectedSpread = physical ? this.backSpread : this.frontSpread
 
-    const slideRaw = physical ? clamp01((this.progress - 0.66) / 0.34) : 0
+    const slideRaw = physical && parent.physicalComicUnderSpread
+      ? clamp01((this.progress - 0.66) / 0.34)
+      : 0
     const slideProgress = 1 - Math.pow(1 - slideRaw, 3)
     const axisSize = Math.max(1, parent?.drag?.axisSize || window.innerWidth)
     const direction = Math.sign(this.physicalDirection || -1)
-    const targetStyle = physical ? {
+    const targetStyle = physical && parent.physicalComicUnderSpread ? {
       transform: `translate3d(${direction * axisSize * slideProgress}px, 0, 0)`,
       willChange: 'transform',
       filter: slideProgress > 0
@@ -105,14 +261,6 @@ export function installPhysicalPagedReader(): void {
       ? {...this.backContentStyle, filter: 'none'}
       : this.backContentStyle
 
-    const spread = (value: PageDtoWithUrl[]) => h('paged-reader-spread', {
-      props: {
-        spread: value,
-        flipDirection: this.flipDirection,
-        scale: this.scale,
-      },
-    })
-
     return h('div', {
       staticClass: 'paper-sheet',
       attrs: {'aria-hidden': 'true'},
@@ -120,7 +268,7 @@ export function installPhysicalPagedReader(): void {
       h('div', {
         staticClass: 'paper-layer paper-target',
         style: targetStyle,
-      }, [spread(targetSpread)]),
+      }, targetSpread.length ? [spread(targetSpread)] : []),
       h('div', {
         staticClass: 'paper-layer paper-current',
         style: this.currentStyle,
