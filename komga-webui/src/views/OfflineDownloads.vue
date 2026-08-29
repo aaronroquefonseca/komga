@@ -71,9 +71,9 @@
                 {{ download.book.metadata.number }} - {{ download.book.metadata.title }}
               </div>
 
-              <div v-if="download.status === 'downloading'" class="mt-3">
+              <div v-if="download.status === 'downloading' || download.status === 'updating'" class="mt-3">
                 <div class="d-flex text-caption mb-1">
-                  <span>{{ $t('offline.downloading') }}</span>
+                  <span>{{ $t(download.status === 'updating' ? 'offline.updating' : 'offline.downloading') }}</span>
                   <v-spacer/>
                   <span>{{ download.completedPages }} / {{ download.totalPages }}</span>
                 </div>
@@ -82,19 +82,50 @@
                   height="7"
                   rounded
                 />
-                <div class="text-caption text--secondary mt-1">{{ formatBytes(download.bytes) }}</div>
+                <div class="text-caption text--secondary mt-1">
+                  {{ formatBytes(download.bytes) }}
+                  <template v-if="download.status === 'updating'"> · {{ $t('offline.old_copy_kept') }}</template>
+                </div>
               </div>
 
-              <v-chip
-                v-else-if="download.status === 'downloaded'"
-                small
-                color="success"
-                outlined
-                class="mt-3"
-              >
-                <v-icon left small>mdi-check-circle</v-icon>
-                {{ $t('offline.available_offline') }} · {{ formatBytes(download.bytes) }}
-              </v-chip>
+              <template v-else-if="download.status === 'downloaded'">
+                <v-chip
+                  small
+                  color="success"
+                  outlined
+                  class="mt-3 me-2"
+                >
+                  <v-icon left small>mdi-check-circle</v-icon>
+                  {{ $t('offline.available_offline') }} · {{ formatBytes(download.bytes) }}
+                </v-chip>
+                <v-chip
+                  v-if="download.updateAvailable"
+                  small
+                  color="warning"
+                  outlined
+                  class="mt-3"
+                >
+                  <v-icon left small>mdi-update</v-icon>
+                  {{ $t('offline.update_available') }}
+                </v-chip>
+                <v-chip
+                  v-if="download.sourceMissing"
+                  small
+                  color="warning"
+                  outlined
+                  class="mt-3"
+                >
+                  <v-icon left small>mdi-cloud-off-outline</v-icon>
+                  {{ $t('offline.source_missing') }}
+                </v-chip>
+                <v-alert
+                  v-if="download.error"
+                  type="warning"
+                  dense
+                  text
+                  class="mt-2 mb-0 text-caption"
+                >{{ $t('offline.update_failed_kept') }}: {{ download.error }}</v-alert>
+              </template>
 
               <v-alert
                 v-else
@@ -109,13 +140,22 @@
           <v-divider/>
           <v-card-actions>
             <v-btn
-              v-if="download.status === 'downloaded'"
+              v-if="download.cacheName"
               text
               color="accent"
               @click="read(download)"
             >
               <v-icon left>mdi-book-open-page-variant</v-icon>
               {{ $t('common.read') }}
+            </v-btn>
+            <v-btn
+              v-if="download.updateAvailable && download.status === 'downloaded' && !download.sourceMissing"
+              text
+              :disabled="!$offline.state.online || $offline.state.offlineMode"
+              @click="retry(download.bookId)"
+            >
+              <v-icon left>mdi-update</v-icon>
+              {{ $t('offline.update_copy') }}
             </v-btn>
             <v-btn
               v-if="download.status === 'error'"
@@ -130,7 +170,7 @@
             <v-btn
               icon
               :title="$t('offline.remove_download')"
-              :disabled="download.status === 'downloading'"
+              :disabled="download.status === 'downloading' || download.status === 'updating'"
               @click="remove(download.bookId)"
             >
               <v-icon>mdi-delete</v-icon>
