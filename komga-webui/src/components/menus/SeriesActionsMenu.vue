@@ -7,6 +7,37 @@
         </v-btn>
       </template>
       <v-list dense>
+        <template v-if="isPwa">
+          <v-list-item v-if="seriesDownloading" disabled>
+            <v-list-item-icon><v-icon small>mdi-download</v-icon></v-list-item-icon>
+            <v-list-item-title>
+              {{ $t('offline.downloading_series', {downloaded: downloadedBookCount, total: series.booksCount}) }}
+            </v-list-item-title>
+          </v-list-item>
+          <v-list-item
+            v-else-if="!seriesAllDownloaded"
+            :disabled="!$offline.state.online || $offline.state.offlineMode"
+            @click="downloadSeries"
+          >
+            <v-list-item-icon><v-icon small>mdi-download-multiple</v-icon></v-list-item-icon>
+            <v-list-item-title v-if="downloadedBookCount === 0">
+              {{ $t('offline.save_series_offline') }}
+            </v-list-item-title>
+            <v-list-item-title v-else>
+              {{ $t('offline.download_series_remaining', {downloaded: downloadedBookCount, total: series.booksCount}) }}
+            </v-list-item-title>
+          </v-list-item>
+          <v-list-item v-if="downloadedBookCount > 0 && !seriesDownloading" @click="removeSeriesDownloads">
+            <v-list-item-icon><v-icon small>mdi-download-off</v-icon></v-list-item-icon>
+            <v-list-item-title>{{ $t('offline.remove_series_downloads') }}</v-list-item-title>
+          </v-list-item>
+          <v-list-item :to="{name: 'offline-downloads'}">
+            <v-list-item-icon><v-icon small>mdi-download-box-multiple</v-icon></v-list-item-icon>
+            <v-list-item-title>{{ $t('offline.manage_downloads') }}</v-list-item-title>
+          </v-list-item>
+          <v-divider/>
+        </template>
+
         <v-list-item @click="analyze" v-if="isAdmin">
           <v-list-item-title>{{ $t('menu.analyze') }}</v-list-item-title>
         </v-list-item>
@@ -36,14 +67,14 @@
 import Vue from 'vue'
 import {SeriesDto} from '@/types/komga-series'
 import {BookSearch, SearchConditionSeriesId, SearchOperatorIs} from '@/types/komga-search'
+import {isStandalonePwa} from '@/functions/pwa'
 
 export default Vue.extend({
   name: 'SeriesActionsMenu',
-  data: () => {
-    return {
-      menuState: false,
-    }
-  },
+  data: () => ({
+    menuState: false,
+    seriesDownloading: false,
+  }),
   props: {
     series: {
       type: Object as () => SeriesDto,
@@ -60,6 +91,9 @@ export default Vue.extend({
     },
   },
   computed: {
+    isPwa(): boolean {
+      return isStandalonePwa()
+    },
     isAdmin(): boolean {
       return this.$store.getters.meAdmin
     },
@@ -68,6 +102,14 @@ export default Vue.extend({
     },
     isUnread(): boolean {
       return this.series.booksUnreadCount === this.series.booksCount
+    },
+    downloadedBookCount(): number {
+      return this.$offline.state.downloads
+        .filter(record => record.book?.seriesId === this.series.id && this.$offline.isDownloaded(record.bookId))
+        .length
+    },
+    seriesAllDownloaded(): boolean {
+      return this.series.booksCount > 0 && this.downloadedBookCount >= this.series.booksCount
     },
   },
   methods: {
@@ -85,6 +127,35 @@ export default Vue.extend({
         condition: new SearchConditionSeriesId(new SearchOperatorIs(this.series.id)),
       } as BookSearch, {unpaged: true, sort: ['metadata.numberSort']})
       this.$store.dispatch('dialogAddBooksToReadList', books.content.map(b => b.id))
+    },
+    async downloadSeries() {
+      this.menuState = false
+      this.seriesDownloading = true
+      try {
+        await import(/* webpackChunkName: "read-book" */ '@/views/DivinaReader.vue')
+        const books = await this.$komgaBooks.getBooksList({
+          condition: new SearchConditionSeriesId(new SearchOperatorIs(this.series.id)),
+        } as BookSearch, {unpaged: true, sort: ['metadata.numberSort']})
+
+        for (const book of books.content) {
+          const existing = this.$offline.getDownload(book.id)
+          if (this.$offline.isDownloaded(book.id) && !existing?.updateAvailable) continue
+          try {
+            await this.$offline.downloadBook(book.id)
+          } catch (e) {
+            this.$warn(`Offline download failed for ${book.id}`, e)
+          }
+        }
+      } finally {
+        this.seriesDownloading = false
+      }
+    },
+    async removeSeriesDownloads() {
+      this.menuState = false
+      const bookIds = this.$offline.state.downloads
+        .filter(record => record.book?.seriesId === this.series.id)
+        .map(record => record.bookId)
+      for (const bookId of bookIds) await this.$offline.removeDownload(bookId)
     },
     async markRead() {
       await this.$komgaSeries.markAsRead(this.series.id)
