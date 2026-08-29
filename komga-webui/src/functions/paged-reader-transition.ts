@@ -5,6 +5,15 @@ export type PaperCurlPoint = {
   y: number
 }
 
+export type PaperCurlAffineMatrix = {
+  a: number
+  b: number
+  c: number
+  d: number
+  e: number
+  f: number
+}
+
 export type PaperCurlDynamicGeometry = {
   seamTop: number
   seamBottom: number
@@ -57,6 +66,40 @@ function reflectPoint(point: PaperCurlPoint, lineA: PaperCurlPoint, lineB: Paper
   return {
     x: projectionX * 2 - point.x,
     y: projectionY * 2 - point.y,
+  }
+}
+
+/**
+ * CSS-compatible affine reflection across an arbitrary line.
+ *
+ * `e` and `f` use the same coordinate units as the supplied points, so callers
+ * can pass page-local pixels and feed the result directly to CSS matrix().
+ */
+export function paperCurlReflectionMatrix(
+  lineA: PaperCurlPoint,
+  lineB: PaperCurlPoint,
+): PaperCurlAffineMatrix {
+  const dx = lineB.x - lineA.x
+  const dy = lineB.y - lineA.y
+  const length = Math.hypot(dx, dy)
+  if (length <= 1e-8) {
+    return {a: 1, b: 0, c: 0, d: 1, e: 0, f: 0}
+  }
+
+  const ux = dx / length
+  const uy = dy / length
+  const a = 2 * ux * ux - 1
+  const b = 2 * ux * uy
+  const c = b
+  const d = 2 * uy * uy - 1
+
+  return {
+    a,
+    b,
+    c,
+    d,
+    e: lineA.x - a * lineA.x - c * lineA.y,
+    f: lineA.y - b * lineA.x - d * lineA.y,
   }
 }
 

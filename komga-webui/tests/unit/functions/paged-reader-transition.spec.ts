@@ -2,8 +2,20 @@ import {
   pageCurlRotation,
   pageCurlVariantForStart,
   paperCurlDynamicGeometry,
+  paperCurlReflectionMatrix,
   transitionProgress,
 } from '@/functions/paged-reader-transition'
+
+function applyMatrix(
+  matrix: ReturnType<typeof paperCurlReflectionMatrix>,
+  x: number,
+  y: number,
+): {x: number; y: number} {
+  return {
+    x: matrix.a * x + matrix.c * y + matrix.e,
+    y: matrix.b * x + matrix.d * y + matrix.f,
+  }
+}
 
 describe('paged reader transitions', () => {
   test('transition progress follows finger distance and clamps', () => {
@@ -25,6 +37,27 @@ describe('paged reader transitions', () => {
     expect(pageCurlRotation(0.5, -1)).toBeCloseTo(-60)
     expect(pageCurlRotation(0.5, 1)).toBeCloseTo(60)
     expect(pageCurlRotation(2, 1)).toBeCloseTo(90)
+  })
+
+  test('reflection matrix mirrors content across a vertical fold', () => {
+    const matrix = paperCurlReflectionMatrix({x: 50, y: 0}, {x: 50, y: 100})
+
+    expect(applyMatrix(matrix, 75, 20)).toEqual({x: 25, y: 20})
+    expect(applyMatrix(matrix, 50, 60)).toEqual({x: 50, y: 60})
+  })
+
+  test('reflection matrix mirrors content across a diagonal fold', () => {
+    const matrix = paperCurlReflectionMatrix({x: 0, y: 0}, {x: 100, y: 100})
+    const reflected = applyMatrix(matrix, 80, 20)
+
+    expect(reflected.x).toBeCloseTo(20)
+    expect(reflected.y).toBeCloseTo(80)
+  })
+
+  test('degenerate reflection line leaves content unchanged', () => {
+    const matrix = paperCurlReflectionMatrix({x: 10, y: 20}, {x: 10, y: 20})
+
+    expect(applyMatrix(matrix, 70, 30)).toEqual({x: 70, y: 30})
   })
 
   test('middle automated paper curl keeps a vertical fold line', () => {
