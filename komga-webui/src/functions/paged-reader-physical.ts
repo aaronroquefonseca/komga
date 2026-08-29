@@ -3,10 +3,61 @@ import {PageDtoWithUrl} from '@/types/komga-books'
 
 export type PhysicalComicTransitionKind = 'curl' | 'slide'
 
+export type DoublePageLeafPlan = {
+  front: PageDtoWithUrl
+  back: PageDtoWithUrl
+  baseSpread: PageDtoWithUrl[]
+}
+
 function firstRealPageNumber(spread: PageDtoWithUrl[] | undefined): number | null {
   if (!spread) return null
   const page = spread.find(x => x.number > 0)
   return page?.number ?? null
+}
+
+export function canUseDoublePageLeaf(
+  pageLayout: PagedReaderLayout,
+  currentSpread: PageDtoWithUrl[] | undefined,
+  targetSpread: PageDtoWithUrl[] | undefined,
+  vertical: boolean,
+): boolean {
+  if (vertical) return false
+  if (pageLayout !== PagedReaderLayout.DOUBLE_PAGES &&
+    pageLayout !== PagedReaderLayout.DOUBLE_NO_COVER) return false
+  return currentSpread?.length === 2 && targetSpread?.length === 2
+}
+
+/**
+ * Build the physical intermediate state for an open two-page book.
+ *
+ * Forward:   A | B  ->  C | D   turns B(front) / C(back), base A | D
+ * Backward:  C | D  ->  A | B   turns C(front) / B(back), base A | D
+ *
+ * Spread rendering itself mirrors the slots for RTL, so this logical mapping is
+ * direction-independent.
+ */
+export function doublePageLeafPlan(
+  currentSpread: PageDtoWithUrl[] | undefined,
+  targetSpread: PageDtoWithUrl[] | undefined,
+  navigationDelta: number,
+): DoublePageLeafPlan | null {
+  if (!currentSpread || !targetSpread ||
+    currentSpread.length !== 2 || targetSpread.length !== 2 ||
+    navigationDelta === 0) return null
+
+  if (navigationDelta > 0) {
+    return {
+      front: currentSpread[1],
+      back: targetSpread[0],
+      baseSpread: [currentSpread[0], targetSpread[1]],
+    }
+  }
+
+  return {
+    front: currentSpread[0],
+    back: targetSpread[1],
+    baseSpread: [targetSpread[0], currentSpread[1]],
+  }
 }
 
 /**
@@ -45,8 +96,8 @@ export function physicalComicTransitionKind(
 /**
  * During a physical single-page curl the requested page is the back face of the
  * sheet being turned. The flat page underneath is one more step in the same
- * navigation direction. Returning null lets the compositor fall back cleanly at
- * book boundaries.
+ * navigation direction. Returning null lets the compositor expose the reader
+ * background cleanly at book boundaries.
  */
 export function physicalComicUnderSpreadIndex(
   targetIndex: number | null,
