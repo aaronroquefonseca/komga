@@ -103,10 +103,9 @@ function renderFace(
   const imageStyle: Record<string, string> = {
     ...faceImageStyle(face),
     ...(readableBack ? {
-      // The transition-spread stylesheet globally hides back-facing images. A
-      // wide BACK is already orientation-corrected by the combined affine matrix
-      // below, so explicitly keep the artwork paintable instead of letting
-      // Chromium cull/dim it as the fold becomes edge-on.
+      // The wide BACK is already orientation-corrected by the combined affine
+      // transform below. Do not let the transition-spread's global
+      // backface-visibility:hidden cull/dim this 2D artwork near an edge-on fold.
       backfaceVisibility: 'visible',
       WebkitBackfaceVisibility: 'visible',
     } : {}),
@@ -134,10 +133,6 @@ function renderFace(
       style: {
         position: 'absolute',
         inset: '0',
-        // Keep the exact stable VNode tree from the last visually good build,
-        // but do not ask the compositor to rasterize a second nested reflection.
-        // readableBackContentStyle() algebraically folds this mirror into the
-        // outer crease transform instead.
         transform: 'none',
         transformOrigin: 'center center',
         transformStyle: 'flat',
@@ -206,13 +201,9 @@ function stationaryTargetFace(plan: PhysicalSinglePageEdgePlan): PhysicalPageFac
 }
 
 /**
- * The last visually stable direct-wide renderer made its real target BACK
- * readable with two nested reflections:
- *
- *   crease reflection * scaleX(-1 around the leaf centre)
- *
- * Combine those matrices instead. The product has positive determinant, so the
- * wide-half artwork itself never becomes a nested back-facing compositor layer.
+ * Fold the readable-back mirror into the crease reflection itself. The product
+ * has positive determinant, so Chromium never has to rasterize the artwork as a
+ * nested mirrored/back-facing layer.
  */
 function readableBackContentStyle(sheet: any): Record<string, string> {
   if (!sheet.pageBoundsReady || !sheet.pageBounds) return {opacity: '0'}
@@ -242,14 +233,28 @@ function readableBackContentStyle(sheet: any): Record<string, string> {
   }
 }
 
+function decorationStyleAtCurl(
+  style: Record<string, any>,
+  curl: number,
+): Record<string, any> {
+  return {
+    ...style,
+    // Geometry reaches its physical endpoint at CURL_END. Keep decoration on the
+    // same local clock so the shadow/crease is already gone while the fully
+    // turned sheet remains opaque for the final settlement tail.
+    opacity: `${Math.sin(clamp01(curl) * Math.PI)}`,
+  }
+}
+
 /**
- * Direct portrait -> wide transitions stay on the isolated visual tree that
- * eliminated their severe flashing at 775e513. The physical layers never mount
- * or unmount during the live curl.
+ * Direct portrait -> wide stays on the isolated visual tree that eliminated the
+ * severe Chromium flashing at 775e513/b20bd4. No live subtree swaps and no
+ * generic FX rewrite happen after this renderer.
  *
- * Decoration is mounted from frame zero using the same post-conversion safe
- * primitives as ordinary curls: clipped gradient shadow + flat crease highlight,
- * with no filtered/blurred compositor layers.
+ * Unlike the old direct-wide settlement, the physical FRONT/BACK/UNDER scene is
+ * never cross-faded against a differently positioned full target spread. At
+ * CURL_END the sheet is already physically complete; it stays opaque until
+ * visualPage commits, matching ordinary Physical Comic curls.
  */
 export function installDirectWideStability(): void {
   const paperOptions = (PagedReaderPaperSheet as any).options
@@ -277,8 +282,6 @@ export function installDirectWideStability(): void {
   if (typeof originalRender !== 'function') return
 
   paperOptions.render = function (this: any, h: CreateElement): VNode {
-    // Lower wrappers still run for touch/image-load/bounds bookkeeping; their
-    // visual tree is deliberately discarded for this one transition.
     const fallback = originalRender.call(this, h) as VNode
     const reader = this.$parent as any
     const plan = directIntoWidePlan(reader)
@@ -290,11 +293,6 @@ export function installDirectWideStability(): void {
 
     const progress = clamp01(Number(this.progress))
     const curl = clamp01(progress / CURL_END)
-    const settling = !!(reader.drag?.settling && reader.drag?.settleCommit)
-    const settle = settling
-      ? smooth((progress - CURL_END) / (1 - CURL_END))
-      : 0
-    const physicalOpacity = 1 - settle
     const stationary = stationaryTargetFace(plan)
     const leafRect = sourceRect(this)
 
@@ -323,7 +321,7 @@ export function installDirectWideStability(): void {
         {
           ...outerEdgeSlotRect(this, faceSide(stationary) || 'right'),
           zIndex: '2',
-          opacity: `${physicalOpacity * smooth(curl / 0.45)}`,
+          opacity: `${smooth(curl / 0.45)}`,
         },
         'single-page-wide-v2-under-target-wide direct-wide-under',
       )
@@ -341,7 +339,7 @@ export function installDirectWideStability(): void {
         position: 'absolute',
         inset: '0',
         zIndex: '8',
-        opacity: `${physicalOpacity}`,
+        opacity: '1',
         pointerEvents: 'none',
         filter: 'none',
         willChange: 'auto',
@@ -373,16 +371,27 @@ export function installDirectWideStability(): void {
           style: readableBackContentStyle(this),
         }, [renderFace(h, plan.back, leafRect, 'direct-wide-back-face', true)]),
       ]),
-      renderSafeCurlShadow(h, this.shadowStyle as Record<string, any>, 'direct-wide-safe-shadow'),
-      renderSafeCurlEdge(h, this.edgeStyle as Record<string, any>, 'direct-wide-safe-edge'),
+      renderSafeCurlShadow(
+        h,
+        decorationStyleAtCurl(this.shadowStyle as Record<string, any>, curl),
+        'direct-wide-safe-shadow',
+      ),
+      renderSafeCurlEdge(
+        h,
+        decorationStyleAtCurl(this.edgeStyle as Record<string, any>, curl),
+        'direct-wide-safe-edge',
+      ),
     ])
 
+    // Keep the target mounted for structural continuity, but never cross-fade it
+    // over the physical scene. visualPage becomes targetIndex only after the
+    // completed sheet is committed by the reader.
     const finalTarget = h('div', {
       key: 'direct-wide-final',
       staticClass: 'paper-layer single-page-wide-v2-final-target direct-wide-final',
       style: {
         zIndex: '14',
-        opacity: `${settle}`,
+        opacity: '0',
         pointerEvents: 'none',
         filter: 'none',
       },
