@@ -1,6 +1,7 @@
 import PagedReaderPaperSheet from '@/components/readers/PagedReaderPaperSheet.vue'
 import {PageDtoWithUrl} from '@/types/komga-books'
 import {installCurlDiagnostics} from './paged-reader-curl-diagnostics.plugin'
+import {installReaderRenderWindow} from './paged-reader-render-window.plugin'
 import {installSafeCurlEffects} from './paged-reader-safe-curl-effects.plugin'
 import {installWideLiveDragGuard} from './paged-reader-wide-live-drag-guard.plugin'
 
@@ -114,9 +115,11 @@ export function installPaperBoundsStability(): void {
   // These final wrappers deliberately run after every topology/compositor plugin.
   // 1. Keep live single->wide gestures physical until release.
   // 2. Rebuild decoration from the no-FX baseline using safe primitives.
-  // 3. Keep opt-in diagnostics last so query modes can still override everything.
+  // 3. Window the custom render list so long books do constant per-frame work.
+  // 4. Keep opt-in diagnostics last so query modes can still override everything.
   installWideLiveDragGuard()
   installSafeCurlEffects()
+  installReaderRenderWindow()
   installCurlDiagnostics()
 
   const paperOptions = (PagedReaderPaperSheet as any).options
