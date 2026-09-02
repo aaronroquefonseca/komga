@@ -2,6 +2,7 @@ import PagedReaderPaperSheet from '@/components/readers/PagedReaderPaperSheet.vu
 import {PageDtoWithUrl} from '@/types/komga-books'
 import {installCurlDiagnostics} from './paged-reader-curl-diagnostics.plugin'
 import {installDirectWideStability} from './paged-reader-direct-wide-stability.plugin'
+import {installDoublePageDirectionStability} from './paged-reader-double-page-direction-stability.plugin'
 import {installReaderRenderWindow} from './paged-reader-render-window.plugin'
 import {installSafeCurlEffects} from './paged-reader-safe-curl-effects.plugin'
 import {installSinglePageBlankGapStateMachine} from './paged-reader-single-page-blank-gap.plugin'
@@ -113,6 +114,9 @@ function currentImagesReady(sheet: any): boolean {
 export function installPaperBoundsStability(): void {
   // Final wrappers deliberately run after every topology/compositor plugin.
   installSinglePageBlankGapStateMachine()
+  // Preserve a valid double-page leaf through a zero-crossing touch sample and
+  // normalize the leaf to the center spine before any compositor reads it.
+  installDoublePageDirectionStability()
   installWideLiveDragGuard()
   installWideCompositorStability()
   // Direct portrait -> wide paints the same FRONT/BACK/shadow/edge primitives as
