@@ -12,8 +12,6 @@ import {
 } from '@/functions/paged-reader-transition'
 import {PageDtoWithUrl} from '@/types/komga-books'
 
-const CURL_END = 0.90
-
 function clamp01(value: number): number {
   return Math.max(0, Math.min(1, value))
 }
@@ -218,9 +216,8 @@ export function installDirectWideStability(): void {
       const plan = directIntoWidePlan(this.$parent as any)
       if (!plan) return originalGeometry.call(this)
 
-      const curl = Math.min(clamp01(Number(this.progress) / CURL_END), 0.9998)
       return paperCurlDynamicGeometry(
-        curl,
+        Math.min(clamp01(Number(this.progress)), 0.9998),
         this.touchCaptured ? this.touchStartY : 0.5,
         this.touchCaptured ? this.touchCurrentY : 0.5,
         this.direction,
@@ -244,7 +241,7 @@ export function installDirectWideStability(): void {
     if (!currentSpread) return fallback
 
     const progress = clamp01(Number(this.progress))
-    const curl = clamp01(progress / CURL_END)
+    const curl = progress
     const stationary = stationaryTargetFace(plan)
     const leafRect = sourceRect(this)
 
