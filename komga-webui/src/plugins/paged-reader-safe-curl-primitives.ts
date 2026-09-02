@@ -21,6 +21,7 @@ export function renderSafeCurlShadow(
 ): VNode {
   const clipPath = styleValue(shadowStyle, 'clipPath', 'none')
   return h('div', {
+    key: staticClass,
     staticClass,
     style: {
       position: 'absolute',
@@ -47,6 +48,7 @@ export function renderSafeCurlEdge(
 ): VNode {
   const clipPath = styleValue(edgeStyle, 'clipPath', 'none')
   return h('div', {
+    key: staticClass,
     staticClass,
     style: {
       position: 'absolute',
