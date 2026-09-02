@@ -11,6 +11,10 @@ import {
   paperCurlReflectionMatrix,
 } from '@/functions/paged-reader-transition'
 import {PageDtoWithUrl} from '@/types/komga-books'
+import {
+  renderSafeCurlEdge,
+  renderSafeCurlShadow,
+} from './paged-reader-safe-curl-primitives'
 
 const CURL_END = 0.90
 
@@ -96,13 +100,25 @@ function renderFace(
   staticClass: string,
   readableBack = false,
 ): VNode {
+  const imageStyle: Record<string, string> = {
+    ...faceImageStyle(face),
+    ...(readableBack ? {
+      // The transition-spread stylesheet globally hides back-facing images. A
+      // wide BACK is already orientation-corrected by the combined affine matrix
+      // below, so explicitly keep the artwork paintable instead of letting
+      // Chromium cull/dim it as the fold becomes edge-on.
+      backfaceVisibility: 'visible',
+      WebkitBackfaceVisibility: 'visible',
+    } : {}),
+  }
+
   const content = isBlank(face) ? [] : [
     h('img', {
       attrs: {
         src: face.page.url,
         alt: `Page ${face.page.number}`,
       },
-      style: faceImageStyle(face),
+      style: imageStyle,
     }),
   ]
 
@@ -124,6 +140,9 @@ function renderFace(
         // outer crease transform instead.
         transform: 'none',
         transformOrigin: 'center center',
+        transformStyle: 'flat',
+        backfaceVisibility: 'visible',
+        WebkitBackfaceVisibility: 'visible',
         willChange: 'auto',
       },
     }, content),
@@ -192,13 +211,8 @@ function stationaryTargetFace(plan: PhysicalSinglePageEdgePlan): PhysicalPageFac
  *
  *   crease reflection * scaleX(-1 around the leaf centre)
  *
- * That is mathematically fine, but it leaves two independently mirrored
- * compositor layers. Combine the matrices instead. The product has positive
- * determinant, so Chromium never has to treat the artwork itself as a nested
- * back-facing surface at extreme curl angles.
- *
- * This is algebraically equivalent to the old two-transform output; only the
- * compositor representation changes.
+ * Combine those matrices instead. The product has positive determinant, so the
+ * wide-half artwork itself never becomes a nested back-facing compositor layer.
  */
 function readableBackContentStyle(sheet: any): Record<string, string> {
   if (!sheet.pageBoundsReady || !sheet.pageBounds) return {opacity: '0'}
@@ -219,6 +233,9 @@ function readableBackContentStyle(sheet: any): Record<string, string> {
   return {
     transformOrigin: '0 0',
     transform: `matrix(${-reflection.a}, ${-reflection.b}, ${reflection.c}, ${reflection.d}, ${reflection.e + 2 * centreX * reflection.a}, ${reflection.f + 2 * centreX * reflection.b})`,
+    transformStyle: 'flat',
+    backfaceVisibility: 'visible',
+    WebkitBackfaceVisibility: 'visible',
     opacity: '1',
     filter: 'none',
     willChange: 'auto',
@@ -226,12 +243,13 @@ function readableBackContentStyle(sheet: any): Record<string, string> {
 }
 
 /**
- * Direct portrait -> wide transitions stay on the exact isolated visual tree
- * that eliminated their severe flashing at 775e513. Do not reuse the unified
- * V2 visual tree and do not add shadow/edge/effect nodes here.
+ * Direct portrait -> wide transitions stay on the isolated visual tree that
+ * eliminated their severe flashing at 775e513. The physical layers never mount
+ * or unmount during the live curl.
  *
- * The only change from that validated renderer is the algebraically combined
- * readable BACK transform above.
+ * Decoration is mounted from frame zero using the same post-conversion safe
+ * primitives as ordinary curls: clipped gradient shadow + flat crease highlight,
+ * with no filtered/blurred compositor layers.
  */
 export function installDirectWideStability(): void {
   const paperOptions = (PagedReaderPaperSheet as any).options
@@ -327,6 +345,8 @@ export function installDirectWideStability(): void {
         pointerEvents: 'none',
         filter: 'none',
         willChange: 'auto',
+        contain: 'none',
+        isolation: 'auto',
       },
     }, [
       h('div', {
@@ -344,6 +364,8 @@ export function installDirectWideStability(): void {
           ...(this.backStyle as Record<string, string>),
           filter: 'none',
           willChange: 'auto',
+          contain: 'none',
+          isolation: 'auto',
         },
       }, [
         h('div', {
@@ -351,6 +373,8 @@ export function installDirectWideStability(): void {
           style: readableBackContentStyle(this),
         }, [renderFace(h, plan.back, leafRect, 'direct-wide-back-face', true)]),
       ]),
+      renderSafeCurlShadow(h, this.shadowStyle as Record<string, any>, 'direct-wide-safe-shadow'),
+      renderSafeCurlEdge(h, this.edgeStyle as Record<string, any>, 'direct-wide-safe-edge'),
     ])
 
     const finalTarget = h('div', {
