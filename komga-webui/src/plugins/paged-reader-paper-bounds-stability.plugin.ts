@@ -8,6 +8,7 @@ import {installSafeCurlEffects} from './paged-reader-safe-curl-effects.plugin'
 import {installSinglePageBlankGapStateMachine} from './paged-reader-single-page-blank-gap.plugin'
 import {installWideCompositorStability} from './paged-reader-wide-compositor-stability.plugin'
 import {installWideLiveDragGuard} from './paged-reader-wide-live-drag-guard.plugin'
+import {installWideSafeDecoration} from './paged-reader-wide-safe-decoration.plugin'
 
 type PaperBounds = {
   left: number
@@ -119,11 +120,18 @@ export function installPaperBoundsStability(): void {
   installDoublePageDirectionStability()
   installWideLiveDragGuard()
 
-  // Restore the last visually validated direct-wide wrapper order from 775e513:
+  // Preserve the last visually validated direct-wide wrapper order from 775e513:
   // generic safe effects run first; the isolated direct-wide renderer runs later
-  // and therefore its deterministic no-FX VNode tree is never rewritten.
+  // and therefore its fixed VNode tree is never rewritten.
   installSafeCurlEffects()
   installWideCompositorStability()
+
+  // Wide -> single already has correct physical geometry. Append only the same
+  // sanitized gradient shadow / crease highlight used by ordinary curls.
+  installWideSafeDecoration()
+
+  // Direct single -> wide owns its complete stable tree, including its own
+  // permanent safe-decoration nodes and opaque-through-commit settlement.
   installDirectWideStability()
 
   installReaderRenderWindow()
