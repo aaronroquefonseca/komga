@@ -65,7 +65,8 @@ function revealedBaseFace(
     ]
 
   // One base face is the untouched half of the current wide scan. The other is
-  // the physical page underneath the turned leaf. Pick that other face.
+  // the physical page underneath the turned leaf. Pick that other face, which
+  // may legitimately be the synthetic white blank immediately behind a cover.
   for (const candidate of screenBase) {
     if (!candidate.face) continue
     const belongsToCurrent = plan.currentFaces.some(face => sameFace(face, candidate.face!))
@@ -110,6 +111,26 @@ function halfFaceNode(
     : window.innerHeight))
   const spine = rootWidth(sheet) / 2
 
+  const imageStyle: Record<string, string> = face.crop === 'full'
+    ? {
+      display: 'block',
+      width: '100%',
+      height: '100%',
+      objectFit: 'contain',
+      objectPosition: 'center center',
+    }
+    : {
+      position: 'absolute',
+      display: 'block',
+      top: '0',
+      left: face.crop === 'left' ? '0' : '-100%',
+      width: '200%',
+      height: '100%',
+      maxWidth: 'none',
+      maxHeight: 'none',
+      objectFit: 'fill',
+    }
+
   return h('div', {
     staticClass: 'physical-comic-corrected-half-under',
     style: {
@@ -128,22 +149,33 @@ function halfFaceNode(
         src: face.page.url,
         alt: `Page ${face.page.number}`,
       },
-      style: {
-        position: 'absolute',
-        display: 'block',
-        top: '0',
-        left: face.crop === 'left' ? '0' : '-100%',
-        width: '200%',
-        height: '100%',
-        maxWidth: 'none',
-        maxHeight: 'none',
-        objectFit: 'fill',
-      },
+      style: imageStyle,
     }),
   ])
 }
 
 function setFullSingleUnder(
+  node: VNode,
+  h: CreateElement,
+  sheet: any,
+  face: PhysicalPageFace,
+  opacity: string,
+): void {
+  if (!node.data) node.data = {}
+  node.data.style = {
+    position: 'absolute',
+    inset: '0',
+    zIndex: '1',
+    opacity,
+    overflow: 'visible',
+    pointerEvents: 'none',
+    filter: 'none',
+    willChange: 'auto',
+  }
+  node.children = [spreadNode(h, sheet, [face.page])]
+}
+
+function setHalfUnder(
   node: VNode,
   h: CreateElement,
   sheet: any,
@@ -162,13 +194,7 @@ function setFullSingleUnder(
     filter: 'none',
     willChange: 'auto',
   }
-
-  // A normal single page belongs to the centered single-page layout, not to a
-  // left/right half-screen slot. Let PagedReaderSpread perform its ordinary
-  // object-fit/centering. Only a virtual half of another wide scan needs a slot.
-  node.children = face.crop === 'full'
-    ? [spreadNode(h, sheet, [face.page])]
-    : [halfFaceNode(h, sheet, face, side)]
+  node.children = [halfFaceNode(h, sheet, face, side)]
 }
 
 function turningOpacity(vnode: VNode): string {
@@ -192,11 +218,12 @@ function correctWideToSingle(
   const revealed = revealedBaseFace(plan, flipDirection)
   if (!revealed) return
 
-  // Before persistent parity, most wide exits crossed a trailing synthetic blank
-  // and this layer happened to contain the target single page. With real parity,
-  // direct exits are common and the physical UNDER is instead the next/previous
-  // base face. Render it for both direct and blank exits.
-  setFullSingleUnder(
+  // During the curl the UNDER face is still one physical half of the open book.
+  // It must keep the wide spread's half-sheet dimensions even when the source of
+  // that face is an ordinary portrait page. The final centered single layout is
+  // introduced only by the existing settlement layer after the physical turn.
+  // A synthetic blank is therefore a white half-sheet, never transparent canvas.
+  setHalfUnder(
     under,
     h,
     sheet,
@@ -214,12 +241,13 @@ function correctCoverGapUnder(vnode: VNode, h: CreateElement, sheet: any, reader
   if (!targetSpread?.[0]) return
 
   const existingOpacity = (under.data?.style as Record<string, string> | undefined)?.opacity || '0'
+  // Cover -> inside blank -> first source is different: the revealed first source
+  // belongs to the ordinary centered single-page layout, not a half of a wide.
   setFullSingleUnder(
     under,
     h,
     sheet,
     {page: targetSpread[0], crop: 'full'},
-    'left',
     existingOpacity,
   )
 }
@@ -266,16 +294,7 @@ function installStableCss(): void {
   document.head.appendChild(style)
 }
 
-/**
- * Final correction/stability layer for the special Physical Comic compositors.
- *
- * 1. Apply the proven no-FX compositor baseline unconditionally to portrait <->
- *    wide and inside-cover-gap transitions.
- * 2. A normal single-page UNDER always uses the normal centered single-page
- *    layout, never a half-screen slot.
- * 3. Wide -> single renders the actual non-current base face underneath for both
- *    direct and synthetic-blank exits.
- */
+/** Final correction/stability layer for special Physical Comic compositors. */
 export function installWideCompositorStability(): void {
   installStableCss()
 
