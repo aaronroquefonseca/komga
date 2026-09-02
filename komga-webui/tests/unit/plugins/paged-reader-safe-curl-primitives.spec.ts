@@ -20,9 +20,10 @@ describe('safe curl primitives', () => {
     expect(style.clipPath).toBe('none')
     expect(style.WebkitClipPath).toBe('none')
     expect(style.opacity).toBe('1')
-    expect(parseFloat(style.width)).toBeLessThanOrEqual(16)
+    expect(parseFloat(style.width)).toBeCloseTo(40)
     expect(parseFloat(style.height)).toBeGreaterThan(800)
     expect(style.transform).toMatch(/^matrix\(/)
+    expect(style.background).toContain('rgba(0, 0, 0, 0.34)')
   })
 
   it('keeps the crease highlight on the same bounded geometry', () => {
@@ -31,7 +32,7 @@ describe('safe curl primitives', () => {
 
     expect(edge.transform).toBe(shadow.transform)
     expect(edge.height).toBe(shadow.height)
-    expect(parseFloat(edge.width)).toBeLessThan(parseFloat(shadow.width))
+    expect(parseFloat(edge.width)).toBeCloseTo(2.25)
     expect(edge.opacity).toBe('1')
   })
 

@@ -314,7 +314,10 @@ export function installDirectWideStability(): void {
         {
           ...outerEdgeSlotRect(this, faceSide(stationary) || 'right'),
           zIndex: '2',
-          opacity: `${physicalOpacity * smooth(curl / 0.45)}`,
+          // This is real paper underneath the turning leaf, not a transition
+          // overlay. Partial opacity blends it with the black reader canvas and
+          // makes its brightness vary with live curl progress.
+          opacity: `${physicalOpacity}`,
         },
         'single-page-wide-v2-under-target-wide direct-wide-under',
       )

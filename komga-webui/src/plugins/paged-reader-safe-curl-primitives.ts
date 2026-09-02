@@ -29,12 +29,11 @@ function styleValue(
 }
 
 /**
- * Build a narrow, crease-local shadow in sheet coordinates.
+ * Build a crease-local shadow in sheet coordinates.
  *
- * The stock shadow is eight percent of the sheet width. At extreme diagonal
- * folds that clipped surface can cover a large triangular part of the exposed
- * page on Chromium. This bounded strip remains a visual depth cue without
- * becoming a second dark page-sized surface.
+ * Match the stock shadow's eight-percent width and strength, but paint it as an
+ * actual bounded strip. At extreme diagonal folds the stock clipped surface has
+ * a page-sized compositor box even though only a narrow part is visible.
  */
 export function safeCreaseShadowStyle(
   sheet: CurlSheetGeometry,
@@ -56,7 +55,7 @@ export function safeCreaseShadowStyle(
   }
 
   const arch = Math.sin(clamp01(curl) * Math.PI)
-  const stripWidth = Math.min(16, Math.max(5, width * 0.018)) * arch
+  const stripWidth = width * 0.08 * arch
   const dx = seamBottom - seamTop
   const dy = bottom - top
   const length = Math.hypot(dx, dy)
@@ -72,7 +71,7 @@ export function safeCreaseShadowStyle(
   const normalY = shadowSign * -dx / length
   const tangentX = dx / length
   const tangentY = dy / length
-  const alpha = 0.24 * arch
+  const alpha = 0.34 * arch
 
   return {
     left: '0',
@@ -96,10 +95,11 @@ export function safeCreaseEdgeStyle(
   if (style.transform === undefined) return style
 
   const arch = Math.sin(clamp01(curl) * Math.PI)
+  const width = Math.max(0.75, Number(sheet.pageBounds?.width) * 0.0045)
   return {
     ...style,
-    width: `${Math.max(0.75, 1.4 * arch)}px`,
-    background: `rgba(250, 250, 250, ${0.86 * arch})`,
+    width: `${width}px`,
+    background: `rgba(250, 250, 250, ${0.98 * arch})`,
   }
 }
 
