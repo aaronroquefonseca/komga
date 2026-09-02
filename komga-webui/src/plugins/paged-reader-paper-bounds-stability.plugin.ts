@@ -114,11 +114,12 @@ export function installPaperBoundsStability(): void {
   // Final wrappers deliberately run after every topology/compositor plugin.
   installSinglePageBlankGapStateMachine()
   installWideLiveDragGuard()
-  installSafeCurlEffects()
   installWideCompositorStability()
-  // Direct portrait -> wide is isolated last so the unified multi-mode VNode
-  // tree cannot re-enter the visual path for this now-common parity case.
+  // Direct portrait -> wide paints the same FRONT/BACK/shadow/edge primitives as
+  // the proven ordinary Physical Comic curl. Install it before safe effects so
+  // those decoration nodes go through the exact same compositor-safe rebuild.
   installDirectWideStability()
+  installSafeCurlEffects()
   installReaderRenderWindow()
   installCurlDiagnostics()
 
