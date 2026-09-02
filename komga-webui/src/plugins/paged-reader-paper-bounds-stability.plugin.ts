@@ -3,6 +3,8 @@ import {PageDtoWithUrl} from '@/types/komga-books'
 import {installCurlDiagnostics} from './paged-reader-curl-diagnostics.plugin'
 import {installReaderRenderWindow} from './paged-reader-render-window.plugin'
 import {installSafeCurlEffects} from './paged-reader-safe-curl-effects.plugin'
+import {installSinglePageBlankGapStateMachine} from './paged-reader-single-page-blank-gap.plugin'
+import {installWideCompositorStability} from './paged-reader-wide-compositor-stability.plugin'
 import {installWideLiveDragGuard} from './paged-reader-wide-live-drag-guard.plugin'
 
 type PaperBounds = {
@@ -113,12 +115,17 @@ function currentImagesReady(sheet: any): boolean {
  */
 export function installPaperBoundsStability(): void {
   // These final wrappers deliberately run after every topology/compositor plugin.
-  // 1. Keep live single->wide gestures physical until release.
-  // 2. Rebuild decoration from the no-FX baseline using safe primitives.
-  // 3. Window the custom render list so long books do constant per-frame work.
-  // 4. Keep opt-in diagnostics last so query modes can still override everything.
+  // 1. Give the inside-cover synthetic blank the same staged choreography as
+  //    compensated wide transitions instead of the generic single-page curl.
+  // 2. Keep live single->wide gestures physical until release.
+  // 3. Rebuild ordinary curl decoration from the no-FX baseline.
+  // 4. Keep the complex wide compositor itself on the proven no-FX baseline.
+  // 5. Window the custom render list so long books do constant per-frame work.
+  // 6. Keep opt-in diagnostics last so query modes can still override everything.
+  installSinglePageBlankGapStateMachine()
   installWideLiveDragGuard()
   installSafeCurlEffects()
+  installWideCompositorStability()
   installReaderRenderWindow()
   installCurlDiagnostics()
 

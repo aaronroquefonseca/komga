@@ -107,6 +107,11 @@ function physicalSpan(reader: any, viewportSpan: number): number | null {
   const plan = singlePhysicalPlan(reader)
   if (!plan) return null
 
+  // The inside-cover synthetic gap has its own staged compositor and measures
+  // the untouched current page directly from the layout anchor. Do not replace
+  // that stable gesture span with a union of the staged DOM layers here.
+  if (plan.crossesSyntheticBlank && !plan.currentWide && !plan.targetWide) return null
+
   if (plan.kind === 'slide') {
     const currentWidth = paintedWidth(currentSpreadElement(reader))
     const targetWidth = paintedWidth(targetSpreadElement(reader))
