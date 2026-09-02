@@ -175,4 +175,15 @@ describe('single-page Physical Comic topology', () => {
     expect(backward?.front.crop).toBe('right')
     expect(backward?.back.page.number).toBe(1)
   })
+
+  test('large books reuse compiled edge plans across hot-path lookups', () => {
+    const book: PageDtoWithUrl[][] = Array.from({length: 320}, (_, index) => [portrait(index + 1)])
+
+    const forward = physicalSinglePageEdgePlan(book, 150, 151, false)
+    expect(physicalSinglePageEdgePlan(book, 150, 151, false)).toBe(forward)
+
+    const backward = physicalSinglePageEdgePlan(book, 151, 150, false)
+    expect(physicalSinglePageEdgePlan(book, 151, 150, false)).toBe(backward)
+    expect(backward).not.toBe(forward)
+  })
 })

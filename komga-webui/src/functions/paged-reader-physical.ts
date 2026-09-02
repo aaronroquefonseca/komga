@@ -45,6 +45,35 @@ export type PhysicalSinglePageEdgePlan = {
   crossesSyntheticBlank: boolean
 }
 
+type PhysicalSinglePageSpan = {
+  first: number
+  last: number
+  faces: PhysicalPageFace[]
+}
+
+type PhysicalSinglePageTopology = {
+  spans: PhysicalSinglePageSpan[]
+  ordinalFaces: Array<PhysicalPageFace | undefined>
+  forwardPlans: Array<PhysicalSinglePageEdgePlan | null | undefined>
+  backwardPlans: Array<PhysicalSinglePageEdgePlan | null | undefined>
+}
+
+type PhysicalSinglePageTopologyCacheEntry = {
+  ltr?: PhysicalSinglePageTopology | null
+  rtl?: PhysicalSinglePageTopology | null
+}
+
+/**
+ * The reader's spreads array is replaced whenever the book/layout is rebuilt,
+ * but remains stable throughout normal rendering and gestures. Cache topology by
+ * that identity so Physical Comic's many render wrappers do not rescan the whole
+ * book on every reactive frame. WeakMap keeps old reader/book data collectible.
+ */
+const physicalSinglePageTopologyCache = new WeakMap<
+  PageDtoWithUrl[][],
+  PhysicalSinglePageTopologyCacheEntry
+>()
+
 function firstRealPageNumber(spread: PageDtoWithUrl[] | undefined): number | null {
   if (!spread) return null
   const page = spread.find(x => x.number > 0)
@@ -147,6 +176,72 @@ export function physicalSinglePageFacesForSpread(
   return flipDirection ? [right, left] : [left, right]
 }
 
+function buildPhysicalSinglePageTopology(
+  spreads: PageDtoWithUrl[][],
+  flipDirection: boolean,
+): PhysicalSinglePageTopology | null {
+  const spans: PhysicalSinglePageSpan[] = []
+  const ordinalFaces: Array<PhysicalPageFace | undefined> = []
+  let nextOrdinal = 1
+
+  for (let index = 0; index < spreads.length; index++) {
+    const faces = physicalSinglePageFacesForSpread(spreads[index], flipDirection)
+    if (!faces) return null
+
+    // The first source may itself be a landscape cover. Every later wide source
+    // must begin on an even physical face. When it does not, add both the
+    // alignment face before it and the parity-restoring face after it.
+    const compensateWide = index > 0 && faces.length === 2 && nextOrdinal % 2 === 1
+    if (compensateWide) {
+      ordinalFaces[nextOrdinal] = syntheticBlankFace()
+      nextOrdinal++
+    }
+
+    const first = nextOrdinal
+    faces.forEach((face, faceIndex) => {
+      ordinalFaces[first + faceIndex] = face
+    })
+    const last = first + faces.length - 1
+    spans.push({first, last, faces})
+    nextOrdinal = last + 1
+
+    if (compensateWide) {
+      ordinalFaces[nextOrdinal] = syntheticBlankFace()
+      nextOrdinal++
+    }
+  }
+
+  return {
+    spans,
+    ordinalFaces,
+    forwardPlans: new Array(spreads.length),
+    backwardPlans: new Array(spreads.length),
+  }
+}
+
+function physicalSinglePageTopology(
+  spreads: PageDtoWithUrl[][],
+  flipDirection: boolean,
+): PhysicalSinglePageTopology | null {
+  let entry = physicalSinglePageTopologyCache.get(spreads)
+  if (!entry) {
+    entry = {}
+    physicalSinglePageTopologyCache.set(spreads, entry)
+  }
+
+  if (flipDirection) {
+    if (entry.rtl === undefined) {
+      entry.rtl = buildPhysicalSinglePageTopology(spreads, true)
+    }
+    return entry.rtl
+  }
+
+  if (entry.ltr === undefined) {
+    entry.ltr = buildPhysicalSinglePageTopology(spreads, false)
+  }
+  return entry.ltr
+}
+
 /**
  * Resolve adjacent source-image navigation into the actual physical leaf edge.
  *
@@ -168,6 +263,9 @@ export function physicalSinglePageFacesForSpread(
  *
  *   portrait -> slide -> blank -> curl -> wide
  *   wide -> curl -> blank -> slide -> portrait
+ *
+ * The complete topology is compiled once per spreads array/direction. Adjacent
+ * edge plans are then memoized, keeping repeated render/touch lookups O(1).
  */
 export function physicalSinglePageEdgePlan(
   spreads: PageDtoWithUrl[][],
@@ -180,43 +278,15 @@ export function physicalSinglePageEdgePlan(
   if (currentIndex < 0 || targetIndex < 0 ||
     currentIndex >= spreads.length || targetIndex >= spreads.length) return null
 
-  type Span = {
-    first: number
-    last: number
-    faces: PhysicalPageFace[]
-  }
+  const topology = physicalSinglePageTopology(spreads, flipDirection)
+  if (!topology) return null
 
-  const spans: Span[] = []
-  const ordinalFaces = new Map<number, PhysicalPageFace>()
-  let nextOrdinal = 1
+  const planCache = direction > 0 ? topology.forwardPlans : topology.backwardPlans
+  const cached = planCache[currentIndex]
+  if (cached !== undefined) return cached
 
-  for (let index = 0; index < spreads.length; index++) {
-    const faces = physicalSinglePageFacesForSpread(spreads[index], flipDirection)
-    if (!faces) return null
-
-    // The first source may itself be a landscape cover. Every later wide source
-    // must begin on an even physical face. When it does not, add both the
-    // alignment face before it and the parity-restoring face after it.
-    const compensateWide = index > 0 && faces.length === 2 && nextOrdinal % 2 === 1
-    if (compensateWide) {
-      ordinalFaces.set(nextOrdinal, syntheticBlankFace())
-      nextOrdinal++
-    }
-
-    const first = nextOrdinal
-    faces.forEach((face, faceIndex) => ordinalFaces.set(first + faceIndex, face))
-    const last = first + faces.length - 1
-    spans.push({first, last, faces})
-    nextOrdinal = last + 1
-
-    if (compensateWide) {
-      ordinalFaces.set(nextOrdinal, syntheticBlankFace())
-      nextOrdinal++
-    }
-  }
-
-  const current = spans[currentIndex]
-  const target = spans[targetIndex]
+  const current = topology.spans[currentIndex]
+  const target = topology.spans[targetIndex]
   const currentWide = current.faces.length === 2
   const targetWide = target.faces.length === 2
 
@@ -239,18 +309,24 @@ export function physicalSinglePageEdgePlan(
       : current.first - 1
   }
 
-  if (boundaryFace < 1) return null
+  if (boundaryFace < 1) {
+    planCache[currentIndex] = null
+    return null
+  }
 
-  const lower = ordinalFaces.get(boundaryFace)
-  const upper = ordinalFaces.get(boundaryFace + 1)
-  if (!lower || !upper) return null
+  const lower = topology.ordinalFaces[boundaryFace]
+  const upper = topology.ordinalFaces[boundaryFace + 1]
+  if (!lower || !upper) {
+    planCache[currentIndex] = null
+    return null
+  }
 
   const front = direction > 0 ? lower : upper
   const back = direction > 0 ? upper : lower
-  const before = ordinalFaces.get(boundaryFace - 1) || null
-  const after = ordinalFaces.get(boundaryFace + 2) || null
+  const before = topology.ordinalFaces[boundaryFace - 1] || null
+  const after = topology.ordinalFaces[boundaryFace + 2] || null
 
-  return {
+  const plan: PhysicalSinglePageEdgePlan = {
     kind: boundaryFace % 2 === 1 ? 'curl' : 'slide',
     direction,
     currentFaces: current.faces,
@@ -263,6 +339,8 @@ export function physicalSinglePageEdgePlan(
     boundaryFace,
     crossesSyntheticBlank: lower.page.number === 0 || upper.page.number === 0,
   }
+  planCache[currentIndex] = plan
+  return plan
 }
 
 export function canUseDoublePageLeaf(
@@ -281,7 +359,7 @@ export function canUseDoublePageLeaf(
  * Build the physical intermediate state for an open two-page book.
  *
  * Forward:   A | B  ->  C | D   turns B(front) / C(back), base A | D
- * Backward:  C | D  ->  A | B   turns C(front) / B(back), base A | D
+ * Backward:  C | D -> A | B   turns C(front) / B(back), base A | D
  *
  * Spread rendering itself mirrors the slots for RTL, so this logical mapping is
  * direction-independent.
