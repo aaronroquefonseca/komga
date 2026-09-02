@@ -8,6 +8,7 @@ import {installSafeCurlEffects} from './paged-reader-safe-curl-effects.plugin'
 import {installSinglePageBlankGapStateMachine} from './paged-reader-single-page-blank-gap.plugin'
 import {installWideCompositorStability} from './paged-reader-wide-compositor-stability.plugin'
 import {installWideLiveDragGuard} from './paged-reader-wide-live-drag-guard.plugin'
+import {installWideLayoutHandoff} from './paged-reader-wide-layout-handoff.plugin'
 import {installWideSafeDecoration} from './paged-reader-wide-safe-decoration.plugin'
 
 type PaperBounds = {
@@ -129,6 +130,10 @@ export function installPaperBoundsStability(): void {
   // Wide -> single already has correct physical geometry. Append only the same
   // sanitized gradient shadow / crease highlight used by ordinary curls.
   installWideSafeDecoration()
+
+  // Preserve that physical geometry while dragging, then allow its existing
+  // destination-layout fade only during a committed post-release settlement.
+  installWideLayoutHandoff()
 
   // Direct single -> wide owns its complete stable tree, including its own
   // permanent safe-decoration nodes and opaque-through-commit settlement.

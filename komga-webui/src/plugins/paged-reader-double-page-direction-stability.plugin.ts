@@ -21,6 +21,11 @@ function isDoubleSheetGesture(reader: any): boolean {
     reader.transition === PagedReaderTransition.PAGE_TURN
 }
 
+function directionHandoffDistance(reader: any): number {
+  const span = Math.max(1, Number(reader.drag?.axisSize) || 1)
+  return Math.min(6, Math.max(4, span * 0.005))
+}
+
 /**
  * The measured leaf width/height stay valid when a live drag crosses through the
  * gesture origin. Only the side of the center spine changes. Correct that side
@@ -55,14 +60,12 @@ function normalizeLeafSide(sheet: any): void {
 
 /**
  * Keep the physical-sheet compositor alive while an active double-page gesture
- * crosses exactly through offset=0.
+ * crosses through the gesture origin.
  *
- * PagedReader normally maps offset=0 to navigationDelta=0/target=current. That
- * is correct for an idle gesture, but during a side switch it creates one render
- * where the double-page leaf plan disappears between two valid directions. At
- * progress zero both directions are visually the same resting spread, so retain
- * the previous valid target for that zero sample and let the next non-zero move
- * choose the opposite target normally.
+ * Touch sampling can jump directly from a small negative offset to a small
+ * positive one without producing offset=0. Keep the previous valid leaf inside
+ * the same tiny activation zone used to start a drag. The compositor therefore
+ * gets a flat frame before target, direction, and leaf side change together.
  */
 export function installDoublePageDirectionStability(): void {
   const readerOptions = (PagedReader as any).options
@@ -88,12 +91,14 @@ export function installDoublePageDirectionStability(): void {
       if (!preserve ||
         !this.drag?.tracking ||
         !this.drag?.active ||
-        this.drag.navigationDelta !== 0 ||
         previousDelta === 0 ||
-        previousTarget === null) return
+        previousTarget === null ||
+        this.drag.navigationDelta === previousDelta ||
+        Math.abs(Number(this.drag.rawOffset) || 0) > directionHandoffDistance(this)) return
 
       this.drag.navigationDelta = previousDelta
       this.drag.targetIndex = previousTarget
+      this.drag.offset = 0
       if (previousPhysicalDirection !== 0) {
         this.drag.physicalDirection = previousPhysicalDirection
       }

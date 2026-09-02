@@ -251,10 +251,10 @@ function decorationStyleAtCurl(
  * severe Chromium flashing at 775e513/b20bd4. No live subtree swaps and no
  * generic FX rewrite happen after this renderer.
  *
- * Unlike the old direct-wide settlement, the physical FRONT/BACK/UNDER scene is
- * never cross-faded against a differently positioned full target spread. At
- * CURL_END the sheet is already physically complete; it stays opaque until
- * visualPage commits, matching ordinary Physical Comic curls.
+ * The physical FRONT/BACK/UNDER scene remains authoritative throughout live
+ * follow-finger. During a committed post-release settlement only, the already
+ * mounted destination layout fades over it in the final tail. The physical
+ * scene itself stays opaque, so the handoff cannot expose the reader canvas.
  */
 export function installDirectWideStability(): void {
   const paperOptions = (PagedReaderPaperSheet as any).options
@@ -293,6 +293,9 @@ export function installDirectWideStability(): void {
 
     const progress = clamp01(Number(this.progress))
     const curl = clamp01(progress / CURL_END)
+    const layoutFade = reader.drag?.settling && reader.drag?.settleCommit
+      ? smooth((progress - CURL_END) / (1 - CURL_END))
+      : 0
     const stationary = stationaryTargetFace(plan)
     const leafRect = sourceRect(this)
 
@@ -383,15 +386,14 @@ export function installDirectWideStability(): void {
       ),
     ])
 
-    // Keep the target mounted for structural continuity, but never cross-fade it
-    // over the physical scene. visualPage becomes targetIndex only after the
-    // completed sheet is committed by the reader.
+    // Keep the target mounted for structural continuity. It remains hidden for
+    // all live/cancelled gestures and only eases in after a committed release.
     const finalTarget = h('div', {
       key: 'direct-wide-final',
       staticClass: 'paper-layer single-page-wide-v2-final-target direct-wide-final',
       style: {
         zIndex: '14',
-        opacity: '0',
+        opacity: `${layoutFade}`,
         pointerEvents: 'none',
         filter: 'none',
       },
