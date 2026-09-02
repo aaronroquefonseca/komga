@@ -1,6 +1,14 @@
 import {CreateElement, VNode} from 'vue'
 import PagedReaderPaperSheet from '@/components/readers/PagedReaderPaperSheet.vue'
 import {PagedReaderTransition} from '@/types/enum-reader'
+import {
+  safeCreaseEdgeStyle,
+  safeCreaseShadowStyle,
+} from './paged-reader-safe-curl-primitives'
+
+function clamp01(value: number): number {
+  return Math.max(0, Math.min(1, value))
+}
 
 function classNames(vnode: VNode): string[] {
   return `${vnode.data?.staticClass || ''}`.split(/\s+/).filter(Boolean)
@@ -50,39 +58,40 @@ function removeUnsafeCompositorProperties(style: Record<string, string>): Record
   return safe
 }
 
-function rebuildShadow(vnode: VNode): void {
-  const original = styleOf(vnode)
-  replaceClass(vnode, 'paper-shadow', 'safe-curl-shadow')
-  setStyle(vnode, {
+function safePrimitiveStyle(
+  style: Record<string, string>,
+  zIndex: string,
+): Record<string, string> {
+  const bounded = style.width !== undefined &&
+    style.height !== undefined &&
+    style.transform !== undefined
+  return {
     position: 'absolute',
-    inset: '0',
-    zIndex: '3',
+    ...(bounded ? {
+      left: style.left || '0',
+      top: style.top || '0',
+      width: style.width,
+      height: style.height,
+      transformOrigin: style.transformOrigin || '0 0',
+      transform: style.transform,
+    } : {inset: '0'}),
+    zIndex,
     pointerEvents: 'none',
-    clipPath: original.clipPath || 'none',
-    WebkitClipPath: original.WebkitClipPath || original.clipPath || 'none',
-    // Keep only the geometry-driven linear gradient. No filter, blur, shadow,
-    // isolated paint layer, or compositor promotion is involved.
-    background: original.background || 'transparent',
-    opacity: original.opacity || '0',
-  })
+    clipPath: style.clipPath || 'none',
+    WebkitClipPath: style.WebkitClipPath || style.clipPath || 'none',
+    background: style.background || 'transparent',
+    opacity: style.opacity || '0',
+  }
 }
 
-function rebuildEdge(vnode: VNode): void {
-  const original = styleOf(vnode)
+function rebuildShadow(vnode: VNode, style: Record<string, string>): void {
+  replaceClass(vnode, 'paper-shadow', 'safe-curl-shadow')
+  setStyle(vnode, safePrimitiveStyle(style, '3'))
+}
+
+function rebuildEdge(vnode: VNode, style: Record<string, string>): void {
   replaceClass(vnode, 'paper-edge', 'safe-curl-edge')
-  setStyle(vnode, {
-    position: 'absolute',
-    inset: '0',
-    zIndex: '6',
-    pointerEvents: 'none',
-    clipPath: original.clipPath || 'none',
-    WebkitClipPath: original.WebkitClipPath || original.clipPath || 'none',
-    // A flat paper highlight is visually enough to define the crease. The old
-    // edge used box-shadow on a continuously clipped layer, one of the raster
-    // combinations deliberately removed by curlDebug=nofx.
-    background: 'rgba(250, 250, 250, 0.86)',
-    opacity: original.opacity || '0',
-  })
+  setStyle(vnode, safePrimitiveStyle(style, '6'))
 }
 
 function isCurl(reader: any): boolean {
@@ -140,9 +149,9 @@ function installSafeCss(): void {
  *
  * curlDebug=nofx proved that the fold/clip/reflection geometry itself can render
  * without flashing on the affected Android Chromium device. The unsafe part was
- * the decoration/compositor stack. Preserve the fold, but replace the old
- * filtered shadow/edge layers with plain clipped color primitives and strip
- * filter/will-change/paint-containment from every curl VNode.
+ * the decoration/compositor stack. Preserve the fold, but replace its full-page
+ * clipped decoration with bounded crease strips and strip filter/will-change/
+ * paint-containment from every curl VNode.
  */
 export function installSafeCurlEffects(): void {
   installSafeCss()
@@ -158,15 +167,18 @@ export function installSafeCurlEffects(): void {
     const vnode = originalRender.call(this, h) as VNode
     const reader = this.$parent as any
     if (!isCurl(reader)) return vnode
+    const progress = clamp01(Number(this.progress))
+    const shadowStyle = safeCreaseShadowStyle(this, progress)
+    const edgeStyle = safeCreaseEdgeStyle(this, progress)
 
     addClass(vnode, 'safe-curl-root')
     visit(vnode, node => {
       if (hasClass(node, 'paper-shadow')) {
-        rebuildShadow(node)
+        rebuildShadow(node, shadowStyle)
         return
       }
       if (hasClass(node, 'paper-edge')) {
-        rebuildEdge(node)
+        rebuildEdge(node, edgeStyle)
         return
       }
       setStyle(node, removeUnsafeCompositorProperties(styleOf(node)))

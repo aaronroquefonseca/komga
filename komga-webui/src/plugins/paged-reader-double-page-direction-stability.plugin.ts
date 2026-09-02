@@ -32,13 +32,13 @@ function directionHandoffOffset(reader: any, physicalDirection: number): number 
 }
 
 function showDirectionHandoffCover(reader: any): void {
-  reader.__doublePageDirectionCover = true
+  reader.drag.directionHandoffCover = true
   reader.__doublePageDirectionCoverGeneration =
     (Number(reader.__doublePageDirectionCoverGeneration) || 0) + 1
 }
 
 function clearDirectionHandoffCover(reader: any): void {
-  reader.__doublePageDirectionCover = false
+  reader.drag.directionHandoffCover = false
   reader.__doublePageDirectionCoverPendingHide = false
   reader.__doublePageDirectionCoverGeneration =
     (Number(reader.__doublePageDirectionCoverGeneration) || 0) + 1
@@ -54,7 +54,7 @@ function hideDirectionHandoffCoverAfterPaint(reader: any): void {
     window.requestAnimationFrame(() => {
       window.requestAnimationFrame(() => {
         if (generation !== reader.__doublePageDirectionCoverGeneration) return
-        reader.__doublePageDirectionCover = false
+        reader.drag.directionHandoffCover = false
         reader.__doublePageDirectionCoverPendingHide = false
         reader.$forceUpdate()
       })
@@ -138,7 +138,7 @@ export function installDoublePageDirectionStability(): void {
       }
 
       if (this.drag.navigationDelta === previousDelta) {
-        if (this.__doublePageDirectionCover && !this.__doublePageDirectionCoverPendingHide) {
+        if (this.drag.directionHandoffCover && !this.__doublePageDirectionCoverPendingHide) {
           clearDirectionHandoffCover(this)
         }
         return

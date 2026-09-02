@@ -8,6 +8,8 @@ import {
 import {
   renderSafeCurlEdge,
   renderSafeCurlShadow,
+  safeCreaseEdgeStyle,
+  safeCreaseShadowStyle,
 } from './paged-reader-safe-curl-primitives'
 
 const OUT_BLANK_CURL_END = 0.56
@@ -55,16 +57,6 @@ function wideExitPlan(reader: any): PhysicalSinglePageEdgePlan | null {
   return plan
 }
 
-function decorationStyleAtCurl(
-  style: Record<string, any>,
-  curl: number,
-): Record<string, any> {
-  return {
-    ...style,
-    opacity: `${Math.sin(clamp01(curl) * Math.PI)}`,
-  }
-}
-
 /**
  * Wide -> single already has correct physical topology/UNDER geometry. Keep that
  * compositor untouched and restore only the polished curl decoration using the
@@ -98,12 +90,12 @@ export function installWideSafeDecoration(): void {
     children.push(
       renderSafeCurlShadow(
         h,
-        decorationStyleAtCurl(this.shadowStyle as Record<string, any>, curl),
+        safeCreaseShadowStyle(this, curl),
         'wide-exit-safe-shadow',
       ),
       renderSafeCurlEdge(
         h,
-        decorationStyleAtCurl(this.edgeStyle as Record<string, any>, curl),
+        safeCreaseEdgeStyle(this, curl),
         'wide-exit-safe-edge',
       ),
     )
