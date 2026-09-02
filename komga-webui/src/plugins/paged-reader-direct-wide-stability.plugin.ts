@@ -12,6 +12,8 @@ import {
 } from '@/functions/paged-reader-transition'
 import {PageDtoWithUrl} from '@/types/komga-books'
 
+const CURL_END = 0.90
+
 function clamp01(value: number): number {
   return Math.max(0, Math.min(1, value))
 }
@@ -92,14 +94,9 @@ function renderFace(
   face: PhysicalPageFace,
   style: Record<string, string>,
   staticClass: string,
+  readableBack = false,
 ): VNode {
-  return h('div', {
-    staticClass,
-    style: {
-      ...style,
-      background: '#fff',
-    },
-  }, isBlank(face) ? [] : [
+  const content = isBlank(face) ? [] : [
     h('img', {
       attrs: {
         src: face.page.url,
@@ -107,7 +104,30 @@ function renderFace(
       },
       style: faceImageStyle(face),
     }),
-  ])
+  ]
+
+  return h('div', {
+    staticClass,
+    style: {
+      ...style,
+      background: '#fff',
+    },
+  }, readableBack ? [
+    h('div', {
+      staticClass: 'direct-wide-readable-back-artwork',
+      style: {
+        position: 'absolute',
+        inset: '0',
+        // Keep the exact stable VNode tree from the last visually good build,
+        // but do not ask the compositor to rasterize a second nested reflection.
+        // readableBackContentStyle() algebraically folds this mirror into the
+        // outer crease transform instead.
+        transform: 'none',
+        transformOrigin: 'center center',
+        willChange: 'auto',
+      },
+    }, content),
+  ] : content)
 }
 
 function sourceRect(sheet: any): Record<string, string> {
@@ -167,12 +187,20 @@ function stationaryTargetFace(plan: PhysicalSinglePageEdgePlan): PhysicalPageFac
 }
 
 /**
- * This is the exact backside transform used by the already-stable ordinary
- * Physical Comic composite. A virtual half of a wide scan must not go through
- * PagedReaderPaperSheet's generic reflection plus a second scaleX(-1): that old
- * combination becomes visually unstable at extreme curl angles.
+ * The last visually stable direct-wide renderer made its real target BACK
+ * readable with two nested reflections:
+ *
+ *   crease reflection * scaleX(-1 around the leaf centre)
+ *
+ * That is mathematically fine, but it leaves two independently mirrored
+ * compositor layers. Combine the matrices instead. The product has positive
+ * determinant, so Chromium never has to treat the artwork itself as a nested
+ * back-facing surface at extreme curl angles.
+ *
+ * This is algebraically equivalent to the old two-transform output; only the
+ * compositor representation changes.
  */
-function alignedBackContentStyle(sheet: any): Record<string, string> {
+function readableBackContentStyle(sheet: any): Record<string, string> {
   if (!sheet.pageBoundsReady || !sheet.pageBounds) return {opacity: '0'}
 
   const {left, top, width, height} = sheet.pageBounds
@@ -186,24 +214,24 @@ function alignedBackContentStyle(sheet: any): Record<string, string> {
     {x: sheet.paperX(seamTop), y: top},
     {x: sheet.paperX(seamBottom), y: bottom},
   )
-
   const centreX = left + width / 2
+
   return {
     transformOrigin: '0 0',
     transform: `matrix(${-reflection.a}, ${-reflection.b}, ${reflection.c}, ${reflection.d}, ${reflection.e + 2 * centreX * reflection.a}, ${reflection.f + 2 * centreX * reflection.b})`,
     opacity: '1',
     filter: 'none',
+    willChange: 'auto',
   }
 }
 
 /**
- * Direct portrait -> wide keeps an isolated scene, but the physical sheet itself
- * is now deliberately identical to the proven ordinary Physical Comic curl:
- * paper-current + paper-back/aligned reflection + paper-shadow + paper-edge.
+ * Direct portrait -> wide transitions stay on the exact isolated visual tree
+ * that eliminated their severe flashing at 775e513. Do not reuse the unified
+ * V2 visual tree and do not add shadow/edge/effect nodes here.
  *
- * The only special piece left here is the stationary half of the target wide
- * scan, which must occupy its outer-edge slot while the other half is the BACK
- * of the turning sheet.
+ * The only change from that validated renderer is the algebraically combined
+ * readable BACK transform above.
  */
 export function installDirectWideStability(): void {
   const paperOptions = (PagedReaderPaperSheet as any).options
@@ -216,8 +244,9 @@ export function installDirectWideStability(): void {
       const plan = directIntoWidePlan(this.$parent as any)
       if (!plan) return originalGeometry.call(this)
 
+      const curl = Math.min(clamp01(Number(this.progress) / CURL_END), 0.9998)
       return paperCurlDynamicGeometry(
-        Math.min(clamp01(Number(this.progress)), 0.9998),
+        curl,
         this.touchCaptured ? this.touchStartY : 0.5,
         this.touchCaptured ? this.touchCurrentY : 0.5,
         this.direction,
@@ -230,18 +259,24 @@ export function installDirectWideStability(): void {
   if (typeof originalRender !== 'function') return
 
   paperOptions.render = function (this: any, h: CreateElement): VNode {
-    // Lower wrappers still perform topology/touch/bounds bookkeeping, but their
-    // multi-mode visual tree is intentionally not reused for this direct edge.
+    // Lower wrappers still run for touch/image-load/bounds bookkeeping; their
+    // visual tree is deliberately discarded for this one transition.
     const fallback = originalRender.call(this, h) as VNode
     const reader = this.$parent as any
     const plan = directIntoWidePlan(reader)
     if (!plan || !this.pageBoundsReady || !this.pageBounds) return fallback
 
     const currentSpread = reader.spreads?.[reader.drag.currentIndex] as PageDtoWithUrl[] | undefined
-    if (!currentSpread) return fallback
+    const targetSpread = reader.spreads?.[reader.drag.targetIndex] as PageDtoWithUrl[] | undefined
+    if (!currentSpread || !targetSpread) return fallback
 
     const progress = clamp01(Number(this.progress))
-    const curl = progress
+    const curl = clamp01(progress / CURL_END)
+    const settling = !!(reader.drag?.settling && reader.drag?.settleCommit)
+    const settle = settling
+      ? smooth((progress - CURL_END) / (1 - CURL_END))
+      : 0
+    const physicalOpacity = 1 - settle
     const stationary = stationaryTargetFace(plan)
     const leafRect = sourceRect(this)
 
@@ -253,11 +288,9 @@ export function installDirectWideStability(): void {
       },
     })
 
-    // The immutable real-image measurement surface prevents image-load/layout
-    // events from changing the physical rectangle during the gesture.
     const measurement = h('div', {
       key: 'direct-wide-measure',
-      staticClass: 'paper-layer paper-current direct-wide-measure',
+      staticClass: 'paper-layer paper-current single-page-wide-v2-measure direct-wide-measure',
       style: {
         visibility: 'hidden',
         zIndex: '0',
@@ -272,59 +305,74 @@ export function installDirectWideStability(): void {
         {
           ...outerEdgeSlotRect(this, faceSide(stationary) || 'right'),
           zIndex: '2',
-          opacity: `${smooth(curl / 0.35)}`,
+          opacity: `${physicalOpacity * smooth(curl / 0.45)}`,
         },
-        'direct-wide-under',
+        'single-page-wide-v2-under-target-wide direct-wide-under',
       )
       : h('div', {
         key: 'direct-wide-under',
-        staticClass: 'direct-wide-under',
+        staticClass: 'single-page-wide-v2-under-target-wide direct-wide-under',
         style: {position: 'absolute', inset: '0', opacity: '0'},
       })
     if (under.data) under.data.key = 'direct-wide-under'
 
     const turning = h('div', {
       key: 'direct-wide-turning',
-      staticClass: 'single-page-physical-turning-group direct-wide-turning',
+      staticClass: 'single-page-wide-v2-turning-group direct-wide-turning',
       style: {
         position: 'absolute',
         inset: '0',
         zIndex: '8',
-        transform: 'translate3d(0, 0, 0)',
+        opacity: `${physicalOpacity}`,
         pointerEvents: 'none',
+        filter: 'none',
+        willChange: 'auto',
       },
     }, [
       h('div', {
-        staticClass: 'paper-layer paper-current single-page-physical-current direct-wide-current',
-        style: this.currentStyle,
-      }, [
-        renderFace(h, plan.front, leafRect, 'single-page-physical-front-face direct-wide-front'),
-      ]),
+        staticClass: 'paper-layer direct-wide-current',
+        style: {
+          position: 'absolute',
+          inset: '0',
+          zIndex: '4',
+          ...(this.currentStyle as Record<string, string>),
+        },
+      }, [renderFace(h, plan.front, leafRect, 'direct-wide-front')]),
       h('div', {
-        staticClass: 'paper-layer paper-back physical-comic-paper-back single-page-physical-back direct-wide-back',
-        style: this.backStyle,
+        staticClass: 'paper-layer paper-back physical-comic-paper-back direct-wide-back',
+        style: {
+          ...(this.backStyle as Record<string, string>),
+          filter: 'none',
+          willChange: 'auto',
+        },
       }, [
         h('div', {
           staticClass: 'paper-back-content',
-          style: alignedBackContentStyle(this),
-        }, [
-          renderFace(h, plan.back, leafRect, 'single-page-physical-back-face direct-wide-back-face'),
-        ]),
+          style: readableBackContentStyle(this),
+        }, [renderFace(h, plan.back, leafRect, 'direct-wide-back-face', true)]),
       ]),
-      h('div', {staticClass: 'paper-shadow', style: this.shadowStyle}),
-      h('div', {staticClass: 'paper-edge', style: this.edgeStyle}),
     ])
 
-    // No late full-spread opacity handoff. At progress=1 the physical BACK is
-    // already the second target half in its final leaf position, exactly like the
-    // ordinary composite. resetDrag()/visualPage then swaps to the idle target.
+    const finalTarget = h('div', {
+      key: 'direct-wide-final',
+      staticClass: 'paper-layer single-page-wide-v2-final-target direct-wide-final',
+      style: {
+        zIndex: '14',
+        opacity: `${settle}`,
+        pointerEvents: 'none',
+        filter: 'none',
+      },
+    }, [spread(targetSpread)])
+
     return h('div', {
-      staticClass: 'paper-sheet direct-wide-stable',
+      staticClass: 'paper-sheet single-page-wide-v2 direct-wide-stable',
       attrs: {'aria-hidden': 'true'},
       style: {
         overflow: 'visible',
         pointerEvents: 'none',
+        contain: 'none',
+        isolation: 'auto',
       },
-    }, [measurement, under, turning])
+    }, [measurement, under, turning, finalTarget])
   }
 }
