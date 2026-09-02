@@ -12,6 +12,7 @@ import {PageDtoWithUrl} from '@/types/komga-books'
 import {
   renderSafeCurlEdge,
   renderSafeCurlShadow,
+  safeCreaseEdgeStyle,
   safeCreaseShadowStyle,
 } from './paged-reader-safe-curl-primitives'
 
@@ -544,10 +545,7 @@ export function installSinglePageBlankGapStateMachine(): void {
       ),
       renderSafeCurlEdge(
         h,
-        {
-          ...(this.edgeStyle as Record<string, any>),
-          opacity: `${Math.sin(curl * Math.PI)}`,
-        },
+        safeCreaseEdgeStyle(this, curl),
         'single-page-gap-v1-safe-edge',
       ),
     ])

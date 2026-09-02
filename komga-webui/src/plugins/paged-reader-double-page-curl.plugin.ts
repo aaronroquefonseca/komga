@@ -325,6 +325,33 @@ function renderBase(
   ])
 }
 
+function renderDirectionHandoffCover(sheet: any, h: CreateElement): VNode {
+  const reader = sheet.$parent as any
+  return h('div', {
+    key: 'double-page-direction-cover',
+    staticClass: 'paper-layer double-page-direction-cover',
+    style: {
+      position: 'absolute',
+      inset: '0',
+      zIndex: '20',
+      opacity: reader?.drag?.tracking && reader.__doublePageDirectionCover ? '1' : '0',
+      pointerEvents: 'none',
+      filter: 'none',
+      willChange: 'auto',
+      contain: 'none',
+      isolation: 'auto',
+    },
+  }, [
+    h('paged-reader-spread', {
+      props: {
+        spread: sheet.frontSpread,
+        flipDirection: sheet.flipDirection,
+        scale: sheet.scale,
+      },
+    }),
+  ])
+}
+
 function renderPageTurn(
   sheet: any,
   h: CreateElement,
@@ -385,6 +412,7 @@ function renderPageTurn(
       renderFace(h, resolved.plan.front, frontStyle, 'double-page-page-turn-front'),
       renderFace(h, resolved.plan.back, backStyle, 'double-page-page-turn-back'),
     ]),
+    renderDirectionHandoffCover(sheet, h),
   ])
 }
 
@@ -431,6 +459,7 @@ function renderPaperCurl(
     ]),
     h('div', {staticClass: 'paper-shadow', style: sheet.shadowStyle}),
     h('div', {staticClass: 'paper-edge', style: sheet.edgeStyle}),
+    renderDirectionHandoffCover(sheet, h),
   ])
 }
 

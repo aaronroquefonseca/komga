@@ -31,6 +31,37 @@ function directionHandoffOffset(reader: any, physicalDirection: number): number 
   return Math.sign(physicalDirection || -1) * Math.min(1.5, Math.max(0.75, span * 0.0015))
 }
 
+function showDirectionHandoffCover(reader: any): void {
+  reader.__doublePageDirectionCover = true
+  reader.__doublePageDirectionCoverGeneration =
+    (Number(reader.__doublePageDirectionCoverGeneration) || 0) + 1
+}
+
+function clearDirectionHandoffCover(reader: any): void {
+  reader.__doublePageDirectionCover = false
+  reader.__doublePageDirectionCoverPendingHide = false
+  reader.__doublePageDirectionCoverGeneration =
+    (Number(reader.__doublePageDirectionCoverGeneration) || 0) + 1
+}
+
+/** Keep the flat current spread painted for one complete frame after the new
+ * target and leaf side have reached the DOM. The swap then happens underneath
+ * an identical opaque page instead of briefly exposing either base spread. */
+function hideDirectionHandoffCoverAfterPaint(reader: any): void {
+  const generation = Number(reader.__doublePageDirectionCoverGeneration) || 0
+  reader.__doublePageDirectionCoverPendingHide = true
+  reader.$nextTick(() => {
+    window.requestAnimationFrame(() => {
+      window.requestAnimationFrame(() => {
+        if (generation !== reader.__doublePageDirectionCoverGeneration) return
+        reader.__doublePageDirectionCover = false
+        reader.__doublePageDirectionCoverPendingHide = false
+        reader.$forceUpdate()
+      })
+    })
+  })
+}
+
 /**
  * The measured leaf width/height stay valid when a live drag crosses through the
  * gesture origin. Only the side of the center spine changes. Correct that side
@@ -96,11 +127,33 @@ export function installDoublePageDirectionStability(): void {
 
       if (!preserve ||
         !this.drag?.tracking ||
-        !this.drag?.active ||
-        previousDelta === 0 ||
-        previousTarget === null ||
-        this.drag.navigationDelta === previousDelta ||
-        Math.abs(Number(this.drag.rawOffset) || 0) > directionHandoffDistance(this)) return
+        !this.drag?.active) {
+        clearDirectionHandoffCover(this)
+        return
+      }
+
+      if (previousDelta === 0 || previousTarget === null) {
+        clearDirectionHandoffCover(this)
+        return
+      }
+
+      if (this.drag.navigationDelta === previousDelta) {
+        if (this.__doublePageDirectionCover && !this.__doublePageDirectionCoverPendingHide) {
+          clearDirectionHandoffCover(this)
+        }
+        return
+      }
+
+      showDirectionHandoffCover(this)
+
+      if (Math.abs(Number(this.drag.rawOffset) || 0) > directionHandoffDistance(this)) {
+        // targetIndex, direction and the normalized leaf side have switched on
+        // this render. Leave the stable cover up until that frame is painted.
+        hideDirectionHandoffCoverAfterPaint(this)
+        return
+      }
+
+      this.__doublePageDirectionCoverPendingHide = false
 
       this.drag.navigationDelta = previousDelta
       this.drag.targetIndex = previousTarget

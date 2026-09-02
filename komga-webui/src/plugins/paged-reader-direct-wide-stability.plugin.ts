@@ -14,6 +14,7 @@ import {PageDtoWithUrl} from '@/types/komga-books'
 import {
   renderSafeCurlEdge,
   renderSafeCurlShadow,
+  safeCreaseEdgeStyle,
   safeCreaseShadowStyle,
 } from './paged-reader-safe-curl-primitives'
 
@@ -234,19 +235,6 @@ function readableBackContentStyle(sheet: any): Record<string, string> {
   }
 }
 
-function decorationStyleAtCurl(
-  style: Record<string, any>,
-  curl: number,
-): Record<string, any> {
-  return {
-    ...style,
-    // Geometry reaches its physical endpoint at CURL_END. Keep decoration on the
-    // same local clock so the shadow/crease is already gone while the fully
-    // turned sheet remains opaque for the final settlement tail.
-    opacity: `${Math.sin(clamp01(curl) * Math.PI)}`,
-  }
-}
-
 /**
  * Direct portrait -> wide stays on the isolated visual tree that eliminated the
  * severe Chromium flashing at 775e513/b20bd4. No live subtree swaps and no
@@ -383,7 +371,7 @@ export function installDirectWideStability(): void {
       ),
       renderSafeCurlEdge(
         h,
-        decorationStyleAtCurl(this.edgeStyle as Record<string, any>, curl),
+        safeCreaseEdgeStyle(this, curl),
         'direct-wide-safe-edge',
       ),
     ])

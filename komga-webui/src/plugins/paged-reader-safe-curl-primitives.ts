@@ -57,14 +57,49 @@ export function safeCreaseShadowStyle(
 
   const arch = Math.sin(clamp01(curl) * Math.PI)
   const stripWidth = Math.min(16, Math.max(5, width * 0.018)) * arch
+  const dx = seamBottom - seamTop
+  const dy = bottom - top
+  const length = Math.hypot(dx, dy)
+  if (length <= 0.01 || stripWidth <= 0.01) return {opacity: '0'}
+
+  // Paint a real strip instead of clipping a viewport-sized transparent layer.
+  // A diagonal 16px polygon still has a page-sized compositor bounding box;
+  // affected Android Chromium builds occasionally blend that whole box as the
+  // fold becomes steep. This matrix maps a small local rectangle directly onto
+  // the crease, with its x axis pointing toward the exposed side of the paper.
   const shadowSign = Math.sign(sheet.direction || -1) < 0 ? 1 : -1
-  const clipPath = `polygon(${seamTop}px ${top}px, ${seamTop + shadowSign * stripWidth}px ${top}px, ${seamBottom + shadowSign * stripWidth}px ${bottom}px, ${seamBottom}px ${bottom}px)`
+  const normalX = shadowSign * dy / length
+  const normalY = shadowSign * -dx / length
+  const tangentX = dx / length
+  const tangentY = dy / length
+  const alpha = 0.24 * arch
 
   return {
-    clipPath,
-    WebkitClipPath: clipPath,
-    background: 'rgba(0, 0, 0, 0.24)',
-    opacity: `${arch}`,
+    left: '0',
+    top: '0',
+    width: `${stripWidth}px`,
+    height: `${length}px`,
+    transformOrigin: '0 0',
+    transform: `matrix(${normalX}, ${normalY}, ${tangentX}, ${tangentY}, ${seamTop}, ${top})`,
+    clipPath: 'none',
+    WebkitClipPath: 'none',
+    background: `linear-gradient(to right, rgba(0, 0, 0, ${alpha}), rgba(0, 0, 0, 0))`,
+    opacity: '1',
+  }
+}
+
+export function safeCreaseEdgeStyle(
+  sheet: CurlSheetGeometry,
+  curl: number,
+): Record<string, string> {
+  const style = safeCreaseShadowStyle(sheet, curl)
+  if (style.transform === undefined) return style
+
+  const arch = Math.sin(clamp01(curl) * Math.PI)
+  return {
+    ...style,
+    width: `${Math.max(0.75, 1.4 * arch)}px`,
+    background: `rgba(250, 250, 250, ${0.86 * arch})`,
   }
 }
 
@@ -79,12 +114,22 @@ export function renderSafeCurlShadow(
   staticClass: string,
 ): VNode {
   const clipPath = styleValue(shadowStyle, 'clipPath', 'none')
+  const bounded = shadowStyle?.width !== undefined &&
+    shadowStyle?.height !== undefined &&
+    shadowStyle?.transform !== undefined
   return h('div', {
     key: staticClass,
     staticClass,
     style: {
       position: 'absolute',
-      inset: '0',
+      ...(bounded ? {
+        left: styleValue(shadowStyle, 'left', '0'),
+        top: styleValue(shadowStyle, 'top', '0'),
+        width: styleValue(shadowStyle, 'width', '0'),
+        height: styleValue(shadowStyle, 'height', '0'),
+        transformOrigin: styleValue(shadowStyle, 'transformOrigin', '0 0'),
+        transform: styleValue(shadowStyle, 'transform', 'none'),
+      } : {inset: '0'}),
       zIndex: '3',
       pointerEvents: 'none',
       clipPath,
@@ -106,17 +151,27 @@ export function renderSafeCurlEdge(
   staticClass: string,
 ): VNode {
   const clipPath = styleValue(edgeStyle, 'clipPath', 'none')
+  const bounded = edgeStyle?.width !== undefined &&
+    edgeStyle?.height !== undefined &&
+    edgeStyle?.transform !== undefined
   return h('div', {
     key: staticClass,
     staticClass,
     style: {
       position: 'absolute',
-      inset: '0',
+      ...(bounded ? {
+        left: styleValue(edgeStyle, 'left', '0'),
+        top: styleValue(edgeStyle, 'top', '0'),
+        width: styleValue(edgeStyle, 'width', '0'),
+        height: styleValue(edgeStyle, 'height', '0'),
+        transformOrigin: styleValue(edgeStyle, 'transformOrigin', '0 0'),
+        transform: styleValue(edgeStyle, 'transform', 'none'),
+      } : {inset: '0'}),
       zIndex: '6',
       pointerEvents: 'none',
       clipPath,
       WebkitClipPath: styleValue(edgeStyle, 'WebkitClipPath', clipPath),
-      background: 'rgba(250, 250, 250, 0.86)',
+      background: styleValue(edgeStyle, 'background', 'rgba(250, 250, 250, 0.86)'),
       opacity: styleValue(edgeStyle, 'opacity', '0'),
       filter: 'none',
       boxShadow: 'none',
