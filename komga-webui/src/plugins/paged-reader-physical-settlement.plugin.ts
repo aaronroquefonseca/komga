@@ -122,15 +122,18 @@ function physicalGestureSpan(reader: any, viewportSpan: number): number | null {
   return null
 }
 
-function applyPaperBoundsClip(vnode: VNode, paperSheet: any): void {
+function applyPaperHorizontalBoundsClip(vnode: VNode, paperSheet: any): void {
   if (!vnode.data || !paperSheet.pageBoundsReady || !paperSheet.pageBounds) return
 
   const {left, top, width, height} = paperSheet.pageBounds
   if (![left, top, width, height].every(Number.isFinite) || width <= 0 || height <= 0) return
 
   const right = left + width
-  const bottom = top + height
-  const clip = `polygon(${left}px ${top}px, ${right}px ${top}px, ${right}px ${bottom}px, ${left}px ${bottom}px)`
+  const rootHeight = paperSheet.$el instanceof HTMLElement
+    ? paperSheet.$el.getBoundingClientRect().height
+    : 0
+  const canvasHeight = Math.max(1, rootHeight || window.innerHeight || top + height)
+  const clip = `polygon(${left}px 0px, ${right}px 0px, ${right}px ${canvasHeight}px, ${left}px ${canvasHeight}px)`
 
   vnode.data.style = {
     ...(vnode.data.style as Record<string, string> || {}),
@@ -140,11 +143,13 @@ function applyPaperBoundsClip(vnode: VNode, paperSheet: any): void {
 }
 
 /**
- * Keep Physical Comic transitions bound to the actual painted comic sheet.
+ * Keep Physical Comic transitions aligned to the actual painted comic sheet.
  *
- * - Single-page curl layers are clipped as a complete compositor to the measured
- *   page rectangle, preventing reflected flap edges, shadows, and crease
- *   decoration from leaking into letterboxed side margins.
+ * - Single-page curl compositors stay horizontally constrained to the painted
+ *   page width, preventing reflected flap edges from leaking into side margins.
+ *   Vertically they retain the full reader canvas, matching the original curl
+ *   behavior where an angled sheet may extend above/below the page into unused
+ *   canvas margin instead of being cut at the artwork edge.
  * - Single-page Physical Comic slides use the painted page span instead of the
  *   viewport width, keeping the outgoing and incoming page edges together.
  * - Double-page Physical Comic curls use the painted open-book width, allowing
@@ -207,8 +212,7 @@ export function installPhysicalPagedReaderSettlementGuard(): void {
       readerOptions.methods.customSpreadStyle = function (this: any, spreadIndex: number): Record<string, string> {
         const style = originalCustomSpreadStyle.call(this, spreadIndex)
         if (!isPhysicalSlide(this) ||
-          spreadIndex === this.drag.currentIndex ||
-          spreadIndex === this.drag.targetIndex) return style
+          spreadIndex === this.drag.currentIndex || spreadIndex === this.drag.targetIndex) return style
 
         return {
           ...style,
@@ -228,8 +232,9 @@ export function installPhysicalPagedReaderSettlementGuard(): void {
 
     // Double-page Physical Comic has its own open-book clip: its curled back face
     // must be allowed to cross the center spine and occupy the opposite page.
-    // Other single-page curls remain strictly clipped to their painted page.
-    if (!parent?.doublePageLeafTransition) applyPaperBoundsClip(vnode, this)
+    // Single-page curls retain only the horizontal painted-page boundary; their
+    // top/bottom fold may extend into the reader canvas just as on master.
+    if (!parent?.doublePageLeafTransition) applyPaperHorizontalBoundsClip(vnode, this)
 
     const physicalSingleCurl = parent &&
       parent.transition === PagedReaderTransition.PHYSICAL_COMIC &&
