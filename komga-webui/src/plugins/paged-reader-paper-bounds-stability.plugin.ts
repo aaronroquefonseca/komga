@@ -114,16 +114,18 @@ function currentImagesReady(sheet: any): boolean {
 export function installPaperBoundsStability(): void {
   // Final wrappers deliberately run after every topology/compositor plugin.
   installSinglePageBlankGapStateMachine()
-  // Preserve a valid double-page leaf through a zero-crossing touch sample and
-  // normalize the leaf to the center spine before any compositor reads it.
+  // Keep a valid double-page leaf through the exact zero sample when a live drag
+  // changes side. This is independent from direct single -> wide rendering.
   installDoublePageDirectionStability()
   installWideLiveDragGuard()
-  installWideCompositorStability()
-  // Direct portrait -> wide paints the same FRONT/BACK/shadow/edge primitives as
-  // the proven ordinary Physical Comic curl. Install it before safe effects so
-  // those decoration nodes go through the exact same compositor-safe rebuild.
-  installDirectWideStability()
+
+  // Restore the last visually validated direct-wide wrapper order from 775e513:
+  // generic safe effects run first; the isolated direct-wide renderer runs later
+  // and therefore its deterministic no-FX VNode tree is never rewritten.
   installSafeCurlEffects()
+  installWideCompositorStability()
+  installDirectWideStability()
+
   installReaderRenderWindow()
   installCurlDiagnostics()
 
