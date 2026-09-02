@@ -1,6 +1,7 @@
 import PagedReaderPaperSheet from '@/components/readers/PagedReaderPaperSheet.vue'
 import {PageDtoWithUrl} from '@/types/komga-books'
 import {installCurlDiagnostics} from './paged-reader-curl-diagnostics.plugin'
+import {installDirectWideStability} from './paged-reader-direct-wide-stability.plugin'
 import {installReaderRenderWindow} from './paged-reader-render-window.plugin'
 import {installSafeCurlEffects} from './paged-reader-safe-curl-effects.plugin'
 import {installSinglePageBlankGapStateMachine} from './paged-reader-single-page-blank-gap.plugin'
@@ -108,24 +109,16 @@ function currentImagesReady(sheet: any): boolean {
  * Final geometry lifecycle guard. It intentionally renders nothing and changes
  * no curl equations. Its only responsibility is keeping one measured paper
  * rectangle for one drag/click transition.
- *
- * This prevents phase overlays and descendant image-load events from changing
- * pageBounds/heightOverWidth in the middle of a fold, which otherwise changes
- * the crease, FRONT clip, BACK clip and reflection matrix in the same frame.
  */
 export function installPaperBoundsStability(): void {
-  // These final wrappers deliberately run after every topology/compositor plugin.
-  // 1. Give the inside-cover synthetic blank the same staged choreography as
-  //    compensated wide transitions instead of the generic single-page curl.
-  // 2. Keep live single->wide gestures physical until release.
-  // 3. Rebuild ordinary curl decoration from the no-FX baseline.
-  // 4. Keep the complex wide compositor itself on the proven no-FX baseline.
-  // 5. Window the custom render list so long books do constant per-frame work.
-  // 6. Keep opt-in diagnostics last so query modes can still override everything.
+  // Final wrappers deliberately run after every topology/compositor plugin.
   installSinglePageBlankGapStateMachine()
   installWideLiveDragGuard()
   installSafeCurlEffects()
   installWideCompositorStability()
+  // Direct portrait -> wide is isolated last so the unified multi-mode VNode
+  // tree cannot re-enter the visual path for this now-common parity case.
+  installDirectWideStability()
   installReaderRenderWindow()
   installCurlDiagnostics()
 
@@ -149,8 +142,6 @@ export function installPaperBoundsStability(): void {
         return
       }
 
-      // A target/direction/viewport change starts a genuinely new physical
-      // transition. Discard the old rectangle and wait for real image metrics.
       if (frozen && frozen.key !== key) this.__curlPaperBoundsSnapshot = null
 
       if (!currentImagesReady(this)) {
