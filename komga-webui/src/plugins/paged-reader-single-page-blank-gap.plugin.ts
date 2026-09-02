@@ -9,6 +9,11 @@ import {
 } from '@/functions/paged-reader-physical'
 import {paperCurlDynamicGeometry} from '@/functions/paged-reader-transition'
 import {PageDtoWithUrl} from '@/types/komga-books'
+import {
+  renderSafeCurlEdge,
+  renderSafeCurlShadow,
+  safeCreaseShadowStyle,
+} from './paged-reader-safe-curl-primitives'
 
 const INTO_BLANK_SLIDE_END = 0.30
 const INTO_CURL_END = 0.90
@@ -305,10 +310,9 @@ function emptyLayer(h: CreateElement, staticClass: string): VNode {
  * normal centered single-page resting state. Backward uses the exact inverse
  * portrait -> blank -> cover choreography.
  *
- * All layers remain mounted for the full transition and there are intentionally
- * no shadow/edge decoration nodes here. The curl itself is unchanged; avoiding
- * extra clipped effect layers keeps this path on the compositor baseline that
- * previously eliminated Android/Chromium flashing.
+ * All layers, including safe shadow/crease decoration, remain mounted for the
+ * full transition. The decoration uses plain clipped color surfaces without
+ * filtered/blurred compositor layers.
  */
 export function installSinglePageBlankGapStateMachine(): void {
   const readerOptions = (PagedReader as any).options
@@ -416,6 +420,7 @@ export function installSinglePageBlankGapStateMachine(): void {
 
     const progress = clamp01(this.progress)
     const mode = gapMode(plan)
+    const curl = localCurlProgress(plan, progress)
     const direction = Math.sign(this.physicalDirection || -1)
     const ready = !!(this.pageBoundsReady && this.pageBounds)
     const width = ready
@@ -532,8 +537,19 @@ export function installSinglePageBlankGapStateMachine(): void {
           },
         }, [renderFace(h, plan.back, leafRect, 'single-page-gap-v1-back-face', true)]),
       ]),
-      emptyLayer(h, 'single-page-gap-v1-shadow-placeholder'),
-      emptyLayer(h, 'single-page-gap-v1-edge-placeholder'),
+      renderSafeCurlShadow(
+        h,
+        safeCreaseShadowStyle(this, curl),
+        'single-page-gap-v1-safe-shadow',
+      ),
+      renderSafeCurlEdge(
+        h,
+        {
+          ...(this.edgeStyle as Record<string, any>),
+          opacity: `${Math.sin(curl * Math.PI)}`,
+        },
+        'single-page-gap-v1-safe-edge',
+      ),
     ])
 
     const blankReturn = h('div', {

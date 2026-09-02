@@ -23,7 +23,12 @@ function isDoubleSheetGesture(reader: any): boolean {
 
 function directionHandoffDistance(reader: any): number {
   const span = Math.max(1, Number(reader.drag?.axisSize) || 1)
-  return Math.min(6, Math.max(4, span * 0.005))
+  return Math.min(18, Math.max(8, span * 0.0125))
+}
+
+function directionHandoffOffset(reader: any, physicalDirection: number): number {
+  const span = Math.max(1, Number(reader.drag?.axisSize) || 1)
+  return Math.sign(physicalDirection || -1) * Math.min(1.5, Math.max(0.75, span * 0.0015))
 }
 
 /**
@@ -64,8 +69,9 @@ function normalizeLeafSide(sheet: any): void {
  *
  * Touch sampling can jump directly from a small negative offset to a small
  * positive one without producing offset=0. Keep the previous valid leaf inside
- * the same tiny activation zone used to start a drag. The compositor therefore
- * gets a flat frame before target, direction, and leaf side change together.
+ * a small hysteresis zone around the origin. Keep a sub-pixel curl rather than
+ * progress=0: the exactly-flat fold collapses every clip polygon onto one line,
+ * which is itself an unstable compositor frame on the affected Chromium build.
  */
 export function installDoublePageDirectionStability(): void {
   const readerOptions = (PagedReader as any).options
@@ -98,7 +104,7 @@ export function installDoublePageDirectionStability(): void {
 
       this.drag.navigationDelta = previousDelta
       this.drag.targetIndex = previousTarget
-      this.drag.offset = 0
+      this.drag.offset = directionHandoffOffset(this, previousPhysicalDirection)
       if (previousPhysicalDirection !== 0) {
         this.drag.physicalDirection = previousPhysicalDirection
       }

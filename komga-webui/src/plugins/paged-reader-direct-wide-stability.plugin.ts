@@ -14,6 +14,7 @@ import {PageDtoWithUrl} from '@/types/komga-books'
 import {
   renderSafeCurlEdge,
   renderSafeCurlShadow,
+  safeCreaseShadowStyle,
 } from './paged-reader-safe-curl-primitives'
 
 const CURL_END = 0.90
@@ -253,8 +254,8 @@ function decorationStyleAtCurl(
  *
  * The physical FRONT/BACK/UNDER scene remains authoritative throughout live
  * follow-finger. During a committed post-release settlement only, the already
- * mounted destination layout fades over it in the final tail. The physical
- * scene itself stays opaque, so the handoff cannot expose the reader canvas.
+ * mounted destination layout crossfades with it in the final tail. This avoids
+ * showing a smaller final spread stacked over a still-opaque portrait page.
  */
 export function installDirectWideStability(): void {
   const paperOptions = (PagedReaderPaperSheet as any).options
@@ -296,6 +297,7 @@ export function installDirectWideStability(): void {
     const layoutFade = reader.drag?.settling && reader.drag?.settleCommit
       ? smooth((progress - CURL_END) / (1 - CURL_END))
       : 0
+    const physicalOpacity = 1 - layoutFade
     const stationary = stationaryTargetFace(plan)
     const leafRect = sourceRect(this)
 
@@ -324,7 +326,7 @@ export function installDirectWideStability(): void {
         {
           ...outerEdgeSlotRect(this, faceSide(stationary) || 'right'),
           zIndex: '2',
-          opacity: `${smooth(curl / 0.45)}`,
+          opacity: `${physicalOpacity * smooth(curl / 0.45)}`,
         },
         'single-page-wide-v2-under-target-wide direct-wide-under',
       )
@@ -342,7 +344,7 @@ export function installDirectWideStability(): void {
         position: 'absolute',
         inset: '0',
         zIndex: '8',
-        opacity: '1',
+        opacity: `${physicalOpacity}`,
         pointerEvents: 'none',
         filter: 'none',
         willChange: 'auto',
@@ -376,7 +378,7 @@ export function installDirectWideStability(): void {
       ]),
       renderSafeCurlShadow(
         h,
-        decorationStyleAtCurl(this.shadowStyle as Record<string, any>, curl),
+        safeCreaseShadowStyle(this, curl),
         'direct-wide-safe-shadow',
       ),
       renderSafeCurlEdge(
