@@ -42,7 +42,7 @@ describe('single-page Physical Comic topology', () => {
     expect(physicalSinglePageEdgePlan(book, 3, 2, false)?.kind).toBe('curl')
   })
 
-  test('aligned portrait-wide edges are direct curls from either side and direction', () => {
+  test('an already aligned first wide source does not add an inside-cover blank', () => {
     const book = spreads(portrait(1), wide(2), portrait(3))
 
     const leftInto = physicalSinglePageEdgePlan(book, 0, 1, false)
@@ -75,71 +75,108 @@ describe('single-page Physical Comic topology', () => {
     expect(rightInto?.baseFaces[0]?.crop).toBe('left')
   })
 
-  test('a misaligned wide source gets a synthetic blank before it', () => {
+  test('a misaligned first wide source moves its correction to the inside of the cover', () => {
     const book = spreads(portrait(1), portrait(2), wide(3), portrait(4))
-    const plan = physicalSinglePageEdgePlan(book, 1, 2, false)
 
-    expect(plan?.kind).toBe('curl')
-    expect(plan?.crossesSyntheticBlank).toBe(true)
-    expect(plan?.front.page.number).toBe(0)
-    expect(plan?.back.page.number).toBe(3)
-    expect(plan?.back.crop).toBe('left')
-    expect(plan?.baseFaces[0]?.page.number).toBe(2)
-    expect(plan?.baseFaces[1]?.crop).toBe('right')
+    const openCover = physicalSinglePageEdgePlan(book, 0, 1, false)
+    expect(openCover?.kind).toBe('curl')
+    expect(openCover?.crossesSyntheticBlank).toBe(true)
+    expect(openCover?.front.page.number).toBe(1)
+    expect(openCover?.back.page.number).toBe(0)
+    expect(openCover?.baseFaces[1]?.page.number).toBe(2)
+
+    const closeCover = physicalSinglePageEdgePlan(book, 1, 0, false)
+    expect(closeCover?.kind).toBe('curl')
+    expect(closeCover?.crossesSyntheticBlank).toBe(true)
+    expect(closeCover?.front.page.number).toBe(0)
+    expect(closeCover?.back.page.number).toBe(1)
+    expect(closeCover?.baseFaces[1]?.page.number).toBe(2)
+
+    // Once the inside-cover blank has shifted the book, the first wide source is
+    // directly aligned and does not need another blank immediately before it.
+    const intoWide = physicalSinglePageEdgePlan(book, 1, 2, false)
+    expect(intoWide?.kind).toBe('curl')
+    expect(intoWide?.crossesSyntheticBlank).toBe(false)
+    expect(intoWide?.front.page.number).toBe(2)
+    expect(intoWide?.back.page.number).toBe(3)
+    expect(intoWide?.back.crop).toBe('left')
+    expect(intoWide?.baseFaces[0]?.page.number).toBe(0)
+    expect(intoWide?.baseFaces[1]?.crop).toBe('right')
   })
 
-  test('the curl into the portrait before a compensated wide keeps the first blank underneath', () => {
-    const book = spreads(portrait(1), portrait(2), wide(3), portrait(4))
-    const plan = physicalSinglePageEdgePlan(book, 0, 1, false)
+  test('a later misaligned wide source gets one leading blank in both directions', () => {
+    const book = spreads(
+      portrait(1),
+      wide(2),
+      portrait(3),
+      wide(4),
+      portrait(5),
+      portrait(6),
+    )
 
-    expect(plan?.kind).toBe('curl')
-    expect(plan?.front.page.number).toBe(1)
-    expect(plan?.back.page.number).toBe(2)
-    expect(plan?.baseFaces[1]?.page.number).toBe(0)
+    const intoWide = physicalSinglePageEdgePlan(book, 2, 3, false)
+    expect(intoWide?.kind).toBe('curl')
+    expect(intoWide?.crossesSyntheticBlank).toBe(true)
+    expect(intoWide?.front.page.number).toBe(0)
+    expect(intoWide?.back.page.number).toBe(4)
+    expect(intoWide?.back.crop).toBe('left')
+    expect(intoWide?.baseFaces[0]?.page.number).toBe(3)
+    expect(intoWide?.baseFaces[1]?.crop).toBe('right')
+
+    const outBackward = physicalSinglePageEdgePlan(book, 3, 2, false)
+    expect(outBackward?.kind).toBe('curl')
+    expect(outBackward?.crossesSyntheticBlank).toBe(true)
+    expect(outBackward?.front.page.number).toBe(4)
+    expect(outBackward?.front.crop).toBe('left')
+    expect(outBackward?.back.page.number).toBe(0)
+    expect(outBackward?.baseFaces[0]?.page.number).toBe(3)
+    expect(outBackward?.baseFaces[1]?.crop).toBe('right')
   })
 
-  test('the blank-before compensated edge is symmetric backwards', () => {
-    const book = spreads(portrait(1), portrait(2), wide(3), portrait(4))
-    const plan = physicalSinglePageEdgePlan(book, 2, 1, false)
+  test('a corrective blank is not followed by a parity-restoring blank', () => {
+    const book = spreads(
+      portrait(1),
+      wide(2),
+      portrait(3),
+      wide(4),
+      portrait(5),
+      portrait(6),
+    )
 
-    expect(plan?.kind).toBe('curl')
-    expect(plan?.crossesSyntheticBlank).toBe(true)
-    expect(plan?.front.page.number).toBe(3)
-    expect(plan?.front.crop).toBe('left')
-    expect(plan?.back.page.number).toBe(0)
-    expect(plan?.baseFaces[0]?.page.number).toBe(2)
-    expect(plan?.baseFaces[1]?.crop).toBe('right')
-  })
-
-  test('a compensated wide curls into its trailing blank before sliding to the next portrait', () => {
-    const book = spreads(portrait(1), portrait(2), wide(3), portrait(4))
-
-    const afterWide = physicalSinglePageEdgePlan(book, 2, 3, false)
-    const backIntoWideFromAfter = physicalSinglePageEdgePlan(book, 3, 2, false)
-
+    const afterWide = physicalSinglePageEdgePlan(book, 3, 4, false)
     expect(afterWide?.kind).toBe('curl')
-    expect(afterWide?.crossesSyntheticBlank).toBe(true)
-    expect(afterWide?.front.page.number).toBe(3)
+    expect(afterWide?.crossesSyntheticBlank).toBe(false)
+    expect(afterWide?.front.page.number).toBe(4)
     expect(afterWide?.front.crop).toBe('right')
-    expect(afterWide?.back.page.number).toBe(0)
-    expect(afterWide?.baseFaces[0]?.page.number).toBe(3)
+    expect(afterWide?.back.page.number).toBe(5)
     expect(afterWide?.baseFaces[0]?.crop).toBe('left')
-    expect(afterWide?.baseFaces[1]?.page.number).toBe(4)
+    expect(afterWide?.baseFaces[1]?.page.number).toBe(6)
 
-    expect(backIntoWideFromAfter?.kind).toBe('curl')
-    expect(backIntoWideFromAfter?.crossesSyntheticBlank).toBe(true)
-    expect(backIntoWideFromAfter?.front.page.number).toBe(0)
-    expect(backIntoWideFromAfter?.back.page.number).toBe(3)
-    expect(backIntoWideFromAfter?.back.crop).toBe('right')
-    expect(backIntoWideFromAfter?.baseFaces[0]?.crop).toBe('left')
-    expect(backIntoWideFromAfter?.baseFaces[1]?.page.number).toBe(4)
+    // The single blank before wide(4) permanently changed parity. With the old
+    // before+after pair this edge was a curl; now it correctly remains a slide.
+    expect(physicalSinglePageEdgePlan(book, 4, 5, false)?.kind).toBe('slide')
+    expect(physicalSinglePageEdgePlan(book, 5, 4, false)?.kind).toBe('slide')
   })
 
-  test('the blank after a compensated wide restores the later page parity', () => {
-    const book = spreads(portrait(1), portrait(2), wide(3), portrait(4), portrait(5))
+  test('later wide sources use the accumulated parity after previous corrections', () => {
+    const book = spreads(
+      portrait(1),
+      wide(2),
+      portrait(3),
+      wide(4),
+      portrait(5),
+      wide(6),
+      portrait(7),
+    )
 
-    expect(physicalSinglePageEdgePlan(book, 3, 4, false)?.kind).toBe('curl')
-    expect(physicalSinglePageEdgePlan(book, 4, 3, false)?.kind).toBe('curl')
+    // wide(4) required a leading blank, permanently shifting the sequence. One
+    // portrait later wide(6) is misaligned again, so it receives one new leading
+    // blank based on the accumulated physical parity.
+    const intoSecondCorrectedWide = physicalSinglePageEdgePlan(book, 4, 5, false)
+    expect(intoSecondCorrectedWide?.crossesSyntheticBlank).toBe(true)
+    expect(intoSecondCorrectedWide?.front.page.number).toBe(0)
+    expect(intoSecondCorrectedWide?.back.page.number).toBe(6)
+    expect(intoSecondCorrectedWide?.back.crop).toBe('left')
   })
 
   test('wide-wide transitions keep both stationary and turning virtual halves', () => {

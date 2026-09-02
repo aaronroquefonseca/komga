@@ -184,13 +184,22 @@ function buildPhysicalSinglePageTopology(
   const ordinalFaces: Array<PhysicalPageFace | undefined> = []
   let nextOrdinal = 1
 
+  // A synthetic page represents a real missing paper face and therefore changes
+  // every later page's parity. If the first wide scan would otherwise start on
+  // the wrong face, model the common blank inside cover once, immediately after
+  // source 0, instead of inserting an artificial blank just before that scan.
+  const firstWideIndex = spreads.findIndex(spread =>
+    spread.length === 1 && !!spread[0] && isPageLandscape(spread[0]))
+  const blankInsideCover = firstWideIndex > 0 && (firstWideIndex + 1) % 2 === 1
+
   for (let index = 0; index < spreads.length; index++) {
     const faces = physicalSinglePageFacesForSpread(spreads[index], flipDirection)
     if (!faces) return null
 
-    // The first source may itself be a landscape cover. Every later wide source
-    // must begin on an even physical face. When it does not, add both the
-    // alignment face before it and the parity-restoring face after it.
+    // Wide sources after the cover correction must begin on an even physical
+    // face. When the accumulated real-paper parity is wrong, add exactly one
+    // blank before the wide source. Never add a matching blank afterwards: the
+    // inserted paper face intentionally changes the parity of everything later.
     const compensateWide = index > 0 && faces.length === 2 && nextOrdinal % 2 === 1
     if (compensateWide) {
       ordinalFaces[nextOrdinal] = syntheticBlankFace()
@@ -205,7 +214,7 @@ function buildPhysicalSinglePageTopology(
     spans.push({first, last, faces})
     nextOrdinal = last + 1
 
-    if (compensateWide) {
+    if (index === 0 && blankInsideCover) {
       ordinalFaces[nextOrdinal] = syntheticBlankFace()
       nextOrdinal++
     }
@@ -245,24 +254,20 @@ function physicalSinglePageTopology(
 /**
  * Resolve adjacent source-image navigation into the actual physical leaf edge.
  *
- * A real two-page scan must occupy an open spread. If a later landscape source
- * would begin on the wrong physical face, bracket that source with two virtual
- * white pages:
+ * A real two-page scan must occupy an open spread. Synthetic blanks represent
+ * missing physical paper faces and therefore permanently shift later parity.
+ * The first required correction is moved to the inside of the cover whenever
+ * possible; later corrections are inserted only immediately before a wide scan.
  *
- *   portrait | blank  ->  wide-left | wide-right  ->  blank | portrait
- *
- * The blank before aligns the wide scan; the matching blank after restores the
- * previous parity so the correction stays local and cannot shift the rest of the
- * book. Single-page navigation never stops on either synthetic face, but the
- * physical animation planner can still use them as real paper surfaces.
- *
- * When one of those blanks lies between adjacent source states, anchor the plan
- * on the curl boundary touching the wide source. The staged renderer then owns
- * the other half of the source-to-source movement as a slide. This is what makes
- * both sides physically symmetric:
+ * A blank immediately before a wide source remains a staged source transition:
  *
  *   portrait -> slide -> blank -> curl -> wide
  *   wide -> curl -> blank -> slide -> portrait
+ *
+ * The inside-cover blank is different: it is the actual back of the cover sheet.
+ * Moving from cover to the next source therefore turns cover(front) / blank(back)
+ * with the next source already flat underneath; backward navigation is the exact
+ * inverse of that same physical sheet.
  *
  * The complete topology is compiled once per spreads array/direction. Adjacent
  * edge plans are then memoized, keeping repeated render/touch lookups O(1).
@@ -296,13 +301,17 @@ export function physicalSinglePageEdgePlan(
 
   let boundaryFace: number
   if (gapHasSyntheticBlank && currentWide) {
-    // Leaving a compensated wide source: turn the wide leaf into its trailing
-    // blank first. The staged renderer then slides blank -> target portrait.
+    // Backward navigation out of a compensated wide source crosses the blank
+    // immediately before that source. Keep the sheet boundary next to the wide.
     boundaryFace = direction > 0 ? current.last : current.first - 1
   } else if (gapHasSyntheticBlank && targetWide) {
     // Entering a compensated wide source: slide source portrait -> blank first,
     // then turn that blank into the adjacent wide leaf.
     boundaryFace = direction > 0 ? target.first - 1 : target.last
+  } else if (gapHasSyntheticBlank) {
+    // The only portrait-to-portrait gap is the blank inside the cover. Turn the
+    // cover/blank sheet itself while the next source remains flat underneath.
+    boundaryFace = direction > 0 ? current.last : target.last
   } else {
     boundaryFace = direction > 0
       ? target.first - 1
