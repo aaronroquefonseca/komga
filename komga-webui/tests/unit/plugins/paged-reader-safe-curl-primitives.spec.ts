@@ -1,5 +1,6 @@
 import {
   safeCreaseEdgeStyle,
+  safeCreaseFrontShadowStyle,
   safeCreaseShadowStyle,
 } from '@/plugins/paged-reader-safe-curl-primitives'
 
@@ -36,8 +37,22 @@ describe('safe curl primitives', () => {
     expect(edge.opacity).toBe('1')
   })
 
+  it('paints a softer bounded shadow onto the opposite front-page side', () => {
+    const under = safeCreaseShadowStyle(sheet(), 0.5)
+    const front = safeCreaseFrontShadowStyle(sheet(), 0.5)
+    const underMatrix = under.transform.match(/matrix\(([^)]+)\)/)![1].split(', ').map(Number)
+    const frontMatrix = front.transform.match(/matrix\(([^)]+)\)/)![1].split(', ').map(Number)
+
+    expect(frontMatrix[0]).toBeCloseTo(-underMatrix[0])
+    expect(frontMatrix[1]).toBeCloseTo(-underMatrix[1])
+    expect(frontMatrix.slice(2)).toEqual(underMatrix.slice(2))
+    expect(parseFloat(front.width)).toBeLessThan(parseFloat(under.width))
+    expect(front.background).toContain('rgba(0, 0, 0, 0.22)')
+  })
+
   it('does not create a drawable layer at curl endpoints', () => {
     expect(safeCreaseShadowStyle(sheet(), 0)).toEqual({opacity: '0'})
+    expect(safeCreaseFrontShadowStyle(sheet(), 0)).toEqual({opacity: '0'})
     expect(safeCreaseEdgeStyle(sheet(), 1)).toEqual({opacity: '0'})
   })
 })

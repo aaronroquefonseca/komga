@@ -87,6 +87,45 @@ export function safeCreaseShadowStyle(
   }
 }
 
+/**
+ * A softer companion shadow painted onto the still-flat front of the sheet.
+ * It uses the opposite crease normal from the under-page shadow, so the folded
+ * back remains visually above the artwork it is peeling away from.
+ */
+export function safeCreaseFrontShadowStyle(
+  sheet: CurlSheetGeometry,
+  curl: number,
+): Record<string, string> {
+  const style = safeCreaseShadowStyle(sheet, curl)
+  if (style.transform === undefined || !sheet.geometry || !sheet.pageBounds ||
+    typeof sheet.paperX !== 'function') return style
+
+  const top = Number(sheet.pageBounds.top)
+  const bottom = top + Number(sheet.pageBounds.height)
+  const seamTop = sheet.paperX(sheet.geometry.seamTop)
+  const seamBottom = sheet.paperX(sheet.geometry.seamBottom)
+  const dx = seamBottom - seamTop
+  const dy = bottom - top
+  const length = Math.hypot(dx, dy)
+  if (length <= 0.01) return {opacity: '0'}
+
+  const arch = Math.sin(clamp01(curl) * Math.PI)
+  const shadowSign = Math.sign(sheet.direction || -1) < 0 ? -1 : 1
+  const normalX = shadowSign * dy / length
+  const normalY = shadowSign * -dx / length
+  const tangentX = dx / length
+  const tangentY = dy / length
+  const stripWidth = Number(sheet.pageBounds.width) * 0.055 * arch
+  const alpha = 0.22 * arch
+
+  return {
+    ...style,
+    width: `${stripWidth}px`,
+    transform: `matrix(${normalX}, ${normalY}, ${tangentX}, ${tangentY}, ${seamTop}, ${top})`,
+    background: `linear-gradient(to right, rgba(0, 0, 0, ${alpha}), rgba(0, 0, 0, 0))`,
+  }
+}
+
 export function safeCreaseEdgeStyle(
   sheet: CurlSheetGeometry,
   curl: number,
@@ -112,6 +151,7 @@ export function renderSafeCurlShadow(
   h: CreateElement,
   shadowStyle: Record<string, any> | undefined,
   staticClass: string,
+  zIndex = '3',
 ): VNode {
   const clipPath = styleValue(shadowStyle, 'clipPath', 'none')
   const bounded = shadowStyle?.width !== undefined &&
@@ -130,7 +170,7 @@ export function renderSafeCurlShadow(
         transformOrigin: styleValue(shadowStyle, 'transformOrigin', '0 0'),
         transform: styleValue(shadowStyle, 'transform', 'none'),
       } : {inset: '0'}),
-      zIndex: '3',
+      zIndex,
       pointerEvents: 'none',
       clipPath,
       WebkitClipPath: styleValue(shadowStyle, 'WebkitClipPath', clipPath),

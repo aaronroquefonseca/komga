@@ -2,7 +2,9 @@ import {CreateElement, VNode} from 'vue'
 import PagedReaderPaperSheet from '@/components/readers/PagedReaderPaperSheet.vue'
 import {PagedReaderTransition} from '@/types/enum-reader'
 import {
+  renderSafeCurlShadow,
   safeCreaseEdgeStyle,
+  safeCreaseFrontShadowStyle,
   safeCreaseShadowStyle,
 } from './paged-reader-safe-curl-primitives'
 
@@ -46,6 +48,16 @@ function visit(vnode: VNode, callback: (node: VNode) => void): void {
   for (const child of (vnode.children || []) as VNode[]) {
     if (child && typeof child === 'object') visit(child, callback)
   }
+}
+
+function findNode(vnode: VNode, names: string[]): VNode | undefined {
+  if (names.some(name => hasClass(vnode, name))) return vnode
+  for (const child of (vnode.children || []) as VNode[]) {
+    if (!child || typeof child !== 'object') continue
+    const found = findNode(child, names)
+    if (found) return found
+  }
+  return undefined
 }
 
 function removeUnsafeCompositorProperties(style: Record<string, string>): Record<string, string> {
@@ -183,6 +195,19 @@ export function installSafeCurlEffects(): void {
       }
       setStyle(node, removeUnsafeCompositorProperties(styleOf(node)))
     })
+
+    const shadowHost = findNode(vnode, [
+      'single-page-wide-v2-turning-group',
+      'single-page-gap-v1-turning-group',
+    ]) || vnode
+    const children = (shadowHost.children || []) as VNode[]
+    children.push(renderSafeCurlShadow(
+      h,
+      safeCreaseFrontShadowStyle(this, progress),
+      'safe-curl-front-shadow',
+      '4',
+    ))
+    shadowHost.children = children
 
     return vnode
   }
