@@ -264,6 +264,7 @@ export default class OfflineLibraryService {
   private cancelledJobs = new Set<string>()
   private processingQueue = false
   private notifiedProgress = new Map<string, number>()
+  private persistedProgressAt = new Map<string, number>()
   state: OfflineLibraryState
 
   constructor(http: AxiosInstance) {
@@ -620,6 +621,7 @@ export default class OfflineLibraryService {
       }
     delete record.error
     await this.updateDownload(record)
+    await this.showDownloadProgressNotification(record, true)
 
     let cursor = 0
     try {
@@ -636,7 +638,7 @@ export default class OfflineLibraryService {
           await stagingCache.put(request, response)
           record.bytes += await sizePromise
           record.completedPages += 1
-          await this.updateDownload(record)
+          await this.persistDownloadProgress(record)
           await this.showDownloadProgressNotification(record)
         }
       })
@@ -704,7 +706,9 @@ export default class OfflineLibraryService {
     Promise.resolve().then(async () => {
       try {
         while (this.activeJobs.size < this.state.preferences.concurrentBooks) {
-          const next = this.state.downloads.find(x => x.status === 'queued' && !this.activeJobs.has(x.bookId))
+          const next = this.state.downloads
+            .filter(x => x.status === 'queued' && !this.activeJobs.has(x.bookId))
+            .sort((a, b) => `${a.queuedAt || ''}`.localeCompare(`${b.queuedAt || ''}`))[0]
           if (!next) break
           next.status = 'queued'
           const controller = new AbortController()
@@ -750,22 +754,19 @@ export default class OfflineLibraryService {
 
   private async showDownloadNotification(record: OfflineDownloadRecord): Promise<void> {
     if (!this.state.preferences.notifyWhenComplete || !('Notification' in window) || Notification.permission !== 'granted') return
-    const registration = 'serviceWorker' in navigator ? await navigator.serviceWorker.ready.catch(() => undefined) : undefined
     this.notifiedProgress.delete(record.bookId)
     const remaining = this.remainingDownloadCount(record.bookId)
     const suffix = remaining > 0 ? ` · ${remaining} book${remaining === 1 ? '' : 's'} remaining` : ''
     const options = {body: `100% · ${record.totalPages}/${record.totalPages} pages${suffix}`, tag: `komga-download-${record.bookId}`}
-    if (registration) await registration.showNotification(`Downloaded ${record.book.seriesTitle}`, options)
-    else new Notification(`Downloaded ${record.book.seriesTitle}`, options)
+    await this.deliverNotification(`Downloaded ${record.book.seriesTitle}`, options)
   }
 
-  private async showDownloadProgressNotification(record: OfflineDownloadRecord): Promise<void> {
+  private async showDownloadProgressNotification(record: OfflineDownloadRecord, force: boolean = false): Promise<void> {
     if (!this.state.preferences.notifyWhenComplete || !('Notification' in window) || Notification.permission !== 'granted') return
     const percent = record.totalPages ? Math.floor(record.completedPages / record.totalPages * 100) : 0
     const previous = this.notifiedProgress.get(record.bookId) ?? -10
-    if (percent < 100 && percent - previous < 5) return
+    if (!force && percent < 100 && percent - previous < 5) return
     this.notifiedProgress.set(record.bookId, percent)
-    const registration = 'serviceWorker' in navigator ? await navigator.serviceWorker.ready.catch(() => undefined) : undefined
     const remaining = this.remainingDownloadCount(record.bookId)
     const suffix = remaining > 0 ? ` · ${remaining} book${remaining === 1 ? '' : 's'} remaining` : ''
     const options = {
@@ -775,8 +776,34 @@ export default class OfflineLibraryService {
       silent: true,
     }
     const title = `Downloading ${record.book.seriesTitle}`
-    if (registration) await registration.showNotification(title, options)
-    else new Notification(title, options)
+    await this.deliverNotification(title, options)
+  }
+
+  private async deliverNotification(title: string, options: NotificationOptions): Promise<boolean> {
+    try {
+      const registration = 'serviceWorker' in navigator ? await navigator.serviceWorker.ready : undefined
+      if (registration) await registration.showNotification(title, options)
+      else new Notification(title, options)
+      return true
+    } catch (_) {
+      return false
+    }
+  }
+
+  async testDownloadNotification(): Promise<boolean> {
+    if (!('Notification' in window) || Notification.permission !== 'granted') return false
+    return this.deliverNotification('Komga download notifications', {
+      body: 'Notifications are working on this device.',
+      tag: 'komga-download-test',
+    })
+  }
+
+  private async persistDownloadProgress(record: OfflineDownloadRecord): Promise<void> {
+    const now = Date.now()
+    const previous = this.persistedProgressAt.get(record.bookId) || 0
+    if (record.completedPages < record.totalPages && now - previous < 500) return
+    this.persistedProgressAt.set(record.bookId, now)
+    await this.updateDownload(record)
   }
 
   private remainingDownloadCount(excludeBookId?: string): number {

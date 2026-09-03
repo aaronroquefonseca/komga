@@ -892,6 +892,10 @@ export default Vue.extend({
       } as Location)
     },
     closeBook() {
+      if (this.$offline.state.offlineMode || !this.$offline.state.online) {
+        this.$router.push({name: 'offline-downloads'})
+        return
+      }
       this.$router.push(
         {
           name: this.book.oneshot ? 'browse-oneshot' : 'browse-book',
