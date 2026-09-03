@@ -68,12 +68,7 @@
           <v-col cols="12" sm="6"><v-select :value="$offline.state.preferences.concurrentBooks" :items="[1, 2, 3, 4, 6]" :label="$t('offline.parallel_books')" hide-details @change="setPreference('concurrentBooks', $event)"/></v-col>
           <v-col cols="12" sm="6"><v-select :value="$offline.state.preferences.concurrentPages" :items="[1, 2, 3, 4]" :label="$t('offline.parallel_pages')" hide-details @change="setPreference('concurrentPages', $event)"/></v-col>
         </v-row>
-        <v-switch :input-value="$offline.state.preferences.notifyWhenComplete" :label="$t('offline.progress_notifications')" hide-details @change="toggleNotifications"/>
-        <div class="d-flex align-center mt-2">
-          <span class="text-caption text--secondary">{{ $t('offline.notification_permission', {status: notificationPermission}) }}</span>
-          <v-spacer/>
-          <v-btn small text :loading="testingNotification" @click="testNotification">{{ $t('offline.test_notification') }}</v-btn>
-        </div>
+        <v-switch :input-value="notificationsEnabled" :label="$t('offline.progress_notifications')" :hint="notificationHint" persistent-hint @change="toggleNotifications"/>
         <v-switch :input-value="$offline.state.preferences.removeRead" :label="$t('offline.remove_read_automatically')" hide-details @change="setPreference('removeRead', $event)"/>
         <v-switch :input-value="$offline.state.preferences.autoDownloadNext" :label="$t('offline.auto_download_next')" :hint="$t('offline.smart_download_hint')" persistent-hint @change="setPreference('autoDownloadNext', $event)"/>
       </v-card-text>
@@ -85,6 +80,7 @@
           <div class="d-flex align-center flex-grow-1 me-3">
             <div><div class="font-weight-medium">{{ group.title }}</div><div class="text-caption text--secondary">{{ $t('offline.series_download_summary', {downloaded: group.downloaded, total: group.downloads.length, bytes: formatBytes(group.bytes)}) }}</div></div>
             <v-spacer/>
+            <v-btn v-if="group.failed" small text color="warning" :title="$t('offline.retry_series_failed', {count: group.failed})" @click.stop="retryGroupFailures(group)"><v-icon left>mdi-refresh</v-icon>{{ group.failed }}</v-btn>
             <v-btn icon small :title="$t('offline.remove_series_downloads')" @click.stop="requestRemoveGroup(group)"><v-icon>mdi-delete-sweep</v-icon></v-btn>
           </div>
         </v-expansion-panel-header>
@@ -254,13 +250,13 @@ import {OfflineDownloadRecord} from '@/services/offline-library.service'
 import {bookThumbnailUrl} from '@/functions/urls'
 import {getBookReadRouteFromMedia} from '@/functions/book-format'
 import ConfirmationDialog from '@/components/dialogs/ConfirmationDialog.vue'
-import {ERROR, NOTIFICATION} from '@/types/events'
 
 interface DownloadGroup {
   seriesId: string
   title: string
   downloads: OfflineDownloadRecord[]
   downloaded: number
+  failed: number
   bytes: number
 }
 
@@ -269,13 +265,20 @@ export default Vue.extend({
   components: {ConfirmationDialog},
   data: () => ({
     changingMode: false,
-    testingNotification: false,
     notificationPermission: 'Notification' in window ? Notification.permission : 'unsupported',
     confirmingRemoval: false,
     pendingRemoval: [] as OfflineDownloadRecord[],
     storage: {usage: 0, quota: 0},
   }),
   computed: {
+    notificationsEnabled(): boolean {
+      return this.$offline.state.preferences.notifyWhenComplete && this.notificationPermission === 'granted'
+    },
+    notificationHint(): string {
+      if (this.notificationPermission === 'unsupported') return this.$t('offline.notification_unsupported').toString()
+      if (this.notificationPermission === 'denied') return this.$t('offline.notification_denied').toString()
+      return this.$t(this.notificationPermission === 'granted' ? 'offline.notification_enabled' : 'offline.notification_enable_hint').toString()
+    },
     downloads(): OfflineDownloadRecord[] {
       return this.$offline.state.downloads
     },
@@ -287,6 +290,7 @@ export default Vue.extend({
         title: downloads[0].book.seriesTitle,
         downloads: downloads.sort((a, b) => (a.book.metadata.numberSort || 0) - (b.book.metadata.numberSort || 0)),
         downloaded: downloads.filter(item => item.status === 'downloaded').length,
+        failed: downloads.filter(item => item.status === 'error' || !!item.error).length,
         bytes: downloads.reduce((sum, item) => sum + item.bytes, 0),
       }))
     },
@@ -351,6 +355,11 @@ export default Vue.extend({
       await this.$offline.downloadBook(bookId)
       await this.refreshStorage()
     },
+    async retryGroupFailures(group: DownloadGroup) {
+      const failed = group.downloads.filter(item => item.status === 'error' || !!item.error).map(item => item.book)
+      await this.$offline.downloadBooks(failed, group.seriesId)
+      await this.refreshStorage()
+    },
     async pause(bookId: string) {
       await this.$offline.pauseDownload(bookId)
     },
@@ -361,24 +370,12 @@ export default Vue.extend({
       await this.$offline.setDownloadPreferences({[key]: value})
     },
     async toggleNotifications(enabled: boolean) {
-      if (enabled && 'Notification' in window && Notification.permission === 'default') {
-        enabled = (await Notification.requestPermission()) === 'granted'
+      if (enabled) {
+        if (!('Notification' in window)) enabled = false
+        else if (Notification.permission !== 'granted') enabled = (await Notification.requestPermission()) === 'granted'
       }
       await this.setPreference('notifyWhenComplete', enabled)
       this.notificationPermission = 'Notification' in window ? Notification.permission : 'unsupported'
-    },
-    async testNotification() {
-      this.testingNotification = true
-      try {
-        if ('Notification' in window && Notification.permission === 'default') await Notification.requestPermission()
-        this.notificationPermission = 'Notification' in window ? Notification.permission : 'unsupported'
-        const delivered = await this.$offline.testDownloadNotification()
-        this.$eventHub.$emit(delivered ? NOTIFICATION : ERROR, {
-          message: this.$t(delivered ? 'offline.test_notification_sent' : 'offline.test_notification_failed').toString(),
-        })
-      } finally {
-        this.testingNotification = false
-      }
     },
     read(download: OfflineDownloadRecord) {
       this.$router.push({

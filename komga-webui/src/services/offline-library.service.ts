@@ -3,7 +3,7 @@ import {AxiosInstance} from 'axios'
 import {BookDto, PageDto, ReadProgressUpdateDto} from '@/types/komga-books'
 import {SeriesDto} from '@/types/komga-series'
 import {BookSearch, SeriesSearch} from '@/types/komga-search'
-import {bookPageUrl, bookThumbnailUrl} from '@/functions/urls'
+import urls, {bookPageUrl, bookThumbnailUrl} from '@/functions/urls'
 import {
   OFFLINE_STORES,
   offlineDelete,
@@ -52,6 +52,7 @@ export interface OfflineDownloadRecord {
   sourceMissing?: boolean
   queuedAt?: string
   autoManaged?: boolean
+  notificationGroupId?: string
 }
 
 interface CachedPages {
@@ -265,6 +266,8 @@ export default class OfflineLibraryService {
   private processingQueue = false
   private notifiedProgress = new Map<string, number>()
   private persistedProgressAt = new Map<string, number>()
+  private notificationCloseTimers = new Map<string, number>()
+  private lastQueuedAt = 0
   state: OfflineLibraryState
 
   constructor(http: AxiosInstance) {
@@ -309,6 +312,7 @@ export default class OfflineLibraryService {
     this.state.initialized = true
     this.notifyServiceWorker()
     this.processQueue()
+    this.closeLegacyDownloadNotifications()
 
     try {
       if (navigator.storage?.persist) await navigator.storage.persist()
@@ -543,7 +547,7 @@ export default class OfflineLibraryService {
     this.notifyServiceWorker(record.bookId)
   }
 
-  async downloadBook(bookId: string, autoManaged: boolean = false): Promise<void> {
+  async downloadBook(bookId: string, autoManaged: boolean = false, notificationGroupId?: string): Promise<void> {
     await this.ready
     if (!this.state.online || this.state.offlineMode) throw new Error('Connect to the server before downloading a book')
     if (!('caches' in window)) throw new Error('This browser does not provide Cache Storage')
@@ -552,19 +556,32 @@ export default class OfflineLibraryService {
     if (current && ['queued', 'downloading', 'updating'].includes(current.status)) return
     const bookResponse = await this.http.get(`/api/v1/books/${bookId}`)
     const book = bookResponse.data as BookDto
-    await this.queueBook(book, autoManaged)
+    await this.queueBook(book, autoManaged, notificationGroupId)
   }
 
-  private async queueBook(book: BookDto, autoManaged: boolean): Promise<void> {
+  async downloadBooks(books: BookDto[], notificationGroupId: string): Promise<void> {
+    await this.ready
+    if (!this.state.online || this.state.offlineMode) throw new Error('Connect to the server before downloading books')
+    if (!('caches' in window)) throw new Error('This browser does not provide Cache Storage')
+    for (const book of books) await this.queueBook(book, false, notificationGroupId, false)
+    this.processQueue()
+  }
+
+  private nextQueuedAt(): string {
+    this.lastQueuedAt = Math.max(Date.now(), this.lastQueuedAt + 1)
+    return new Date(this.lastQueuedAt).toISOString()
+  }
+
+  private async queueBook(book: BookDto, autoManaged: boolean, notificationGroupId?: string, startQueue: boolean = true): Promise<void> {
     const bookId = book.id
     const current = this.getDownload(bookId)
     const queued: OfflineDownloadRecord = current?.cacheName
-      ? {...clone(current), status: 'queued', queuedAt: new Date().toISOString(), autoManaged}
+      ? {...clone(current), status: 'queued', queuedAt: this.nextQueuedAt(), autoManaged, notificationGroupId}
       : {bookId, book: clone(book), status: 'queued', totalPages: book.media?.pagesCount || 0,
-        completedPages: 0, bytes: 0, queuedAt: new Date().toISOString(), autoManaged}
+        completedPages: 0, bytes: 0, queuedAt: this.nextQueuedAt(), autoManaged, notificationGroupId}
     delete queued.error
     await this.updateDownload(queued)
-    this.processQueue()
+    if (startQueue) this.processQueue()
   }
 
   private async performDownload(bookId: string, controller: AbortController): Promise<void> {
@@ -618,6 +635,9 @@ export default class OfflineLibraryService {
         totalPages: pages.length,
         completedPages: 0,
         bytes: 0,
+        notificationGroupId: existing.notificationGroupId,
+        autoManaged: existing.autoManaged,
+        queuedAt: existing.queuedAt,
       }
     delete record.error
     await this.updateDownload(record)
@@ -696,6 +716,8 @@ export default class OfflineLibraryService {
         record.error = e instanceof Error ? e.message : `${e}`
         await this.updateDownload(record)
       }
+      const failed = this.getDownload(bookId)
+      if (failed?.error) await this.showDownloadNotification(failed)
       throw e
     }
   }
@@ -754,29 +776,56 @@ export default class OfflineLibraryService {
 
   private async showDownloadNotification(record: OfflineDownloadRecord): Promise<void> {
     if (!this.state.preferences.notifyWhenComplete || !('Notification' in window) || Notification.permission !== 'granted') return
-    this.notifiedProgress.delete(record.bookId)
-    const remaining = this.remainingDownloadCount(record.bookId)
-    const suffix = remaining > 0 ? ` · ${remaining} book${remaining === 1 ? '' : 's'} remaining` : ''
-    const options = {body: `100% · ${record.totalPages}/${record.totalPages} pages${suffix}`, tag: `komga-download-${record.bookId}`}
-    await this.deliverNotification(`Downloaded ${record.book.seriesTitle}`, options)
+    await this.showGroupedDownloadNotification(record, true)
   }
 
   private async showDownloadProgressNotification(record: OfflineDownloadRecord, force: boolean = false): Promise<void> {
     if (!this.state.preferences.notifyWhenComplete || !('Notification' in window) || Notification.permission !== 'granted') return
-    const percent = record.totalPages ? Math.floor(record.completedPages / record.totalPages * 100) : 0
-    const previous = this.notifiedProgress.get(record.bookId) ?? -10
+    await this.showGroupedDownloadNotification(record, force)
+  }
+
+  private async showGroupedDownloadNotification(record: OfflineDownloadRecord, force: boolean = false): Promise<void> {
+    const groupId = record.notificationGroupId || record.bookId
+    const group = this.state.downloads.filter(item => (item.notificationGroupId || item.bookId) === groupId)
+    const totalPages = group.reduce((sum, item) => sum + item.totalPages, 0)
+    const completedPages = group.reduce((sum, item) => sum + Math.min(item.completedPages, item.totalPages), 0)
+    const downloaded = group.filter(item => item.status === 'downloaded').length
+    const active = group.filter(item => item.status === 'downloading' || item.status === 'updating').length
+    const queued = group.filter(item => item.status === 'queued' || item.status === 'paused').length
+    const failed = group.filter(item => item.status === 'error' || !!item.error).length
+    const finished = group.every(item => item.status === 'downloaded' || item.status === 'error') && active === 0 && queued === 0
+    const percent = totalPages ? Math.floor(completedPages / totalPages * 100) : 0
+    const previous = this.notifiedProgress.get(groupId) ?? -10
     if (!force && percent < 100 && percent - previous < 5) return
-    this.notifiedProgress.set(record.bookId, percent)
-    const remaining = this.remainingDownloadCount(record.bookId)
-    const suffix = remaining > 0 ? ` · ${remaining} book${remaining === 1 ? '' : 's'} remaining` : ''
-    const options = {
-      body: `${percent}% · ${record.completedPages}/${record.totalPages} pages${suffix}`,
-      tag: `komga-download-${record.bookId}`,
+    this.notifiedProgress.set(groupId, percent)
+    const seriesDownload = !!record.notificationGroupId
+    const title = finished
+      ? (failed > 0 ? `${record.book.seriesTitle}: finished with errors` : `${record.book.seriesTitle}: download finished`)
+      : `Downloading ${record.book.seriesTitle}`
+    const details = [`${finished && failed === 0 ? 100 : percent}%`, `${downloaded}/${group.length} books`, `${completedPages}/${totalPages} pages`]
+    if (active > 0) details.push(`${active} active`)
+    if (queued > 0) details.push(`${queued} queued`)
+    if (failed > 0) details.push(`${failed} failed`)
+    const tag = `komga-${seriesDownload ? 'series' : 'book'}-download-${groupId}`
+    await this.deliverNotification(title, {
+      body: details.join(' · '),
+      tag,
+      icon: new URL(`${urls.base}android-chrome-192x192.png`, window.location.origin).href,
+      badge: new URL(`${urls.base}android-chrome-192x192.png`, window.location.origin).href,
       renotify: false,
-      silent: true,
-    }
-    const title = `Downloading ${record.book.seriesTitle}`
-    await this.deliverNotification(title, options)
+      silent: !finished,
+    })
+    if (finished) this.notifiedProgress.delete(groupId)
+    if (finished && failed === 0) this.scheduleNotificationClose(tag)
+  }
+
+  private async closeLegacyDownloadNotifications(): Promise<void> {
+    if (!('serviceWorker' in navigator)) return
+    const registration = await navigator.serviceWorker.ready.catch(() => undefined)
+    const notifications = await registration?.getNotifications() || []
+    notifications
+      .filter(notification => notification.tag.startsWith('komga-download-') || notification.tag === 'komga-download-test')
+      .forEach(notification => notification.close())
   }
 
   private async deliverNotification(title: string, options: NotificationOptions): Promise<boolean> {
@@ -790,12 +839,16 @@ export default class OfflineLibraryService {
     }
   }
 
-  async testDownloadNotification(): Promise<boolean> {
-    if (!('Notification' in window) || Notification.permission !== 'granted') return false
-    return this.deliverNotification('Komga download notifications', {
-      body: 'Notifications are working on this device.',
-      tag: 'komga-download-test',
-    })
+  private scheduleNotificationClose(tag: string): void {
+    const previous = this.notificationCloseTimers.get(tag)
+    if (previous) window.clearTimeout(previous)
+    const timer = window.setTimeout(async () => {
+      const registration = await navigator.serviceWorker.ready.catch(() => undefined)
+      const notifications = await registration?.getNotifications({tag}) || []
+      notifications.forEach(notification => notification.close())
+      this.notificationCloseTimers.delete(tag)
+    }, 5000)
+    this.notificationCloseTimers.set(tag, timer)
   }
 
   private async persistDownloadProgress(record: OfflineDownloadRecord): Promise<void> {
@@ -806,10 +859,6 @@ export default class OfflineLibraryService {
     await this.updateDownload(record)
   }
 
-  private remainingDownloadCount(excludeBookId?: string): number {
-    return this.state.downloads.filter(item => item.bookId !== excludeBookId &&
-      ['queued', 'downloading', 'updating'].includes(item.status)).length
-  }
 
   async removeDownload(bookId: string): Promise<void> {
     await this.ready
@@ -864,8 +913,8 @@ export default class OfflineLibraryService {
     const next = siblings.slice(index + 1).find(book => !this.isDownloaded(book.id))
     if (preferences.removeRead) await this.removeDownload(bookId)
     if (preferences.autoDownloadNext && next) {
-      if (this.state.online && !this.state.offlineMode) await this.downloadBook(next.id, true)
-      else await this.queueBook(next, true)
+      if (this.state.online && !this.state.offlineMode) await this.downloadBook(next.id, true, completed.book.seriesId)
+      else await this.queueBook(next, true, completed.book.seriesId)
     }
   }
 
