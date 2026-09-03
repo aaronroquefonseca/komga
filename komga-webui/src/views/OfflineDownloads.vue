@@ -92,14 +92,30 @@
       </v-card-text>
     </v-card>
 
-    <v-row v-if="downloads.length > 0">
-      <v-col
-        v-for="download in downloads"
-        :key="download.bookId"
-        cols="12"
-        md="6"
-        xl="4"
-      >
+    <v-card outlined class="my-4">
+      <v-card-title class="text-subtitle-1">{{ $t('offline.download_settings') }}</v-card-title>
+      <v-card-text>
+        <v-row dense>
+          <v-col cols="12" sm="6"><v-select :value="$offline.state.preferences.concurrentBooks" :items="[1, 2, 3]" :label="$t('offline.parallel_books')" hide-details @change="setPreference('concurrentBooks', $event)"/></v-col>
+          <v-col cols="12" sm="6"><v-select :value="$offline.state.preferences.concurrentPages" :items="[1, 2, 4, 6, 8]" :label="$t('offline.parallel_pages')" hide-details @change="setPreference('concurrentPages', $event)"/></v-col>
+        </v-row>
+        <v-switch :input-value="$offline.state.preferences.notifyWhenComplete" :label="$t('offline.progress_notifications')" hide-details @change="toggleNotifications"/>
+        <v-switch :input-value="$offline.state.preferences.removeRead" :label="$t('offline.remove_read_automatically')" hide-details @change="setPreference('removeRead', $event)"/>
+        <v-switch :input-value="$offline.state.preferences.autoDownloadNext" :label="$t('offline.auto_download_next')" :hint="$t('offline.smart_download_hint')" persistent-hint @change="setPreference('autoDownloadNext', $event)"/>
+      </v-card-text>
+    </v-card>
+
+    <v-expansion-panels v-if="downloads.length > 0" multiple accordion>
+      <v-expansion-panel v-for="group in downloadGroups" :key="group.seriesId">
+        <v-expansion-panel-header>
+          <div class="d-flex align-center flex-grow-1 me-3">
+            <div><div class="font-weight-medium">{{ group.title }}</div><div class="text-caption text--secondary">{{ $t('offline.series_download_summary', {downloaded: group.downloaded, total: group.downloads.length, bytes: formatBytes(group.bytes)}) }}</div></div>
+            <v-spacer/>
+            <v-btn icon small :title="$t('offline.remove_series_downloads')" @click.stop="removeGroup(group)"><v-icon>mdi-delete-sweep</v-icon></v-btn>
+          </div>
+        </v-expansion-panel-header>
+        <v-expansion-panel-content><v-row>
+      <v-col v-for="download in group.downloads" :key="download.bookId" cols="12" md="6" xl="4">
         <v-card outlined class="fill-height">
           <div class="d-flex pa-3">
             <v-img
@@ -172,8 +188,13 @@
                 >{{ $t('offline.update_failed_kept') }}: {{ download.error }}</v-alert>
               </template>
 
+              <v-chip v-else-if="download.status === 'queued' || download.status === 'paused'" small outlined class="mt-3">
+                <v-icon left small>{{ download.status === 'paused' ? 'mdi-pause-circle' : 'mdi-clock-outline' }}</v-icon>
+                {{ $t(`offline.${download.status}`) }}
+              </v-chip>
+
               <v-alert
-                v-else
+                v-else-if="download.status === 'error'"
                 type="error"
                 dense
                 text
@@ -203,6 +224,17 @@
               {{ $t('offline.update_copy') }}
             </v-btn>
             <v-btn
+              v-if="['queued', 'downloading', 'updating'].includes(download.status)"
+              text
+              @click="pause(download.bookId)"
+            ><v-icon left>mdi-pause</v-icon>{{ $t('offline.pause_download') }}</v-btn>
+            <v-btn
+              v-if="download.status === 'paused'"
+              text
+              :disabled="!$offline.state.online || $offline.state.offlineMode"
+              @click="resume(download.bookId)"
+            ><v-icon left>mdi-play</v-icon>{{ $t('offline.resume_download') }}</v-btn>
+            <v-btn
               v-if="download.status === 'error'"
               text
               :disabled="!$offline.state.online || $offline.state.offlineMode"
@@ -215,7 +247,6 @@
             <v-btn
               icon
               :title="$t('offline.remove_download')"
-              :disabled="download.status === 'downloading' || download.status === 'updating'"
               @click="remove(download.bookId)"
             >
               <v-icon>mdi-delete</v-icon>
@@ -223,7 +254,9 @@
           </v-card-actions>
         </v-card>
       </v-col>
-    </v-row>
+        </v-row></v-expansion-panel-content>
+      </v-expansion-panel>
+    </v-expansion-panels>
 
     <v-card v-else outlined class="pa-8 text-center">
       <v-icon size="56" class="mb-3">mdi-download-off-outline</v-icon>
@@ -248,6 +281,14 @@ interface OfflineLaunchState {
   version: string
 }
 
+interface DownloadGroup {
+  seriesId: string
+  title: string
+  downloads: OfflineDownloadRecord[]
+  downloaded: number
+  bytes: number
+}
+
 export default Vue.extend({
   name: 'OfflineDownloads',
   data: () => ({
@@ -266,6 +307,17 @@ export default Vue.extend({
   computed: {
     downloads(): OfflineDownloadRecord[] {
       return this.$offline.state.downloads
+    },
+    downloadGroups(): DownloadGroup[] {
+      const grouped = new Map<string, OfflineDownloadRecord[]>()
+      this.downloads.forEach(item => grouped.set(item.book.seriesId, [...(grouped.get(item.book.seriesId) || []), item]))
+      return Array.from(grouped.entries()).map(([seriesId, downloads]) => ({
+        seriesId,
+        title: downloads[0].book.seriesTitle,
+        downloads: downloads.sort((a, b) => (a.book.metadata.numberSort || 0) - (b.book.metadata.numberSort || 0)),
+        downloaded: downloads.filter(item => item.status === 'downloaded').length,
+        bytes: downloads.reduce((sum, item) => sum + item.bytes, 0),
+      }))
     },
     offlineLaunchReady(): boolean {
       return this.offlineLaunch.supported && this.offlineLaunch.registered &&
@@ -399,9 +451,28 @@ export default Vue.extend({
       await this.$offline.removeDownload(bookId)
       await this.refreshStorage()
     },
+    async removeGroup(group: DownloadGroup) {
+      await Promise.all(group.downloads.map(item => this.$offline.removeDownload(item.bookId)))
+      await this.refreshStorage()
+    },
     async retry(bookId: string) {
       await this.$offline.downloadBook(bookId)
       await this.refreshStorage()
+    },
+    async pause(bookId: string) {
+      await this.$offline.pauseDownload(bookId)
+    },
+    async resume(bookId: string) {
+      await this.$offline.resumeDownload(bookId)
+    },
+    async setPreference(key: string, value: any) {
+      await this.$offline.setDownloadPreferences({[key]: value})
+    },
+    async toggleNotifications(enabled: boolean) {
+      if (enabled && 'Notification' in window && Notification.permission === 'default') {
+        enabled = (await Notification.requestPermission()) === 'granted'
+      }
+      await this.setPreference('notifyWhenComplete', enabled)
     },
     read(download: OfflineDownloadRecord) {
       this.$router.push({

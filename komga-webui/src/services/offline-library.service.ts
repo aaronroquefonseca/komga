@@ -16,7 +16,23 @@ import {
 
 export const OFFLINE_BOOK_CACHE_PREFIX = 'komga-offline-book-v2-'
 
-export type OfflineDownloadStatus = 'downloading' | 'updating' | 'downloaded' | 'error'
+export type OfflineDownloadStatus = 'queued' | 'downloading' | 'updating' | 'downloaded' | 'paused' | 'error'
+
+export interface OfflineDownloadPreferences {
+  concurrentBooks: number
+  concurrentPages: number
+  notifyWhenComplete: boolean
+  removeRead: boolean
+  autoDownloadNext: boolean
+}
+
+const DEFAULT_DOWNLOAD_PREFERENCES: OfflineDownloadPreferences = {
+  concurrentBooks: 2,
+  concurrentPages: 4,
+  notifyWhenComplete: true,
+  removeRead: false,
+  autoDownloadNext: false,
+}
 
 export interface OfflineDownloadRecord {
   bookId: string
@@ -34,6 +50,8 @@ export interface OfflineDownloadRecord {
   remoteManifestRevision?: string
   remotePages?: PageDto[]
   sourceMissing?: boolean
+  queuedAt?: string
+  autoManaged?: boolean
 }
 
 interface CachedPages {
@@ -64,6 +82,7 @@ export interface OfflineLibraryState {
   downloads: OfflineDownloadRecord[]
   cachedBooks: number
   cachedSeries: number
+  preferences: OfflineDownloadPreferences
 }
 
 function clone<T>(value: T): T {
@@ -241,6 +260,10 @@ function dateToken(value: any): string {
 export default class OfflineLibraryService {
   private http: AxiosInstance
   private ready: Promise<void>
+  private activeJobs = new Map<string, AbortController>()
+  private cancelledJobs = new Set<string>()
+  private processingQueue = false
+  private notifiedProgress = new Map<string, number>()
   state: OfflineLibraryState
 
   constructor(http: AxiosInstance) {
@@ -254,6 +277,7 @@ export default class OfflineLibraryService {
       downloads: [],
       cachedBooks: 0,
       cachedSeries: 0,
+      preferences: clone(DEFAULT_DOWNLOAD_PREFERENCES),
     }) as OfflineLibraryState
 
     this.ready = this.initialize()
@@ -263,6 +287,7 @@ export default class OfflineLibraryService {
 
   private handleOnline = () => {
     this.state.online = true
+    this.processQueue()
   }
 
   private handleOffline = () => {
@@ -272,11 +297,15 @@ export default class OfflineLibraryService {
   private async initialize(): Promise<void> {
     await openOfflineDatabase()
     const setting = await offlineGet<OfflineSetting<boolean>>(OFFLINE_STORES.settings, 'offlineMode')
+    const preferences = await offlineGet<OfflineSetting<OfflineDownloadPreferences>>(OFFLINE_STORES.settings, 'downloadPreferences')
     this.state.offlineMode = setting?.value === true
+    this.state.preferences = {...DEFAULT_DOWNLOAD_PREFERENCES, ...(preferences?.value || {})}
     await this.refreshState()
+    await this.recoverInterruptedDownloads()
     await this.cleanupOrphanedBookCaches()
     this.state.initialized = true
     this.notifyServiceWorker()
+    this.processQueue()
 
     try {
       if (navigator.storage?.persist) await navigator.storage.persist()
@@ -303,6 +332,24 @@ export default class OfflineLibraryService {
     this.state.offlineMode = enabled
     await offlinePut(OFFLINE_STORES.settings, {key: 'offlineMode', value: enabled} as OfflineSetting<boolean>)
     this.notifyServiceWorker()
+    if (!enabled) this.processQueue()
+  }
+
+  async setDownloadPreferences(preferences: Partial<OfflineDownloadPreferences>): Promise<void> {
+    await this.ready
+    this.state.preferences = {...this.state.preferences, ...preferences}
+    await offlinePut(OFFLINE_STORES.settings, {key: 'downloadPreferences', value: clone(this.state.preferences)})
+    this.processQueue()
+  }
+
+  private async recoverInterruptedDownloads(): Promise<void> {
+    for (const record of this.state.downloads.filter(x => x.status === 'downloading' || x.status === 'updating')) {
+      record.status = 'queued'
+      record.completedPages = 0
+      record.bytes = record.cacheName ? record.bytes : 0
+      record.queuedAt = new Date().toISOString()
+      await this.updateDownload(record)
+    }
   }
 
   isDownloaded(bookId: string): boolean {
@@ -493,24 +540,46 @@ export default class OfflineLibraryService {
     this.notifyServiceWorker(record.bookId)
   }
 
-  async downloadBook(bookId: string): Promise<void> {
+  async downloadBook(bookId: string, autoManaged: boolean = false): Promise<void> {
     await this.ready
     if (!this.state.online || this.state.offlineMode) throw new Error('Connect to the server before downloading a book')
     if (!('caches' in window)) throw new Error('This browser does not provide Cache Storage')
 
+    const current = this.getDownload(bookId)
+    if (current && ['queued', 'downloading', 'updating'].includes(current.status)) return
+    const bookResponse = await this.http.get(`/api/v1/books/${bookId}`)
+    const book = bookResponse.data as BookDto
+    await this.queueBook(book, autoManaged)
+  }
+
+  private async queueBook(book: BookDto, autoManaged: boolean): Promise<void> {
+    const bookId = book.id
+    const current = this.getDownload(bookId)
+    const queued: OfflineDownloadRecord = current?.cacheName
+      ? {...clone(current), status: 'queued', queuedAt: new Date().toISOString(), autoManaged}
+      : {bookId, book: clone(book), status: 'queued', totalPages: book.media?.pagesCount || 0,
+        completedPages: 0, bytes: 0, queuedAt: new Date().toISOString(), autoManaged}
+    delete queued.error
+    await this.updateDownload(queued)
+    this.processQueue()
+  }
+
+  private async performDownload(bookId: string, controller: AbortController): Promise<void> {
+    const existing = this.getDownload(bookId)
+    if (!existing) return
     const [bookResponse, pagesResponse] = await Promise.all([
-      this.http.get(`/api/v1/books/${bookId}`),
-      this.http.get(`/api/v1/books/${bookId}/pages`),
+      this.http.get(`/api/v1/books/${bookId}`, {signal: controller.signal}),
+      this.http.get(`/api/v1/books/${bookId}/pages`, {signal: controller.signal}),
     ])
     const book = bookResponse.data as BookDto
     const pages = pagesResponse.data as PageDto[]
     const revision = manifestRevision(pages)
-    const existing = this.getDownload(bookId)
 
     // If only the container/archive changed (for example CBR -> CBZ) while the
     // extracted page manifest is identical, update metadata without redownloading.
     if (existing?.cacheName && existing.manifestRevision === revision) {
       existing.book = clone(book)
+      existing.status = 'downloaded'
       existing.sourceLastModified = dateToken(book.lastModified)
       existing.updateAvailable = false
       existing.sourceMissing = false
@@ -552,10 +621,11 @@ export default class OfflineLibraryService {
 
     let cursor = 0
     try {
-      const workers = Array.from({length: Math.min(3, Math.max(1, pages.length))}, async () => {
+      const workers = Array.from({length: Math.min(this.state.preferences.concurrentPages, Math.max(1, pages.length))}, async () => {
         while (cursor < pages.length) {
+          if (controller.signal.aborted) throw new DOMException('Download cancelled', 'AbortError')
           const page = pages[cursor++]
-          const request = new Request(this.downloadPageUrl(bookId, page), {credentials: 'include'})
+          const request = new Request(this.downloadPageUrl(bookId, page), {credentials: 'include', signal: controller.signal})
           const response = await fetch(request)
           if (!response.ok) throw new Error(`Could not download page ${page.number} (${response.status})`)
 
@@ -565,6 +635,7 @@ export default class OfflineLibraryService {
           record.bytes += await sizePromise
           record.completedPages += 1
           await this.updateDownload(record)
+          await this.showDownloadProgressNotification(record)
         }
       })
       await Promise.all(workers)
@@ -599,14 +670,22 @@ export default class OfflineLibraryService {
       await this.updateDownload(record)
 
       if (oldCacheName && oldCacheName !== stagingCacheName) await caches.delete(oldCacheName)
+      await this.showDownloadNotification(record)
     } catch (e) {
       await caches.delete(stagingCacheName)
-      if (hadActiveSnapshot && existing) {
+      if (this.cancelledJobs.has(bookId) || !this.getDownload(bookId)) {
+        this.cancelledJobs.delete(bookId)
+      } else if (hadActiveSnapshot && existing) {
         const restored = clone(existing)
         restored.status = 'downloaded'
         restored.updateAvailable = true
         restored.error = e instanceof Error ? e.message : `${e}`
         await this.updateDownload(restored)
+      } else if (controller.signal.aborted) {
+        record.status = 'paused'
+        delete record.cacheName
+        delete record.error
+        await this.updateDownload(record)
       } else {
         record.status = 'error'
         delete record.cacheName
@@ -617,9 +696,88 @@ export default class OfflineLibraryService {
     }
   }
 
+  private processQueue(): void {
+    if (this.processingQueue || !this.state.online || this.state.offlineMode) return
+    this.processingQueue = true
+    Promise.resolve().then(async () => {
+      try {
+        while (this.activeJobs.size < this.state.preferences.concurrentBooks) {
+          const next = this.state.downloads.find(x => x.status === 'queued')
+          if (!next) break
+          next.status = 'queued'
+          const controller = new AbortController()
+          this.activeJobs.set(next.bookId, controller)
+          this.performDownload(next.bookId, controller)
+            .catch(async e => {
+              const record = this.getDownload(next.bookId)
+              if (record?.status === 'queued' && !this.cancelledJobs.has(next.bookId)) {
+                record.status = record.cacheName ? 'downloaded' : (this.state.online ? 'error' : 'queued')
+                if (record.cacheName) record.updateAvailable = true
+                record.error = e instanceof Error ? e.message : `${e}`
+                await this.updateDownload(record)
+              }
+            })
+            .finally(() => {
+              this.activeJobs.delete(next.bookId)
+              this.processQueue()
+            })
+        }
+      } finally {
+        this.processingQueue = false
+      }
+    })
+  }
+
+  async pauseDownload(bookId: string): Promise<void> {
+    const record = this.getDownload(bookId)
+    this.activeJobs.get(bookId)?.abort()
+    if (record && record.status === 'queued') {
+      record.status = 'paused'
+      await this.updateDownload(record)
+    }
+  }
+
+  async resumeDownload(bookId: string): Promise<void> {
+    const record = this.getDownload(bookId)
+    if (!record || !['paused', 'error'].includes(record.status)) return
+    record.status = 'queued'
+    delete record.error
+    await this.updateDownload(record)
+    this.processQueue()
+  }
+
+  private async showDownloadNotification(record: OfflineDownloadRecord): Promise<void> {
+    if (!this.state.preferences.notifyWhenComplete || !('Notification' in window) || Notification.permission !== 'granted') return
+    const registration = 'serviceWorker' in navigator ? await navigator.serviceWorker.ready.catch(() => undefined) : undefined
+    this.notifiedProgress.delete(record.bookId)
+    const options = {body: `100% · ${record.totalPages}/${record.totalPages} pages`, tag: `komga-download-${record.bookId}`}
+    if (registration) await registration.showNotification(`Downloaded ${record.book.seriesTitle}`, options)
+    else new Notification(`Downloaded ${record.book.seriesTitle}`, options)
+  }
+
+  private async showDownloadProgressNotification(record: OfflineDownloadRecord): Promise<void> {
+    if (!this.state.preferences.notifyWhenComplete || !('Notification' in window) || Notification.permission !== 'granted') return
+    const percent = record.totalPages ? Math.floor(record.completedPages / record.totalPages * 100) : 0
+    const previous = this.notifiedProgress.get(record.bookId) ?? -10
+    if (percent < 100 && percent - previous < 5) return
+    this.notifiedProgress.set(record.bookId, percent)
+    const registration = 'serviceWorker' in navigator ? await navigator.serviceWorker.ready.catch(() => undefined) : undefined
+    const options = {
+      body: `${percent}% · ${record.completedPages}/${record.totalPages} pages`,
+      tag: `komga-download-${record.bookId}`,
+      renotify: false,
+      silent: true,
+    }
+    const title = `Downloading ${record.book.seriesTitle}`
+    if (registration) await registration.showNotification(title, options)
+    else new Notification(title, options)
+  }
+
   async removeDownload(bookId: string): Promise<void> {
     await this.ready
     const record = this.getDownload(bookId)
+    if (this.activeJobs.has(bookId)) this.cancelledJobs.add(bookId)
+    this.activeJobs.get(bookId)?.abort()
     if (record?.cacheName) await caches.delete(record.cacheName)
     await offlineDelete(OFFLINE_STORES.downloads, bookId)
     this.state.downloads = this.state.downloads.filter(x => x.bookId !== bookId)
@@ -640,6 +798,8 @@ export default class OfflineLibraryService {
     }
     await offlinePut(OFFLINE_STORES.progress, queued)
 
+    if (progress.completed === true) await this.handleCompletedDownload(bookId)
+
     if (!this.state.online || this.state.offlineMode) return
     try {
       await this.http.patch(`/api/v1/books/${bookId}/read-progress`, progress)
@@ -647,6 +807,27 @@ export default class OfflineLibraryService {
       await offlinePut(OFFLINE_STORES.progress, queued)
     } catch (_) {
       // Remains queued and is retried after catalog/revision reconciliation.
+    }
+  }
+
+  private async handleCompletedDownload(bookId: string): Promise<void> {
+    const completed = this.getDownload(bookId)
+    if (!completed?.cacheName) return
+    const preferences = this.state.preferences
+    if (!preferences.removeRead && !preferences.autoDownloadNext) return
+
+    const siblings = (await this.getCachedBooksPage({condition: {seriesId: {operator: 'is', value: completed.book.seriesId}}},
+      {unpaged: true, sort: ['metadata.numberSort']})).content
+    const downloaded = siblings.filter(book => this.isDownloaded(book.id))
+    // Smart rotation is deliberately conservative: it starts only when this
+    // device already has a two-book reading buffer for the series.
+    if (downloaded.length < 2) return
+    const index = siblings.findIndex(book => book.id === bookId)
+    const next = siblings.slice(index + 1).find(book => !this.isDownloaded(book.id))
+    if (preferences.removeRead) await this.removeDownload(bookId)
+    if (preferences.autoDownloadNext && next) {
+      if (this.state.online && !this.state.offlineMode) await this.downloadBook(next.id, true)
+      else await this.queueBook(next, true)
     }
   }
 
