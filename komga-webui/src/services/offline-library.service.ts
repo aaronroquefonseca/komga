@@ -27,8 +27,8 @@ export interface OfflineDownloadPreferences {
 }
 
 const DEFAULT_DOWNLOAD_PREFERENCES: OfflineDownloadPreferences = {
-  concurrentBooks: 2,
-  concurrentPages: 4,
+  concurrentBooks: 3,
+  concurrentPages: 2,
   notifyWhenComplete: true,
   removeRead: false,
   autoDownloadNext: false,
@@ -300,6 +300,8 @@ export default class OfflineLibraryService {
     const preferences = await offlineGet<OfflineSetting<OfflineDownloadPreferences>>(OFFLINE_STORES.settings, 'downloadPreferences')
     this.state.offlineMode = setting?.value === true
     this.state.preferences = {...DEFAULT_DOWNLOAD_PREFERENCES, ...(preferences?.value || {})}
+    this.state.preferences.concurrentBooks = Math.max(1, Math.min(6, this.state.preferences.concurrentBooks))
+    this.state.preferences.concurrentPages = Math.max(1, Math.min(4, this.state.preferences.concurrentPages))
     await this.refreshState()
     await this.recoverInterruptedDownloads()
     await this.cleanupOrphanedBookCaches()
@@ -702,7 +704,7 @@ export default class OfflineLibraryService {
     Promise.resolve().then(async () => {
       try {
         while (this.activeJobs.size < this.state.preferences.concurrentBooks) {
-          const next = this.state.downloads.find(x => x.status === 'queued')
+          const next = this.state.downloads.find(x => x.status === 'queued' && !this.activeJobs.has(x.bookId))
           if (!next) break
           next.status = 'queued'
           const controller = new AbortController()
@@ -750,7 +752,9 @@ export default class OfflineLibraryService {
     if (!this.state.preferences.notifyWhenComplete || !('Notification' in window) || Notification.permission !== 'granted') return
     const registration = 'serviceWorker' in navigator ? await navigator.serviceWorker.ready.catch(() => undefined) : undefined
     this.notifiedProgress.delete(record.bookId)
-    const options = {body: `100% · ${record.totalPages}/${record.totalPages} pages`, tag: `komga-download-${record.bookId}`}
+    const remaining = this.remainingDownloadCount(record.bookId)
+    const suffix = remaining > 0 ? ` · ${remaining} book${remaining === 1 ? '' : 's'} remaining` : ''
+    const options = {body: `100% · ${record.totalPages}/${record.totalPages} pages${suffix}`, tag: `komga-download-${record.bookId}`}
     if (registration) await registration.showNotification(`Downloaded ${record.book.seriesTitle}`, options)
     else new Notification(`Downloaded ${record.book.seriesTitle}`, options)
   }
@@ -762,8 +766,10 @@ export default class OfflineLibraryService {
     if (percent < 100 && percent - previous < 5) return
     this.notifiedProgress.set(record.bookId, percent)
     const registration = 'serviceWorker' in navigator ? await navigator.serviceWorker.ready.catch(() => undefined) : undefined
+    const remaining = this.remainingDownloadCount(record.bookId)
+    const suffix = remaining > 0 ? ` · ${remaining} book${remaining === 1 ? '' : 's'} remaining` : ''
     const options = {
-      body: `${percent}% · ${record.completedPages}/${record.totalPages} pages`,
+      body: `${percent}% · ${record.completedPages}/${record.totalPages} pages${suffix}`,
       tag: `komga-download-${record.bookId}`,
       renotify: false,
       silent: true,
@@ -771,6 +777,11 @@ export default class OfflineLibraryService {
     const title = `Downloading ${record.book.seriesTitle}`
     if (registration) await registration.showNotification(title, options)
     else new Notification(title, options)
+  }
+
+  private remainingDownloadCount(excludeBookId?: string): number {
+    return this.state.downloads.filter(item => item.bookId !== excludeBookId &&
+      ['queued', 'downloading', 'updating'].includes(item.status)).length
   }
 
   async removeDownload(bookId: string): Promise<void> {

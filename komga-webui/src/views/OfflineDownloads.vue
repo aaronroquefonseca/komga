@@ -96,8 +96,8 @@
       <v-card-title class="text-subtitle-1">{{ $t('offline.download_settings') }}</v-card-title>
       <v-card-text>
         <v-row dense>
-          <v-col cols="12" sm="6"><v-select :value="$offline.state.preferences.concurrentBooks" :items="[1, 2, 3]" :label="$t('offline.parallel_books')" hide-details @change="setPreference('concurrentBooks', $event)"/></v-col>
-          <v-col cols="12" sm="6"><v-select :value="$offline.state.preferences.concurrentPages" :items="[1, 2, 4, 6, 8]" :label="$t('offline.parallel_pages')" hide-details @change="setPreference('concurrentPages', $event)"/></v-col>
+          <v-col cols="12" sm="6"><v-select :value="$offline.state.preferences.concurrentBooks" :items="[1, 2, 3, 4, 6]" :label="$t('offline.parallel_books')" hide-details @change="setPreference('concurrentBooks', $event)"/></v-col>
+          <v-col cols="12" sm="6"><v-select :value="$offline.state.preferences.concurrentPages" :items="[1, 2, 3, 4]" :label="$t('offline.parallel_pages')" hide-details @change="setPreference('concurrentPages', $event)"/></v-col>
         </v-row>
         <v-switch :input-value="$offline.state.preferences.notifyWhenComplete" :label="$t('offline.progress_notifications')" hide-details @change="toggleNotifications"/>
         <v-switch :input-value="$offline.state.preferences.removeRead" :label="$t('offline.remove_read_automatically')" hide-details @change="setPreference('removeRead', $event)"/>
