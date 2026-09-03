@@ -36,7 +36,13 @@ import komgaReleases from './plugins/komga-releases.plugin'
 import komgaSettings from './plugins/komga-settings.plugin'
 import komgaFonts from './plugins/komga-fonts.plugin'
 import {installPhysicalPagedReader} from './plugins/paged-reader-physical.plugin'
+import {installDoublePagePhysicalCurl} from './plugins/paged-reader-double-page-curl.plugin'
 import {installPhysicalPagedReaderSettlementGuard} from './plugins/paged-reader-physical-settlement.plugin'
+import {installSinglePagePhysicalComic} from './plugins/paged-reader-single-page-physical.plugin'
+import {installPhysicalPlaceholderSurfaces} from './plugins/paged-reader-placeholder-surface.plugin'
+import {installSinglePageTopologyGuard} from './plugins/paged-reader-single-page-topology-guard.plugin'
+import {installSinglePageWideStateMachine} from './plugins/paged-reader-single-page-wide-state-machine.plugin'
+import {installPaperBoundsStability} from './plugins/paged-reader-paper-bounds-stability.plugin'
 import vuetify from './plugins/vuetify'
 import logger from './plugins/logger.plugin'
 import './public-path'
@@ -94,7 +100,13 @@ Vue.use(offlineKomgaAdapter)
 Vue.config.productionTip = false
 
 installPhysicalPagedReader()
+installDoublePagePhysicalCurl()
 installPhysicalPagedReaderSettlementGuard()
+installSinglePagePhysicalComic()
+installPhysicalPlaceholderSurfaces()
+installSinglePageTopologyGuard()
+installSinglePageWideStateMachine()
+installPaperBoundsStability()
 sync(store, router)
 
 const installedPwa = isStandalonePwa()

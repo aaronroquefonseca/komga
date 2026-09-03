@@ -142,6 +142,14 @@ describe('paged reader transitions', () => {
     })
   })
 
+  test('near-complete curl extends one full page through the spine', () => {
+    const leftward = paperCurlDynamicGeometry(0.9998, 0.5, 0.5, -1)
+    const rightward = paperCurlDynamicGeometry(0.9998, 0.5, 0.5, 1)
+
+    expect(Math.min(...leftward.backPolygon.map(point => point.x))).toBeLessThan(-99.9)
+    expect(Math.max(...rightward.backPolygon.map(point => point.x))).toBeGreaterThan(199.9)
+  })
+
   test('dynamic fold collapses exactly at both settled endpoints', () => {
     const start = paperCurlDynamicGeometry(0, 0.1, 0.9, -1)
     const end = paperCurlDynamicGeometry(1, 0.1, 0.9, -1)

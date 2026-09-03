@@ -48,7 +48,11 @@
          Vuetify is completely absent in this mode. This prevents its window
          bookkeeping from re-laying out the visible page at gesture settlement. -->
     <div v-else class="custom-reader-stage">
-      <div class="custom-layout-anchor" aria-hidden="true">
+      <div
+        class="custom-layout-anchor"
+        :style="drag.directionHandoffCover ? {visibility: 'visible', zIndex: '20'} : undefined"
+        aria-hidden="true"
+      >
         <paged-reader-spread
           v-if="spreads[visualPage]"
           :spread="spreads[visualPage]"
@@ -182,6 +186,7 @@ export default Vue.extend({
         currentIndex: 0,
         targetIndex: null as number | null,
         curlVariant: 'middle' as PageCurlVariant,
+        directionHandoffCover: false,
       },
     }
   },
@@ -493,6 +498,7 @@ export default Vue.extend({
       this.drag.curlVariant = this.vertical
         ? 'middle'
         : pageCurlVariantForStart(touch.clientY, window.innerHeight || root.clientHeight)
+      this.drag.directionHandoffCover = false
     },
     followFingerMove(event: TouchEvent) {
       if (!this.drag.tracking || event.touches.length !== 1) return
@@ -655,6 +661,7 @@ export default Vue.extend({
       this.drag.currentIndex = this.visualPage
       this.drag.targetIndex = null
       this.drag.curlVariant = 'middle'
+      this.drag.directionHandoffCover = false
     },
     effectiveTransition(): PagedReaderTransition {
       if (this.drag.navigationDelta < 0) {

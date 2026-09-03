@@ -42,6 +42,13 @@ const i18n = new VueI18n({
 // Fork-only features use English fallback until they are moved into Weblate.
 i18n.mergeLocaleMessage('en', {
   bookreader: {
+    webtoon_pull_previous: 'Pull farther for the previous book',
+    webtoon_release_previous: 'Release for the previous book',
+    webtoon_pull_next: 'Pull farther for the next book',
+    webtoon_release_next: 'Release for the next book',
+    webtoon_pull_exit: 'Pull farther to leave the reader',
+    webtoon_release_exit: 'Release to leave the reader',
+    webtoon_hold_navigation: 'Hold to confirm',
     settings: {
       follow_finger: 'Follow finger',
       page_transition: 'Page transition',
