@@ -268,6 +268,8 @@ export default class OfflineLibraryService {
   private persistedProgressAt = new Map<string, number>()
   private notificationCloseTimers = new Map<string, number>()
   private lastQueuedAt = 0
+  private openReaderBooks = new Set<string>()
+  private deferredCompletions = new Set<string>()
   state: OfflineLibraryState
 
   constructor(http: AxiosInstance) {
@@ -888,7 +890,10 @@ export default class OfflineLibraryService {
     }
     await offlinePut(OFFLINE_STORES.progress, queued)
 
-    if (normalizedProgress.completed === true) await this.handleCompletedDownload(bookId)
+    if (normalizedProgress.completed === true) {
+      if (this.openReaderBooks.has(bookId)) this.deferredCompletions.add(bookId)
+      else await this.handleCompletedDownload(bookId)
+    }
 
     if (!this.state.online || this.state.offlineMode) return
     try {
@@ -898,6 +903,16 @@ export default class OfflineLibraryService {
     } catch (_) {
       // Remains queued and is retried after catalog/revision reconciliation.
     }
+  }
+
+  readerOpened(bookId: string): void {
+    this.openReaderBooks.add(bookId)
+  }
+
+  readerClosed(bookId: string): void {
+    this.openReaderBooks.delete(bookId)
+    if (!this.deferredCompletions.delete(bookId)) return
+    this.handleCompletedDownload(bookId).catch(() => undefined)
   }
 
   private async handleCompletedDownload(bookId: string): Promise<void> {
