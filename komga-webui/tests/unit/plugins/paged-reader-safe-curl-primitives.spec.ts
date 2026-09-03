@@ -63,11 +63,14 @@ describe('safe curl primitives', () => {
   it('wraps the front shadow around every exposed flap edge', () => {
     const styles = safeCreaseFrontShadowStyles(sheet(), 0.5)
 
-    expect(styles).toHaveLength(3)
-    styles.forEach(style => {
+    expect(styles).toHaveLength(5)
+    styles.slice(0, 3).forEach(style => {
       expect(style.opacity).toBe('1')
       expect(style.transform).toMatch(/^matrix\(/)
-      expect(style.borderRadius).not.toBe('0')
+    })
+    styles.slice(3).forEach(style => {
+      expect(style.background).toContain('radial-gradient')
+      expect(style.borderRadius).toBe('50%')
     })
   })
 
