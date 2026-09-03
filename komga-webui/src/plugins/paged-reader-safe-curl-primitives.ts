@@ -108,7 +108,7 @@ export function safeCreaseFrontShadowStyles(
   sheet: CurlSheetGeometry,
   curl: number,
 ): Array<Record<string, string>> {
-  const hidden = Array.from({length: 5}, () => ({opacity: '0'}))
+  const hidden = Array.from({length: 3}, () => ({opacity: '0'}))
   const style = safeCreaseShadowStyle(sheet, curl)
   const polygon = sheet.geometry?.backPolygon
   if (style.transform === undefined || !polygon || polygon.length < 4 ||
@@ -133,7 +133,7 @@ export function safeCreaseFrontShadowStyles(
   center.x /= points.length
   center.y /= points.length
 
-  const segments = [[0, 1], [1, 2], [2, 3]].map(([startIndex, endIndex], segmentIndex): Record<string, string> => {
+  return [[0, 1], [1, 2], [2, 3]].map(([startIndex, endIndex]): Record<string, string> => {
     const start = points[startIndex]
     const end = points[endIndex]
     const dx = end.x - start.x
@@ -152,32 +152,16 @@ export function safeCreaseFrontShadowStyles(
       normalY *= -1
     }
 
-    // Leave each shared corner to one radial layer. This prevents the darker
-    // wedge produced when two translucent linear gradients overlap there.
-    const trimStart = segmentIndex > 0 ? Math.min(stripWidth * 0.55, length * 0.2) : 0
-    const trimEnd = segmentIndex < 2 ? Math.min(stripWidth * 0.55, length * 0.2) : 0
-    const originX = start.x + tangentX * trimStart
-    const originY = start.y + tangentY * trimStart
     return {
       ...style,
       width: `${stripWidth}px`,
-      height: `${Math.max(0, length - trimStart - trimEnd)}px`,
-      transform: `matrix(${normalX}, ${normalY}, ${tangentX}, ${tangentY}, ${originX}, ${originY})`,
+      height: `${length}px`,
+      transform: `matrix(${normalX}, ${normalY}, ${tangentX}, ${tangentY}, ${start.x}, ${start.y})`,
       background: `linear-gradient(to right, rgba(0, 0, 0, ${alpha}), rgba(0, 0, 0, 0))`,
+      maskImage: 'linear-gradient(to bottom, transparent 0, black 12%, black 88%, transparent 100%)',
+      WebkitMaskImage: 'linear-gradient(to bottom, transparent 0, black 12%, black 88%, transparent 100%)',
     }
   })
-
-  const cornerDiameter = stripWidth * 2
-  const corners = [points[1], points[2]].map((point): Record<string, string> => ({
-    ...style,
-    width: `${cornerDiameter}px`,
-    height: `${cornerDiameter}px`,
-    transform: `translate3d(${point.x - stripWidth}px, ${point.y - stripWidth}px, 0)`,
-    background: `radial-gradient(circle, rgba(0, 0, 0, ${alpha}) 0, rgba(0, 0, 0, 0) 68%)`,
-    borderRadius: '50%',
-  }))
-
-  return [...segments, ...corners]
 }
 
 export function safeCreaseEdgeStyle(
@@ -230,6 +214,8 @@ export function renderSafeCurlShadow(
       WebkitClipPath: styleValue(shadowStyle, 'WebkitClipPath', clipPath),
       background: styleValue(shadowStyle, 'background', 'transparent'),
       borderRadius: styleValue(shadowStyle, 'borderRadius', '0'),
+      maskImage: styleValue(shadowStyle, 'maskImage', 'none'),
+      WebkitMaskImage: styleValue(shadowStyle, 'WebkitMaskImage', 'none'),
       opacity: styleValue(shadowStyle, 'opacity', '0'),
       filter: 'none',
       boxShadow: 'none',
