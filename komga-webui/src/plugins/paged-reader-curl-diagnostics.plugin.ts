@@ -32,6 +32,18 @@ const SURFACE_SELECTORS = [
   '.double-page-curl-back-face',
   '.double-page-curl-current',
   '.double-page-curl-back',
+  '.single-page-wide-v2',
+  '.single-page-wide-v2-under-current',
+  '.single-page-wide-v2-under-target-wide',
+  '.single-page-wide-v2-under-target-single',
+  '.single-page-wide-v2-turning-group',
+  '.single-page-wide-v2-current',
+  '.single-page-wide-v2-front',
+  '.single-page-wide-v2-back',
+  '.single-page-wide-v2-back-face',
+  '.single-page-wide-v2-final-target',
+  '.single-page-wide-v2-bootstrap',
+  '.single-page-wide-v2-measure',
 ]
 
 function debugMode(): CurlDebugMode | null {
@@ -94,6 +106,9 @@ function capture(reader: any, phase: string): CurlTraceEntry {
     time: performance.now(),
     phase,
     drag: {
+      pageLayout: reader.pageLayout,
+      transition: reader.transition,
+      flipDirection: !!reader.flipDirection,
       tracking: !!reader.drag?.tracking,
       prepared: !!reader.drag?.prepared,
       active: !!reader.drag?.active,
@@ -240,6 +255,25 @@ export function installCurlDiagnostics(): void {
       [data-curl-debug-mode="${mode}"] .double-page-curl-base-right { box-shadow: inset 0 0 0 8px rgba(0, 220, 255, .8) !important; }
       [data-curl-debug-mode="${mode}"] .double-page-curl-front-face { outline: 6px solid #ffe600 !important; }
       [data-curl-debug-mode="${mode}"] .double-page-curl-back-face { outline: 6px solid #3878ff !important; }
+      [data-curl-debug-mode="${mode}"] .single-page-wide-v2-under-current {
+        box-shadow: inset 0 0 0 8px #ff00c8 !important;
+      }
+      [data-curl-debug-mode="${mode}"] .single-page-wide-v2-under-target-wide,
+      [data-curl-debug-mode="${mode}"] .single-page-wide-v2-under-target-single {
+        box-shadow: inset 0 0 0 8px #00dcff !important;
+      }
+      [data-curl-debug-mode="${mode}"] .single-page-wide-v2-front {
+        box-shadow: inset 0 0 0 8px #ffe600 !important;
+      }
+      [data-curl-debug-mode="${mode}"] .single-page-wide-v2-back-face {
+        box-shadow: inset 0 0 0 8px #3878ff !important;
+      }
+      [data-curl-debug-mode="${mode}"] .single-page-wide-v2-final-target {
+        box-shadow: inset 0 0 0 8px #00ff66 !important;
+      }
+      [data-curl-debug-mode="${mode}"] .single-page-wide-v2-measure {
+        outline: 5px dashed #ff7a00 !important;
+      }
     `)
   }
 
