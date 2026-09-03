@@ -875,21 +875,24 @@ export default class OfflineLibraryService {
   async updateReadProgress(bookId: string, progress: ReadProgressUpdateDto): Promise<void> {
     await this.ready
     const activeDownload = this.getDownload(bookId)
+    const normalizedProgress = clone(progress)
+    const pagesCount = activeDownload?.book.media?.pagesCount || activeDownload?.totalPages || 0
+    if (normalizedProgress.page && pagesCount > 0 && normalizedProgress.page >= pagesCount) normalizedProgress.completed = true
     const fromOfflineSnapshot = (this.state.offlineMode || !this.state.online) && !!activeDownload?.cacheName
     const queued: QueuedProgress = {
       bookId,
-      progress: clone(progress),
+      progress: normalizedProgress,
       updatedAt: new Date().toISOString(),
       pending: true,
       revision: fromOfflineSnapshot ? activeDownload?.manifestRevision : undefined,
     }
     await offlinePut(OFFLINE_STORES.progress, queued)
 
-    if (progress.completed === true) await this.handleCompletedDownload(bookId)
+    if (normalizedProgress.completed === true) await this.handleCompletedDownload(bookId)
 
     if (!this.state.online || this.state.offlineMode) return
     try {
-      await this.http.patch(`/api/v1/books/${bookId}/read-progress`, progress)
+      await this.http.patch(`/api/v1/books/${bookId}/read-progress`, normalizedProgress)
       queued.pending = false
       await offlinePut(OFFLINE_STORES.progress, queued)
     } catch (_) {
@@ -903,14 +906,18 @@ export default class OfflineLibraryService {
     const preferences = this.state.preferences
     if (!preferences.removeRead && !preferences.autoDownloadNext) return
 
-    const siblings = (await this.getCachedBooksPage({condition: {seriesId: {operator: 'is', value: completed.book.seriesId}}},
-      {unpaged: true, sort: ['metadata.numberSort']})).content
-    const downloaded = siblings.filter(book => this.isDownloaded(book.id))
-    // Smart rotation is deliberately conservative: it starts only when this
-    // device already has a two-book reading buffer for the series.
-    if (downloaded.length < 2) return
-    const index = siblings.findIndex(book => book.id === bookId)
-    const next = siblings.slice(index + 1).find(book => !this.isDownloaded(book.id))
+    let next: BookDto | undefined
+    if (preferences.autoDownloadNext) {
+      const siblings = (await this.getCachedBooksPage({condition: {seriesId: {operator: 'is', value: completed.book.seriesId}}},
+        {unpaged: true, sort: ['metadata.numberSort']})).content
+      const index = siblings.findIndex(book => book.id === bookId)
+      const bufferedNext = siblings[index + 1]
+      // Rotation starts only with a consecutive two-book buffer: the completed
+      // book and the immediately following book must both already be readable.
+      if (index >= 0 && bufferedNext && this.isDownloaded(bufferedNext.id)) {
+        next = siblings.slice(index + 1).find(book => !this.isDownloaded(book.id))
+      }
+    }
     if (preferences.removeRead) await this.removeDownload(bookId)
     if (preferences.autoDownloadNext && next) {
       if (this.state.online && !this.state.offlineMode) await this.downloadBook(next.id, true, completed.book.seriesId)
