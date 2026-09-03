@@ -48,6 +48,7 @@ i18n.mergeLocaleMessage('en', {
     webtoon_release_next: 'Release for the next book',
     webtoon_pull_exit: 'Pull farther to leave the reader',
     webtoon_release_exit: 'Release to leave the reader',
+    webtoon_hold_navigation: 'Hold to confirm',
     settings: {
       follow_finger: 'Follow finger',
       page_transition: 'Page transition',

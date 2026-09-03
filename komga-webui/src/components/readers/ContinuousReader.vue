@@ -10,9 +10,10 @@
          v-scroll="onScroll"
     >
       <div class="edge-pull" :style="pullIndicatorStyle('previous')" aria-live="polite">
-        <div class="edge-pull-content" :style="pullContentStyle('previous')">
-          <v-icon>{{ pullArmed && pullDirection === 'previous' ? 'mdi-arrow-down-bold' : 'mdi-arrow-down' }}</v-icon>
+        <div class="edge-pull-content" :class="{armed: pullArmed && pullDirection === 'previous'}" :style="pullContentStyle('previous')">
+          <v-icon>{{ pullIcon('previous') }}</v-icon>
           <span>{{ pullMessage('previous') }}</span>
+          <div class="edge-pull-progress"><div :style="pullProgressStyle('previous')"/></div>
         </div>
       </div>
       <img v-for="(page, i) in pages"
@@ -26,9 +27,10 @@
            v-intersect="onIntersect"
       />
       <div class="edge-pull" :style="pullIndicatorStyle('next')" aria-live="polite">
-        <div class="edge-pull-content" :style="pullContentStyle('next')">
-          <v-icon>{{ pullArmed && pullDirection === 'next' ? 'mdi-arrow-up-bold' : 'mdi-arrow-up' }}</v-icon>
+        <div class="edge-pull-content" :class="{armed: pullArmed && pullDirection === 'next'}" :style="pullContentStyle('next')">
+          <v-icon>{{ pullIcon('next') }}</v-icon>
           <span>{{ pullMessage('next') }}</span>
+          <div class="edge-pull-progress"><div :style="pullProgressStyle('next')"/></div>
         </div>
       </div>
     </div>
@@ -75,9 +77,12 @@ export default Vue.extend({
       pullDirection: null as 'previous' | 'next' | null,
       pullTracking: false,
       pullArmed: false,
+      pullHolding: false,
+      pullHoldProgress: 0,
+      pullHoldTimer: null as number | null,
       pullSettling: false,
       pullThreshold: 82,
-      pullMaximum: 116,
+      pullHoldDuration: 650,
     }
   },
   props: {
@@ -141,6 +146,7 @@ export default Vue.extend({
     window.addEventListener('keydown', this.keyPressed)
   },
   destroyed() {
+    this.cancelPullTimer()
     window.removeEventListener('keydown', this.keyPressed)
   },
   mounted() {
@@ -181,7 +187,19 @@ export default Vue.extend({
         transform: `scale(${0.86 + progress * 0.14})`,
       }
     },
+    pullProgressStyle(direction: 'previous' | 'next') {
+      return {width: `${this.pullDirection === direction ? this.pullHoldProgress * 100 : 0}%`}
+    },
+    pullIcon(direction: 'previous' | 'next'): string {
+      if (this.pullDirection === direction && this.pullArmed) return 'mdi-check-bold'
+      if (this.pullDirection === direction && this.pullHolding) return 'mdi-timer-sand'
+      return direction === 'previous' ? 'mdi-arrow-down' : 'mdi-arrow-up'
+    },
     pullMessage(direction: 'previous' | 'next'): string {
+      const active = this.pullDirection === direction
+      if (active && this.pullHolding && !this.pullArmed) {
+        return this.$t('bookreader.webtoon_hold_navigation').toString()
+      }
       if (direction === 'previous') {
         return this.$t(this.pullArmed && this.pullDirection === direction
           ? 'bookreader.webtoon_release_previous'
@@ -209,6 +227,8 @@ export default Vue.extend({
       this.pullDirection = null
       this.pullDistance = 0
       this.pullArmed = false
+      this.pullHolding = false
+      this.pullHoldProgress = 0
     },
     pullMove(e: TouchEvent) {
       if (!this.pullTracking || e.touches.length !== 1) return
@@ -227,13 +247,22 @@ export default Vue.extend({
       }
 
       const rawDistance = this.pullDirection === 'previous' ? dy : -dy
-      if (rawDistance <= 0) return
+      if (rawDistance <= 0) {
+        this.pullDistance = 0
+        this.cancelPullHold(true)
+        return
+      }
       e.preventDefault()
-      const distance = Math.min(this.pullMaximum, rawDistance * 0.5)
-      const wasArmed = this.pullArmed
-      this.pullDistance = distance
-      this.pullArmed = distance >= this.pullThreshold
-      if (!wasArmed && this.pullArmed) this.vibrate(12)
+      const resistedDistance = rawDistance * 0.5
+      if (resistedDistance >= this.pullThreshold) {
+        // Once the threshold is reached, movement hits a physical detent. The
+        // final few pixels have much stronger resistance while the hold arms.
+        this.pullDistance = this.pullThreshold + Math.min(10, (resistedDistance - this.pullThreshold) * 0.1)
+        if (!this.pullHolding && !this.pullArmed) this.startPullHold()
+      } else {
+        this.pullDistance = resistedDistance
+        if (resistedDistance < this.pullThreshold * 0.82) this.cancelPullHold(true)
+      }
       if (this.pullDirection === 'next') {
         this.$nextTick(() => window.scrollTo(0, document.documentElement.scrollHeight))
       }
@@ -253,6 +282,7 @@ export default Vue.extend({
     },
     resetPull() {
       const wasNext = this.pullDirection === 'next'
+      this.cancelPullHold(false)
       this.pullTracking = false
       this.pullArmed = false
       this.pullSettling = true
@@ -262,6 +292,36 @@ export default Vue.extend({
         this.pullSettling = false
         if (wasNext) window.scrollTo(0, document.documentElement.scrollHeight)
       }, 220)
+    },
+    startPullHold() {
+      this.pullHolding = true
+      this.pullHoldProgress = 0
+      this.vibrate(8)
+      const started = performance.now()
+      this.pullHoldTimer = window.setInterval(() => {
+        this.pullHoldProgress = Math.min(1, (performance.now() - started) / this.pullHoldDuration)
+        if (this.pullHoldProgress >= 1) {
+          this.cancelPullTimer()
+          this.pullHolding = false
+          this.pullArmed = true
+          this.pullDistance = this.pullThreshold + 10
+          this.vibrate([18, 24, 18])
+        }
+      }, 25)
+    },
+    cancelPullHold(feedback: boolean) {
+      const wasEligible = this.pullHolding || this.pullArmed
+      this.cancelPullTimer()
+      this.pullHolding = false
+      this.pullArmed = false
+      this.pullHoldProgress = 0
+      if (feedback && wasEligible) this.vibrate(6)
+    },
+    cancelPullTimer() {
+      if (this.pullHoldTimer !== null) {
+        window.clearInterval(this.pullHoldTimer)
+        this.pullHoldTimer = null
+      }
     },
     vibrate(pattern: number | number[]) {
       if (typeof navigator !== 'undefined' && typeof navigator.vibrate === 'function') {
@@ -367,6 +427,26 @@ export default Vue.extend({
   border-radius: 18px;
   text-align: center;
   transform-origin: center;
+  transition: background-color 140ms ease, box-shadow 140ms ease;
+}
+
+.edge-pull-content.armed {
+  background: rgba(20, 110, 58, 0.94);
+  box-shadow: 0 0 0 3px rgba(100, 255, 170, 0.35);
+}
+
+.edge-pull-progress {
+  background: rgba(255, 255, 255, 0.22);
+  border-radius: 2px;
+  height: 3px;
+  overflow: hidden;
+  width: 100%;
+}
+
+.edge-pull-progress > div {
+  background: currentColor;
+  height: 100%;
+  transition: width 25ms linear;
 }
 
 .top-quarter {
