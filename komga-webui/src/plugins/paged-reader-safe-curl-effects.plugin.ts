@@ -4,7 +4,7 @@ import {PagedReaderTransition} from '@/types/enum-reader'
 import {
   renderSafeCurlShadow,
   safeCreaseEdgeStyle,
-  safeCreaseFrontShadowStyle,
+  safeCreaseFrontShadowStyles,
   safeCreaseShadowStyle,
 } from './paged-reader-safe-curl-primitives'
 
@@ -201,12 +201,14 @@ export function installSafeCurlEffects(): void {
       'single-page-gap-v1-turning-group',
     ]) || vnode
     const children = (shadowHost.children || []) as VNode[]
-    children.push(renderSafeCurlShadow(
-      h,
-      safeCreaseFrontShadowStyle(this, progress),
-      'safe-curl-front-shadow',
-      '4',
-    ))
+    safeCreaseFrontShadowStyles(this, progress).forEach((frontStyle, index) => {
+      children.push(renderSafeCurlShadow(
+        h,
+        frontStyle,
+        `safe-curl-front-shadow safe-curl-front-shadow-${index}`,
+        '4',
+      ))
+    })
     shadowHost.children = children
 
     return vnode

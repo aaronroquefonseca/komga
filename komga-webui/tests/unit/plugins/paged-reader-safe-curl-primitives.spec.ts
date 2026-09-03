@@ -1,6 +1,7 @@
 import {
   safeCreaseEdgeStyle,
   safeCreaseFrontShadowStyle,
+  safeCreaseFrontShadowStyles,
   safeCreaseShadowStyle,
 } from '@/plugins/paged-reader-safe-curl-primitives'
 
@@ -53,10 +54,21 @@ describe('safe curl primitives', () => {
     const frontMatrix = front.transform.match(/matrix\(([^)]+)\)/)![1].split(', ').map(Number)
 
     expect(frontMatrix[0]).toBeLessThan(0)
-    expect(frontMatrix[4]).toBeCloseTo(sheet().paperX(45))
+    expect(Math.abs(frontMatrix[4] - sheet().paperX(45))).toBeLessThan(parseFloat(front.width))
     expect(frontMatrix[4]).not.toBeCloseTo(underMatrix[4])
     expect(parseFloat(front.width)).toBeLessThan(parseFloat(under.width))
     expect(front.background).toContain('rgba(0, 0, 0, 0.22)')
+  })
+
+  it('wraps the front shadow around every exposed flap edge', () => {
+    const styles = safeCreaseFrontShadowStyles(sheet(), 0.5)
+
+    expect(styles).toHaveLength(3)
+    styles.forEach(style => {
+      expect(style.opacity).toBe('1')
+      expect(style.transform).toMatch(/^matrix\(/)
+      expect(style.borderRadius).not.toBe('0')
+    })
   })
 
   it('does not create a drawable layer at curl endpoints', () => {

@@ -96,39 +96,75 @@ export function safeCreaseFrontShadowStyle(
   sheet: CurlSheetGeometry,
   curl: number,
 ): Record<string, string> {
+  return safeCreaseFrontShadowStyles(sheet, curl)[1]
+}
+
+/**
+ * Cast a bounded shadow around all three exposed edges of the folded face.
+ * Separate overlapping strips avoid the large filtered compositor surface
+ * which caused darkening on some Android Chromium builds.
+ */
+export function safeCreaseFrontShadowStyles(
+  sheet: CurlSheetGeometry,
+  curl: number,
+): Array<Record<string, string>> {
+  const hidden = [{opacity: '0'}, {opacity: '0'}, {opacity: '0'}]
   const style = safeCreaseShadowStyle(sheet, curl)
   const polygon = sheet.geometry?.backPolygon
   if (style.transform === undefined || !polygon || polygon.length < 4 ||
-    !sheet.pageBounds || typeof sheet.paperX !== 'function') return style
+    !sheet.pageBounds || typeof sheet.paperX !== 'function') return hidden
 
   const top = Number(sheet.pageBounds.top)
   const height = Number(sheet.pageBounds.height)
-  const freeTopX = sheet.paperX(polygon[1].x)
-  const freeTopY = top + height * polygon[1].y / 100
-  const freeBottomX = sheet.paperX(polygon[2].x)
-  const freeBottomY = top + height * polygon[2].y / 100
-  const dx = freeBottomX - freeTopX
-  const dy = freeBottomY - freeTopY
-  const length = Math.hypot(dx, dy)
-  if (![height, freeTopX, freeTopY, freeBottomX, freeBottomY].every(Number.isFinite) ||
-    height <= 0 || length <= 0.01) return {opacity: '0'}
+  const points = polygon.map(point => ({
+    x: sheet.paperX!(point.x),
+    y: top + height * point.y / 100,
+  }))
+  if (height <= 0 || points.some(point => !Number.isFinite(point.x) || !Number.isFinite(point.y))) {
+    return hidden
+  }
 
   const arch = Math.sin(clamp01(curl) * Math.PI)
-  const shadowSign = Math.sign(sheet.direction || -1)
-  const normalX = shadowSign * dy / length
-  const normalY = shadowSign * -dx / length
-  const tangentX = dx / length
-  const tangentY = dy / length
   const stripWidth = Number(sheet.pageBounds.width) * 0.055 * arch
   const alpha = 0.22 * arch
+  if (stripWidth <= 0.01) return hidden
 
-  return {
-    ...style,
-    width: `${stripWidth}px`,
-    height: `${length}px`,
-    transform: `matrix(${normalX}, ${normalY}, ${tangentX}, ${tangentY}, ${freeTopX}, ${freeTopY})`,
-    background: `linear-gradient(to right, rgba(0, 0, 0, ${alpha}), rgba(0, 0, 0, 0))`,
-  }
+  const center = points.reduce((sum, point) => ({x: sum.x + point.x, y: sum.y + point.y}), {x: 0, y: 0})
+  center.x /= points.length
+  center.y /= points.length
+
+  return [[0, 1], [1, 2], [2, 3]].map(([startIndex, endIndex]): Record<string, string> => {
+    const start = points[startIndex]
+    const end = points[endIndex]
+    const dx = end.x - start.x
+    const dy = end.y - start.y
+    const length = Math.hypot(dx, dy)
+    if (length <= 0.01) return {opacity: '0'}
+
+    const tangentX = dx / length
+    const tangentY = dy / length
+    let normalX = dy / length
+    let normalY = -dx / length
+    const midpointX = (start.x + end.x) / 2
+    const midpointY = (start.y + end.y) / 2
+    if (normalX * (midpointX - center.x) + normalY * (midpointY - center.y) < 0) {
+      normalX *= -1
+      normalY *= -1
+    }
+
+    // Overlap the segments beneath the flap so adjacent edges meet softly.
+    const cap = Math.min(stripWidth * 0.65, length * 0.2)
+    const originX = start.x - tangentX * cap
+    const originY = start.y - tangentY * cap
+    return {
+      ...style,
+      width: `${stripWidth}px`,
+      height: `${length + cap * 2}px`,
+      transform: `matrix(${normalX}, ${normalY}, ${tangentX}, ${tangentY}, ${originX}, ${originY})`,
+      background: `linear-gradient(to right, rgba(0, 0, 0, ${alpha}), rgba(0, 0, 0, 0))`,
+      borderRadius: `${stripWidth * 0.55}px`,
+    }
+  })
 }
 
 export function safeCreaseEdgeStyle(
@@ -180,6 +216,7 @@ export function renderSafeCurlShadow(
       clipPath,
       WebkitClipPath: styleValue(shadowStyle, 'WebkitClipPath', clipPath),
       background: styleValue(shadowStyle, 'background', 'transparent'),
+      borderRadius: styleValue(shadowStyle, 'borderRadius', '0'),
       opacity: styleValue(shadowStyle, 'opacity', '0'),
       filter: 'none',
       boxShadow: 'none',

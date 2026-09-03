@@ -15,7 +15,7 @@ import {
   renderSafeCurlEdge,
   renderSafeCurlShadow,
   safeCreaseEdgeStyle,
-  safeCreaseFrontShadowStyle,
+  safeCreaseFrontShadowStyles,
   safeCreaseShadowStyle,
 } from './paged-reader-safe-curl-primitives'
 
@@ -373,12 +373,12 @@ export function installDirectWideStability(): void {
         safeCreaseShadowStyle(this, curl),
         'direct-wide-safe-shadow',
       ),
-      renderSafeCurlShadow(
+      ...safeCreaseFrontShadowStyles(this, curl).map((frontStyle, index) => renderSafeCurlShadow(
         h,
-        safeCreaseFrontShadowStyle(this, curl),
-        'direct-wide-safe-front-shadow',
+        frontStyle,
+        `direct-wide-safe-front-shadow direct-wide-safe-front-shadow-${index}`,
         '4',
-      ),
+      )),
       renderSafeCurlEdge(
         h,
         safeCreaseEdgeStyle(this, curl),
