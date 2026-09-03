@@ -10,6 +10,7 @@ type CurlSheetGeometry = {
   geometry?: {
     seamTop: number
     seamBottom: number
+    backPolygon?: Array<{x: number; y: number}>
   }
   direction?: number
   paperX?: (percent: number) => number
@@ -88,29 +89,32 @@ export function safeCreaseShadowStyle(
 }
 
 /**
- * A softer companion shadow painted onto the still-flat front of the sheet.
- * It uses the opposite crease normal from the under-page shadow, so the folded
- * back remains visually above the artwork it is peeling away from.
+ * A softer cast shadow painted from the folded flap's free edge onto the
+ * still-flat front of the sheet. The flap itself remains above this strip.
  */
 export function safeCreaseFrontShadowStyle(
   sheet: CurlSheetGeometry,
   curl: number,
 ): Record<string, string> {
   const style = safeCreaseShadowStyle(sheet, curl)
-  if (style.transform === undefined || !sheet.geometry || !sheet.pageBounds ||
-    typeof sheet.paperX !== 'function') return style
+  const polygon = sheet.geometry?.backPolygon
+  if (style.transform === undefined || !polygon || polygon.length < 4 ||
+    !sheet.pageBounds || typeof sheet.paperX !== 'function') return style
 
   const top = Number(sheet.pageBounds.top)
-  const bottom = top + Number(sheet.pageBounds.height)
-  const seamTop = sheet.paperX(sheet.geometry.seamTop)
-  const seamBottom = sheet.paperX(sheet.geometry.seamBottom)
-  const dx = seamBottom - seamTop
-  const dy = bottom - top
+  const height = Number(sheet.pageBounds.height)
+  const freeTopX = sheet.paperX(polygon[1].x)
+  const freeTopY = top + height * polygon[1].y / 100
+  const freeBottomX = sheet.paperX(polygon[2].x)
+  const freeBottomY = top + height * polygon[2].y / 100
+  const dx = freeBottomX - freeTopX
+  const dy = freeBottomY - freeTopY
   const length = Math.hypot(dx, dy)
-  if (length <= 0.01) return {opacity: '0'}
+  if (![height, freeTopX, freeTopY, freeBottomX, freeBottomY].every(Number.isFinite) ||
+    height <= 0 || length <= 0.01) return {opacity: '0'}
 
   const arch = Math.sin(clamp01(curl) * Math.PI)
-  const shadowSign = Math.sign(sheet.direction || -1) < 0 ? -1 : 1
+  const shadowSign = Math.sign(sheet.direction || -1)
   const normalX = shadowSign * dy / length
   const normalY = shadowSign * -dx / length
   const tangentX = dx / length
@@ -121,7 +125,8 @@ export function safeCreaseFrontShadowStyle(
   return {
     ...style,
     width: `${stripWidth}px`,
-    transform: `matrix(${normalX}, ${normalY}, ${tangentX}, ${tangentY}, ${seamTop}, ${top})`,
+    height: `${length}px`,
+    transform: `matrix(${normalX}, ${normalY}, ${tangentX}, ${tangentY}, ${freeTopX}, ${freeTopY})`,
     background: `linear-gradient(to right, rgba(0, 0, 0, ${alpha}), rgba(0, 0, 0, 0))`,
   }
 }

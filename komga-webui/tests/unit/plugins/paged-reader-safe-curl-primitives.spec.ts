@@ -8,7 +8,16 @@ function sheet() {
   return {
     pageBoundsReady: true,
     pageBounds: {top: 100, width: 500, height: 800},
-    geometry: {seamTop: 85, seamBottom: 15},
+    geometry: {
+      seamTop: 85,
+      seamBottom: 15,
+      backPolygon: [
+        {x: 85, y: 0},
+        {x: 45, y: 0},
+        {x: 10, y: 100},
+        {x: 15, y: 100},
+      ],
+    },
     direction: -1,
     paperX: (percent: number) => 250 + 500 * percent / 100,
   }
@@ -37,15 +46,15 @@ describe('safe curl primitives', () => {
     expect(edge.opacity).toBe('1')
   })
 
-  it('paints a softer bounded shadow onto the opposite front-page side', () => {
+  it('paints a softer bounded shadow outward from the folded free edge', () => {
     const under = safeCreaseShadowStyle(sheet(), 0.5)
     const front = safeCreaseFrontShadowStyle(sheet(), 0.5)
     const underMatrix = under.transform.match(/matrix\(([^)]+)\)/)![1].split(', ').map(Number)
     const frontMatrix = front.transform.match(/matrix\(([^)]+)\)/)![1].split(', ').map(Number)
 
-    expect(frontMatrix[0]).toBeCloseTo(-underMatrix[0])
-    expect(frontMatrix[1]).toBeCloseTo(-underMatrix[1])
-    expect(frontMatrix.slice(2)).toEqual(underMatrix.slice(2))
+    expect(frontMatrix[0]).toBeLessThan(0)
+    expect(frontMatrix[4]).toBeCloseTo(sheet().paperX(45))
+    expect(frontMatrix[4]).not.toBeCloseTo(underMatrix[4])
     expect(parseFloat(front.width)).toBeLessThan(parseFloat(under.width))
     expect(front.background).toContain('rgba(0, 0, 0, 0.22)')
   })
