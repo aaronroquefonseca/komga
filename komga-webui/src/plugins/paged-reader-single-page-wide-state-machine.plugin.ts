@@ -190,6 +190,32 @@ function measureOwnedBounds(sheet: any, plan: PhysicalSinglePageEdgePlan): void 
   if (typeof sheet.syncTouchGeometry === 'function') sheet.syncTouchGeometry()
 }
 
+/**
+ * A direction change keeps the same wide source image, so none of the paper
+ * sheet's image/prop watchers schedule a new measurement. Re-anchor the already
+ * measured half synchronously: clip/reflection geometry must never render with
+ * the previous virtual half's rectangle.
+ */
+export function anchorWideSourceBounds(
+  sheet: any,
+  plan: Pick<PhysicalSinglePageEdgePlan, 'currentWide' | 'front'>,
+): void {
+  if (!plan.currentWide || !sheet.pageBoundsReady || !sheet.pageBounds) return
+  const side = faceSide(plan.front)
+  if (!side) return
+
+  const width = Number(sheet.pageBounds.width)
+  if (!Number.isFinite(width) || width <= 0) return
+  const spine = rootWidth(sheet) / 2
+  const left = side === 'left' ? spine - width : spine
+  if (Math.abs(Number(sheet.pageBounds.left) - left) <= 0.01) return
+
+  sheet.pageBounds = {
+    ...sheet.pageBounds,
+    left,
+  }
+}
+
 function localCurlProgress(plan: PhysicalSinglePageEdgePlan, progress: number): number {
   const p = clamp01(progress)
   switch (transitionMode(plan)) {
@@ -490,6 +516,8 @@ export function installSinglePageWideStateMachine(): void {
     const reader = this.$parent as any
     const plan = transitionPlan(reader)
     if (!plan) return originalRender.call(this, h) as VNode
+
+    anchorWideSourceBounds(this, plan)
 
     const currentSpread = reader.spreads?.[reader.drag.currentIndex] as PageDtoWithUrl[] | undefined
     const targetSpread = reader.spreads?.[reader.drag.targetIndex] as PageDtoWithUrl[] | undefined
