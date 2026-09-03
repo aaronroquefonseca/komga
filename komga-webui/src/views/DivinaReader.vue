@@ -131,9 +131,13 @@
         :scale="continuousScale"
         :sidePadding="sidePadding"
         :page-margin="pageMargin"
+        :previous-available="!$_.isEmpty(siblingPrevious)"
+        :next-available="!$_.isEmpty(siblingNext)"
         @menu="toggleToolbars()"
         @jump-previous="jumpToPrevious()"
         @jump-next="jumpToNext()"
+        @edge-previous="previousBook()"
+        @edge-next="nextBook()"
       ></continuous-reader>
 
       <paged-reader
