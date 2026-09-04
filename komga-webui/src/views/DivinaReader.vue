@@ -493,6 +493,7 @@ export default Vue.extend({
     if (screenfull.isEnabled) screenfull.on('change', this.fullscreenChanged)
   },
   async mounted() {
+    this.$offline.readerOpened(this.bookId)
     document.documentElement.classList.add('html-reader')
 
     this.$debug('[mounted]', 'route.query:', this.$route.query)
@@ -522,6 +523,7 @@ export default Vue.extend({
     this.setup(this.bookId, Number(this.$route.query.page))
   },
   destroyed() {
+    this.$offline.readerClosed(this.bookId)
     document.documentElement.classList.remove('html-reader')
 
     this.$vuetify.rtl = (this.$t('common.locale_rtl') === 'true')
@@ -539,6 +541,8 @@ export default Vue.extend({
   },
   async beforeRouteUpdate(to, from, next) {
     if (to.params.bookId !== from.params.bookId) {
+      this.$offline.readerOpened(to.params.bookId)
+      this.$offline.readerClosed(from.params.bookId)
       // route update means either:
       // - going to previous/next book, in this case the query.page is not set, so it will default to first page
       // - pressing the back button of the browser and navigating to the previous book, in this case the query.page is set, so we honor it
@@ -892,6 +896,10 @@ export default Vue.extend({
       } as Location)
     },
     closeBook() {
+      if (this.$offline.state.offlineMode || !this.$offline.state.online) {
+        this.$router.push({name: 'offline-downloads'})
+        return
+      }
       this.$router.push(
         {
           name: this.book.oneshot ? 'browse-oneshot' : 'browse-book',

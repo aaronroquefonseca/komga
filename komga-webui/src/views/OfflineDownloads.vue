@@ -27,37 +27,6 @@
       {{ $t('offline.offline_mode_description') }}
     </v-alert>
 
-    <v-alert
-      :type="offlineLaunchReady ? 'success' : 'warning'"
-      text
-      dense
-      class="mt-4"
-    >
-      <div class="font-weight-medium">
-        {{ $t(offlineLaunchReady ? 'offline.offline_launch_ready' : 'offline.offline_launch_not_ready') }}
-      </div>
-      <div class="text-caption mt-1">
-        {{ $t(offlineLaunchReady ? 'offline.offline_launch_ready_description' : 'offline.offline_launch_not_ready_description') }}
-      </div>
-      <div v-if="offlineLaunch.active" class="text-caption mt-1">
-        {{ $t('offline.offline_worker_details', {
-          version: offlineLaunch.version || 'unknown',
-          controlled: offlineLaunch.controlled ? 'yes' : 'no'
-        }) }}
-      </div>
-      <v-btn
-        v-if="!offlineLaunchReady && $offline.state.online"
-        small
-        text
-        class="mt-2"
-        :loading="preparingLaunch"
-        @click="prepareOfflineLaunch"
-      >
-        <v-icon left small>mdi-cloud-download-outline</v-icon>
-        {{ $t('offline.prepare_offline_launch') }}
-      </v-btn>
-    </v-alert>
-
     <v-card outlined class="my-4">
       <v-card-text>
         <div class="d-flex align-center mb-2">
@@ -92,14 +61,31 @@
       </v-card-text>
     </v-card>
 
-    <v-row v-if="downloads.length > 0">
-      <v-col
-        v-for="download in downloads"
-        :key="download.bookId"
-        cols="12"
-        md="6"
-        xl="4"
-      >
+    <v-card outlined class="my-4">
+      <v-card-title class="text-subtitle-1">{{ $t('offline.download_settings') }}</v-card-title>
+      <v-card-text>
+        <v-row dense>
+          <v-col cols="12" sm="6"><v-select :value="$offline.state.preferences.concurrentBooks" :items="[1, 2, 3, 4, 6]" :label="$t('offline.parallel_books')" hide-details @change="setPreference('concurrentBooks', $event)"/></v-col>
+          <v-col cols="12" sm="6"><v-select :value="$offline.state.preferences.concurrentPages" :items="[1, 2, 3, 4]" :label="$t('offline.parallel_pages')" hide-details @change="setPreference('concurrentPages', $event)"/></v-col>
+        </v-row>
+        <v-switch :input-value="notificationsEnabled" :label="$t('offline.progress_notifications')" :hint="notificationHint" persistent-hint @change="toggleNotifications"/>
+        <v-switch :input-value="$offline.state.preferences.removeRead" :label="$t('offline.remove_read_automatically')" hide-details @change="setPreference('removeRead', $event)"/>
+        <v-switch :input-value="$offline.state.preferences.autoDownloadNext" :label="$t('offline.auto_download_next')" :hint="$t('offline.smart_download_hint')" persistent-hint @change="setPreference('autoDownloadNext', $event)"/>
+      </v-card-text>
+    </v-card>
+
+    <v-expansion-panels v-if="downloads.length > 0" multiple accordion>
+      <v-expansion-panel v-for="group in downloadGroups" :key="group.seriesId">
+        <v-expansion-panel-header>
+          <div class="d-flex align-center flex-grow-1 me-3">
+            <div><div class="font-weight-medium">{{ group.title }}</div><div class="text-caption text--secondary">{{ $t('offline.series_download_summary', {downloaded: group.downloaded, total: group.downloads.length, bytes: formatBytes(group.bytes)}) }}</div></div>
+            <v-spacer/>
+            <v-btn v-if="group.failed" small text color="warning" :title="$t('offline.retry_series_failed', {count: group.failed})" @click.stop="retryGroupFailures(group)"><v-icon left>mdi-refresh</v-icon>{{ group.failed }}</v-btn>
+            <v-btn icon small :title="$t('offline.remove_series_downloads')" @click.stop="requestRemoveGroup(group)"><v-icon>mdi-delete-sweep</v-icon></v-btn>
+          </div>
+        </v-expansion-panel-header>
+        <v-expansion-panel-content><v-row>
+      <v-col v-for="download in group.downloads" :key="download.bookId" cols="12" md="6" xl="4">
         <v-card outlined class="fill-height">
           <div class="d-flex pa-3">
             <v-img
@@ -172,8 +158,13 @@
                 >{{ $t('offline.update_failed_kept') }}: {{ download.error }}</v-alert>
               </template>
 
+              <v-chip v-else-if="download.status === 'queued' || download.status === 'paused'" small outlined class="mt-3">
+                <v-icon left small>{{ download.status === 'paused' ? 'mdi-pause-circle' : 'mdi-clock-outline' }}</v-icon>
+                {{ $t(`offline.${download.status}`) }}
+              </v-chip>
+
               <v-alert
-                v-else
+                v-else-if="download.status === 'error'"
                 type="error"
                 dense
                 text
@@ -203,6 +194,17 @@
               {{ $t('offline.update_copy') }}
             </v-btn>
             <v-btn
+              v-if="['queued', 'downloading', 'updating'].includes(download.status)"
+              text
+              @click="pause(download.bookId)"
+            ><v-icon left>mdi-pause</v-icon>{{ $t('offline.pause_download') }}</v-btn>
+            <v-btn
+              v-if="download.status === 'paused'"
+              text
+              :disabled="!$offline.state.online || $offline.state.offlineMode"
+              @click="resume(download.bookId)"
+            ><v-icon left>mdi-play</v-icon>{{ $t('offline.resume_download') }}</v-btn>
+            <v-btn
               v-if="download.status === 'error'"
               text
               :disabled="!$offline.state.online || $offline.state.offlineMode"
@@ -215,21 +217,30 @@
             <v-btn
               icon
               :title="$t('offline.remove_download')"
-              :disabled="download.status === 'downloading' || download.status === 'updating'"
-              @click="remove(download.bookId)"
+              @click="requestRemove(download)"
             >
               <v-icon>mdi-delete</v-icon>
             </v-btn>
           </v-card-actions>
         </v-card>
       </v-col>
-    </v-row>
+        </v-row></v-expansion-panel-content>
+      </v-expansion-panel>
+    </v-expansion-panels>
 
     <v-card v-else outlined class="pa-8 text-center">
       <v-icon size="56" class="mb-3">mdi-download-off-outline</v-icon>
       <div class="text-h6">{{ $t('offline.no_downloads') }}</div>
       <div class="text-body-2 text--secondary mt-1">{{ $t('offline.no_downloads_description') }}</div>
     </v-card>
+    <confirmation-dialog
+      v-model="confirmingRemoval"
+      :title="$t('offline.confirm_remove_title')"
+      :body="removalText"
+      :button-confirm="$t('offline.confirm_remove_button')"
+      button-confirm-color="error"
+      @confirm="confirmRemove"
+    />
   </v-container>
 </template>
 
@@ -238,38 +249,55 @@ import Vue from 'vue'
 import {OfflineDownloadRecord} from '@/services/offline-library.service'
 import {bookThumbnailUrl} from '@/functions/urls'
 import {getBookReadRouteFromMedia} from '@/functions/book-format'
+import ConfirmationDialog from '@/components/dialogs/ConfirmationDialog.vue'
 
-interface OfflineLaunchState {
-  supported: boolean
-  registered: boolean
-  active: boolean
-  controlled: boolean
-  shellReady: boolean
-  version: string
+interface DownloadGroup {
+  seriesId: string
+  title: string
+  downloads: OfflineDownloadRecord[]
+  downloaded: number
+  failed: number
+  bytes: number
 }
 
 export default Vue.extend({
   name: 'OfflineDownloads',
+  components: {ConfirmationDialog},
   data: () => ({
     changingMode: false,
-    preparingLaunch: false,
+    notificationPermission: 'Notification' in window ? Notification.permission : 'unsupported',
+    confirmingRemoval: false,
+    pendingRemoval: [] as OfflineDownloadRecord[],
     storage: {usage: 0, quota: 0},
-    offlineLaunch: {
-      supported: 'serviceWorker' in navigator,
-      registered: false,
-      active: false,
-      controlled: false,
-      shellReady: false,
-      version: '',
-    } as OfflineLaunchState,
   }),
   computed: {
+    notificationsEnabled(): boolean {
+      return this.$offline.state.preferences.notifyWhenComplete && this.notificationPermission === 'granted'
+    },
+    notificationHint(): string {
+      if (this.notificationPermission === 'unsupported') return this.$t('offline.notification_unsupported').toString()
+      if (this.notificationPermission === 'denied') return this.$t('offline.notification_denied').toString()
+      return this.$t(this.notificationPermission === 'granted' ? 'offline.notification_enabled' : 'offline.notification_enable_hint').toString()
+    },
     downloads(): OfflineDownloadRecord[] {
       return this.$offline.state.downloads
     },
-    offlineLaunchReady(): boolean {
-      return this.offlineLaunch.supported && this.offlineLaunch.registered &&
-        this.offlineLaunch.active && this.offlineLaunch.shellReady
+    downloadGroups(): DownloadGroup[] {
+      const grouped = new Map<string, OfflineDownloadRecord[]>()
+      this.downloads.forEach(item => grouped.set(item.book.seriesId, [...(grouped.get(item.book.seriesId) || []), item]))
+      return Array.from(grouped.entries()).map(([seriesId, downloads]) => ({
+        seriesId,
+        title: downloads[0].book.seriesTitle,
+        downloads: downloads.sort((a, b) => (a.book.metadata.numberSort || 0) - (b.book.metadata.numberSort || 0)),
+        downloaded: downloads.filter(item => item.status === 'downloaded').length,
+        failed: downloads.filter(item => item.status === 'error' || !!item.error).length,
+        bytes: downloads.reduce((sum, item) => sum + item.bytes, 0),
+      }))
+    },
+    removalText(): string {
+      if (this.pendingRemoval.length === 0) return ''
+      if (this.pendingRemoval.length === 1) return this.$t('offline.confirm_remove_book', {title: this.pendingRemoval[0].book.metadata.title}).toString()
+      return this.$t('offline.confirm_remove_series', {title: this.pendingRemoval[0].book.seriesTitle, count: this.pendingRemoval.length}).toString()
     },
     storagePercent(): number {
       if (!this.storage.quota) return 0
@@ -286,8 +314,6 @@ export default Vue.extend({
   async created() {
     await this.$offline.whenReady()
     await this.refreshStorage()
-    if (this.$offline.state.online) await this.prepareOfflineLaunch()
-    else await this.refreshOfflineLaunchStatus()
   },
   methods: {
     thumbnail(bookId: string): string {
@@ -300,90 +326,6 @@ export default Vue.extend({
       const value = bytes / Math.pow(1024, index)
       return `${value >= 10 || index === 0 ? value.toFixed(0) : value.toFixed(1)} ${units[index]}`
     },
-    shellAssets(): string[] {
-      const assets = new Set<string>()
-      document.querySelectorAll<HTMLScriptElement>('script[src]').forEach(element => assets.add(element.src))
-      document.querySelectorAll<HTMLLinkElement>('link[href]').forEach(element => {
-        const rel = element.rel.toLocaleLowerCase()
-        if (['stylesheet', 'icon', 'apple-touch-icon', 'manifest', 'preload', 'modulepreload'].includes(rel)) {
-          assets.add(element.href)
-        }
-      })
-      return Array.from(assets)
-    },
-    workerStatus(worker: ServiceWorker): Promise<any> {
-      return new Promise(resolve => {
-        const channel = new MessageChannel()
-        const timer = window.setTimeout(() => resolve(undefined), 1500)
-        channel.port1.onmessage = event => {
-          window.clearTimeout(timer)
-          resolve(event.data)
-        }
-        worker.postMessage({type: 'KOMGA_OFFLINE_STATUS'}, [channel.port2])
-      })
-    },
-    waitForServiceWorkerReady(timeoutMs: number = 6000): Promise<ServiceWorkerRegistration | undefined> {
-      return new Promise(resolve => {
-        let settled = false
-        const finish = (registration?: ServiceWorkerRegistration) => {
-          if (settled) return
-          settled = true
-          window.clearTimeout(timer)
-          resolve(registration)
-        }
-        const timer = window.setTimeout(() => finish(undefined), timeoutMs)
-        navigator.serviceWorker.ready.then(registration => finish(registration), () => finish(undefined))
-      })
-    },
-    async refreshOfflineLaunchStatus() {
-      if (!('serviceWorker' in navigator)) {
-        this.offlineLaunch = {...this.offlineLaunch, supported: false}
-        return
-      }
-
-      const registration = await navigator.serviceWorker.getRegistration()
-      const active = registration?.active
-      let status: any
-      if (active) status = await this.workerStatus(active)
-      this.offlineLaunch = {
-        supported: true,
-        registered: !!registration,
-        active: !!active,
-        controlled: !!navigator.serviceWorker.controller,
-        shellReady: status?.shellReady === true,
-        version: status?.version || '',
-      }
-    },
-    async prepareOfflineLaunch() {
-      if (!('serviceWorker' in navigator) || !this.$offline.state.online) {
-        await this.refreshOfflineLaunchStatus()
-        return
-      }
-      this.preparingLaunch = true
-      try {
-        let registration = await navigator.serviceWorker.getRegistration()
-        if (!registration?.active) registration = await this.waitForServiceWorkerReady()
-        if (registration) {
-          try {
-            await registration.update()
-          } catch (_) {
-            // The currently active worker can still prepare the shell.
-          }
-        }
-        const worker = registration?.active
-        if (worker) {
-          worker.postMessage({
-            type: 'KOMGA_PREPARE_OFFLINE_SHELL',
-            pageUrl: window.location.href,
-            assets: this.shellAssets(),
-          })
-          await new Promise(resolve => window.setTimeout(resolve, 800))
-        }
-        await this.refreshOfflineLaunchStatus()
-      } finally {
-        this.preparingLaunch = false
-      }
-    },
     async refreshStorage() {
       this.storage = await this.$offline.storageEstimate()
     },
@@ -395,13 +337,45 @@ export default Vue.extend({
         this.changingMode = false
       }
     },
-    async remove(bookId: string) {
-      await this.$offline.removeDownload(bookId)
+    requestRemove(download: OfflineDownloadRecord) {
+      this.pendingRemoval = [download]
+      this.confirmingRemoval = true
+    },
+    requestRemoveGroup(group: DownloadGroup) {
+      this.pendingRemoval = [...group.downloads]
+      this.confirmingRemoval = true
+    },
+    async confirmRemove() {
+      const removals = [...this.pendingRemoval]
+      this.pendingRemoval = []
+      await Promise.all(removals.map(item => this.$offline.removeDownload(item.bookId)))
       await this.refreshStorage()
     },
     async retry(bookId: string) {
       await this.$offline.downloadBook(bookId)
       await this.refreshStorage()
+    },
+    async retryGroupFailures(group: DownloadGroup) {
+      const failed = group.downloads.filter(item => item.status === 'error' || !!item.error).map(item => item.book)
+      await this.$offline.downloadBooks(failed, group.seriesId)
+      await this.refreshStorage()
+    },
+    async pause(bookId: string) {
+      await this.$offline.pauseDownload(bookId)
+    },
+    async resume(bookId: string) {
+      await this.$offline.resumeDownload(bookId)
+    },
+    async setPreference(key: string, value: any) {
+      await this.$offline.setDownloadPreferences({[key]: value})
+    },
+    async toggleNotifications(enabled: boolean) {
+      if (enabled) {
+        if (!('Notification' in window)) enabled = false
+        else if (Notification.permission !== 'granted') enabled = (await Notification.requestPermission()) === 'granted'
+      }
+      await this.setPreference('notifyWhenComplete', enabled)
+      this.notificationPermission = 'Notification' in window ? Notification.permission : 'unsupported'
     },
     read(download: OfflineDownloadRecord) {
       this.$router.push({

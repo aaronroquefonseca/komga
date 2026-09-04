@@ -194,18 +194,15 @@ export default Vue.extend({
 
         if (!(await this.browserQuotaAllows(this.requiredSeriesBytes(books.content)))) return
 
-        for (const book of books.content) {
+        const pending = books.content.filter(book => {
           const existing = this.$offline.getDownload(book.id)
-          if (this.$offline.isDownloaded(book.id) && !existing?.updateAvailable) continue
-          try {
-            await this.$offline.downloadBook(book.id)
-          } catch (e) {
-            if (this.isStorageFullError(e)) {
-              this.$eventHub.$emit(ERROR, {message: this.$t('offline.device_storage_full').toString()})
-              break
-            }
-            this.$warn(`Offline download failed for ${book.id}`, e)
-          }
+          return !this.$offline.isDownloaded(book.id) || !!existing?.updateAvailable
+        })
+        try {
+          await this.$offline.downloadBooks(pending, this.series.id)
+        } catch (e) {
+          if (this.isStorageFullError(e)) this.$eventHub.$emit(ERROR, {message: this.$t('offline.device_storage_full').toString()})
+          else this.$warn(`Offline series download failed for ${this.series.id}`, e)
         }
       } finally {
         this.seriesDownloading = false
