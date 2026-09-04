@@ -422,6 +422,7 @@ export default Vue.extend({
       showSettings: false,
       showHelp: false,
       goToPage: 1,
+      setupRevision: 0,
       settings: {
         pageLayout: PagedReaderLayout.SINGLE_PAGE,
         pagedTransition: PagedReaderTransition.DEFAULT,
@@ -521,7 +522,7 @@ export default Vue.extend({
     this.pageMargin = webreader.continuous.margin
     this.backgroundColor = webreader.background
 
-    this.setup(this.bookId, Number(this.$route.query.page))
+    this.setup(this.bookId, Number(this.$route.query.page), this.$route.query.position as string | undefined)
   },
   destroyed() {
     this.$offline.readerClosed(this.bookId)
@@ -548,7 +549,7 @@ export default Vue.extend({
       // - going to previous/next book, in this case the query.page is not set, so it will default to first page
       // - pressing the back button of the browser and navigating to the previous book, in this case the query.page is set, so we honor it
       this.$debug('[beforeRouteUpdate]', 'to.query:', to.query)
-      this.setup(to.params.bookId, Number(to.query.page))
+      this.setup(to.params.bookId, Number(to.query.page), to.query.position as string | undefined)
     }
     next()
   },
@@ -764,10 +765,15 @@ export default Vue.extend({
       if (e.ctrlKey || e.altKey || e.shiftKey || e.metaKey) return
       this.shortcuts[e.key]?.execute(this)
     },
-    async setup(bookId: string, page?: number) {
+    async setup(bookId: string, page?: number, position?: string) {
+      const revision = ++this.setupRevision
       this.$debug('[setup]', `bookId:${bookId}`, `page:${page}`)
-      this.book = await this.$komgaBooks.getBook(bookId)
-      this.series = await this.$komgaSeries.getOneSeries(this.book.seriesId)
+      const book = await this.$komgaBooks.getBook(bookId)
+      if (revision !== this.setupRevision) return
+      const series = await this.$komgaSeries.getOneSeries(book.seriesId)
+      if (revision !== this.setupRevision) return
+      this.book = book
+      this.series = series
 
       // parse query params to get context and contextId
       if (this.$route.query.contextId && this.$route.query.context
@@ -781,6 +787,7 @@ export default Vue.extend({
 
       if (this?.context.origin === ContextOrigin.READLIST) {
         this.contextName = (await (this.$komgaReadLists.getOneReadList(this.context.id))).name
+        if (revision !== this.setupRevision) return
         document.title = `Komga - ${this.contextName} - ${this.book.metadata.title}`
       } else {
         document.title = `Komga - ${this.bookTitle}`
@@ -790,11 +797,16 @@ export default Vue.extend({
       this.incognito = !!(this.$route.query.incognito && this.$route.query.incognito.toString().toLowerCase() === 'true')
 
       const pageDtos = (await this.$komgaBooks.getBookPages(bookId))
+      if (revision !== this.setupRevision) return
       pageDtos.forEach((p: any) => p['url'] = this.getPageUrl(p, bookId))
       this.pages = pageDtos as PageDtoWithUrl[]
 
       this.$debug('[setup]', `pages count:${this.pagesCount}`, 'read progress:', this.book.readProgress)
-      if (page && page >= 1 && page <= this.pagesCount) {
+      if (position === 'end') {
+        this.goTo(this.pages[this.pages.length - 1]?.number || this.pagesCount, bookId)
+      } else if (position === 'start') {
+        this.goTo(this.pages[0]?.number || 1, bookId)
+      } else if (page && page >= 1 && page <= this.pagesCount) {
         this.goTo(page, bookId)
       } else if (this.book.readProgress?.completed === false) {
         this.goTo(this.book.readProgress?.page!!, bookId)
@@ -813,21 +825,25 @@ export default Vue.extend({
 
       try {
         if (this?.context.origin === ContextOrigin.READLIST) {
-          this.siblingNext = await this.$komgaReadLists.getBookSiblingNext(this.context.id, bookId)
+          const sibling = await this.$komgaReadLists.getBookSiblingNext(this.context.id, bookId)
+          if (revision === this.setupRevision) this.siblingNext = sibling
         } else {
-          this.siblingNext = await this.$komgaBooks.getBookSiblingNext(bookId)
+          const sibling = await this.$komgaBooks.getBookSiblingNext(bookId)
+          if (revision === this.setupRevision) this.siblingNext = sibling
         }
       } catch (e) {
-        this.siblingNext = {} as BookDto
+        if (revision === this.setupRevision) this.siblingNext = {} as BookDto
       }
       try {
         if (this?.context.origin === ContextOrigin.READLIST) {
-          this.siblingPrevious = await this.$komgaReadLists.getBookSiblingPrevious(this.context.id, bookId)
+          const sibling = await this.$komgaReadLists.getBookSiblingPrevious(this.context.id, bookId)
+          if (revision === this.setupRevision) this.siblingPrevious = sibling
         } else {
-          this.siblingPrevious = await this.$komgaBooks.getBookSiblingPrevious(bookId)
+          const sibling = await this.$komgaBooks.getBookSiblingPrevious(bookId)
+          if (revision === this.setupRevision) this.siblingPrevious = sibling
         }
       } catch (e) {
-        this.siblingPrevious = {} as BookDto
+        if (revision === this.setupRevision) this.siblingPrevious = {} as BookDto
       }
     },
     getPageUrl(page: PageDto, bookId: string = this.bookId): string {
@@ -857,7 +873,7 @@ export default Vue.extend({
         this.$router.push({
           name: getBookReadRouteFromMedia(this.siblingPrevious.media),
           params: {bookId: this.siblingPrevious.id.toString()},
-          query: {page: this.siblingPrevious.media.pagesCount.toString(), context: this.context.origin, contextId: this.context.id, incognito: this.incognito.toString()},
+          query: {position: 'end', context: this.context.origin, contextId: this.context.id, incognito: this.incognito.toString()},
         })
       }
     },
@@ -872,7 +888,7 @@ export default Vue.extend({
         this.$router.push({
           name: getBookReadRouteFromMedia(this.siblingNext.media),
           params: {bookId: this.siblingNext.id.toString()},
-          query: {page: '1', context: this.context.origin, contextId: this.context.id, incognito: this.incognito.toString()},
+          query: {position: 'start', context: this.context.origin, contextId: this.context.id, incognito: this.incognito.toString()},
         })
       }
     },
