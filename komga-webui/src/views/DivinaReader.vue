@@ -134,6 +134,7 @@
         :page-margin="pageMargin"
         :previous-available="!$_.isEmpty(siblingPrevious)"
         :next-available="!$_.isEmpty(siblingNext)"
+        :navigation-locked="readerTransitioning"
         @menu="toggleToolbars()"
         @jump-previous="jumpToPrevious()"
         @jump-next="jumpToNext()"
@@ -423,6 +424,7 @@ export default Vue.extend({
       showHelp: false,
       goToPage: 1,
       setupRevision: 0,
+      readerTransitioning: false,
       settings: {
         pageLayout: PagedReaderLayout.SINGLE_PAGE,
         pagedTransition: PagedReaderTransition.DEFAULT,
@@ -799,20 +801,28 @@ export default Vue.extend({
       const pageDtos = (await this.$komgaBooks.getBookPages(bookId))
       if (revision !== this.setupRevision) return
       pageDtos.forEach((p: any) => p['url'] = this.getPageUrl(p, bookId))
-      this.pages = pageDtos as PageDtoWithUrl[]
+      const pages = pageDtos as PageDtoWithUrl[]
+      const pagesCount = pages.length
+      let targetPage: number
+      if (position === 'end') {
+        targetPage = pages[pages.length - 1]?.number || pagesCount
+      } else if (position === 'start') {
+        targetPage = pages[0]?.number || 1
+      } else if (page && page >= 1 && page <= pagesCount) {
+        targetPage = page
+      } else if (this.book.readProgress?.completed === false) {
+        targetPage = this.book.readProgress?.page!!
+      } else {
+        targetPage = 1
+      }
+      // Publish the target before the pages. ContinuousReader then positions the
+      // new page set before it starts accepting intersections or touch input.
+      this.page = targetPage
+      this.pages = pages
+      this.readerTransitioning = false
+      this.markProgress(targetPage, bookId)
 
       this.$debug('[setup]', `pages count:${this.pagesCount}`, 'read progress:', this.book.readProgress)
-      if (position === 'end') {
-        this.goTo(this.pages[this.pages.length - 1]?.number || this.pagesCount, bookId)
-      } else if (position === 'start') {
-        this.goTo(this.pages[0]?.number || 1, bookId)
-      } else if (page && page >= 1 && page <= this.pagesCount) {
-        this.goTo(page, bookId)
-      } else if (this.book.readProgress?.completed === false) {
-        this.goTo(this.book.readProgress?.page!!, bookId)
-      } else {
-        this.goTo(1, bookId)
-      }
 
       // set non-persistent reading direction if exists in metadata
       if (this.series.metadata.readingDirection in ReadingDirection && this.readingDirection !== this.series.metadata.readingDirection) {
@@ -868,16 +878,21 @@ export default Vue.extend({
       }
     },
     previousBook() {
-      if (!this.$_.isEmpty(this.siblingPrevious)) {
+      if (!this.readerTransitioning && !this.$_.isEmpty(this.siblingPrevious)) {
         this.jumpToPreviousBook = false
+        this.readerTransitioning = true
+        this.pages = []
         this.$router.push({
           name: getBookReadRouteFromMedia(this.siblingPrevious.media),
           params: {bookId: this.siblingPrevious.id.toString()},
           query: {position: 'end', context: this.context.origin, contextId: this.context.id, incognito: this.incognito.toString()},
+        }).catch(() => {
+          this.readerTransitioning = false
         })
       }
     },
     async nextBook(fromBottomEdge: boolean = false) {
+      if (this.readerTransitioning) return
       if (fromBottomEdge === true && !this.incognito) {
         await this.$komgaBooks.updateReadProgress(this.bookId, {page: this.pagesCount, completed: true})
       }
@@ -885,10 +900,14 @@ export default Vue.extend({
         this.closeBook()
       } else {
         this.jumpToNextBook = false
+        this.readerTransitioning = true
+        this.pages = []
         this.$router.push({
           name: getBookReadRouteFromMedia(this.siblingNext.media),
           params: {bookId: this.siblingNext.id.toString()},
           query: {position: 'start', context: this.context.origin, contextId: this.context.id, incognito: this.incognito.toString()},
+        }).catch(() => {
+          this.readerTransitioning = false
         })
       }
     },
