@@ -271,7 +271,7 @@ export default Vue.extend({
       if (!this.pullTracking) return
       const direction = this.pullDirection
       const trigger = this.pullArmed && direction !== null
-      this.resetPull()
+      this.resetPull(trigger)
       if (trigger) {
         this.vibrate([18, 30, 24])
         this.$emit(direction === 'previous' ? 'edge-previous' : 'edge-next')
@@ -280,13 +280,18 @@ export default Vue.extend({
     pullCancel() {
       if (this.pullTracking) this.resetPull()
     },
-    resetPull() {
+    resetPull(navigating: boolean = false) {
       const wasNext = this.pullDirection === 'next'
       this.cancelPullHold(false)
       this.pullTracking = false
       this.pullArmed = false
       this.pullSettling = true
       this.pullDistance = 0
+      if (navigating) {
+        this.pullDirection = null
+        this.pullSettling = false
+        return
+      }
       window.setTimeout(() => {
         this.pullDirection = null
         this.pullSettling = false

@@ -111,7 +111,7 @@
                     {{ pagesCount }}
                   </v-label>
                   <v-icon @click="goToLast" class="mx-1">mdi-skip-next</v-icon>
-                  <v-icon @click="nextBook" class="">mdi-redo</v-icon>
+                  <v-icon @click="nextBook()" class="">mdi-redo</v-icon>
                 </template>
               </v-slider>
             </v-col>
@@ -124,6 +124,7 @@
     <div class="full-height">
       <continuous-reader
         v-if="continuousReader"
+        :key="bookId"
         :pages="pages"
         :page.sync="page"
         :smooth-scroll="webtoonSmoothScroll"
@@ -137,7 +138,7 @@
         @jump-previous="jumpToPrevious()"
         @jump-next="jumpToNext()"
         @edge-previous="previousBook()"
-        @edge-next="nextBook()"
+        @edge-next="nextBook(true)"
       ></continuous-reader>
 
       <paged-reader
@@ -555,7 +556,7 @@ export default Vue.extend({
     page: {
       handler(val, old) {
         if (val) {
-          this.markProgress(val)
+          this.markProgress(val, this.bookId)
           this.goToPage = val
           this.updateRoute()
         }
@@ -789,16 +790,16 @@ export default Vue.extend({
       this.incognito = !!(this.$route.query.incognito && this.$route.query.incognito.toString().toLowerCase() === 'true')
 
       const pageDtos = (await this.$komgaBooks.getBookPages(bookId))
-      pageDtos.forEach((p: any) => p['url'] = this.getPageUrl(p))
+      pageDtos.forEach((p: any) => p['url'] = this.getPageUrl(p, bookId))
       this.pages = pageDtos as PageDtoWithUrl[]
 
       this.$debug('[setup]', `pages count:${this.pagesCount}`, 'read progress:', this.book.readProgress)
       if (page && page >= 1 && page <= this.pagesCount) {
-        this.goTo(page)
+        this.goTo(page, bookId)
       } else if (this.book.readProgress?.completed === false) {
-        this.goTo(this.book.readProgress?.page!!)
+        this.goTo(this.book.readProgress?.page!!, bookId)
       } else {
-        this.goToFirst()
+        this.goTo(1, bookId)
       }
 
       // set non-persistent reading direction if exists in metadata
@@ -829,11 +830,11 @@ export default Vue.extend({
         this.siblingPrevious = {} as BookDto
       }
     },
-    getPageUrl(page: PageDto): string {
+    getPageUrl(page: PageDto, bookId: string = this.bookId): string {
       if (!this.supportedMediaTypes.includes(page.mediaType)) {
-        return bookPageUrl(this.bookId, page.number, this.convertTo)
+        return bookPageUrl(bookId, page.number, this.convertTo)
       } else {
-        return bookPageUrl(this.bookId, page.number)
+        return bookPageUrl(bookId, page.number)
       }
     },
     jumpToPrevious() {
@@ -856,11 +857,14 @@ export default Vue.extend({
         this.$router.push({
           name: getBookReadRouteFromMedia(this.siblingPrevious.media),
           params: {bookId: this.siblingPrevious.id.toString()},
-          query: {context: this.context.origin, contextId: this.context.id, incognito: this.incognito.toString()},
+          query: {page: this.siblingPrevious.media.pagesCount.toString(), context: this.context.origin, contextId: this.context.id, incognito: this.incognito.toString()},
         })
       }
     },
-    nextBook() {
+    async nextBook(fromBottomEdge: boolean = false) {
+      if (fromBottomEdge === true && !this.incognito) {
+        await this.$komgaBooks.updateReadProgress(this.bookId, {page: this.pagesCount, completed: true})
+      }
       if (this.$_.isEmpty(this.siblingNext)) {
         this.closeBook()
       } else {
@@ -868,14 +872,14 @@ export default Vue.extend({
         this.$router.push({
           name: getBookReadRouteFromMedia(this.siblingNext.media),
           params: {bookId: this.siblingNext.id.toString()},
-          query: {context: this.context.origin, contextId: this.context.id, incognito: this.incognito.toString()},
+          query: {page: '1', context: this.context.origin, contextId: this.context.id, incognito: this.incognito.toString()},
         })
       }
     },
-    goTo(page: number) {
+    goTo(page: number, bookId: string = this.bookId) {
       this.$debug('[goTo]', `page:${page}`)
       this.page = page
-      this.markProgress(page)
+      this.markProgress(page, bookId)
     },
     goToFirst() {
       this.goTo(1)
@@ -987,9 +991,9 @@ export default Vue.extend({
       this.notification.message = message
       this.notification.enabled = true
     },
-    markProgress: debounce(function (this: any, page: number) {
+    markProgress: debounce(function (this: any, page: number, bookId: string) {
       if (!this.incognito) {
-        this.$komgaBooks.updateReadProgress(this.bookId, {page: page})
+        this.$komgaBooks.updateReadProgress(bookId, {page: page})
       }
     }, 50),
     downloadCurrentPage() {
