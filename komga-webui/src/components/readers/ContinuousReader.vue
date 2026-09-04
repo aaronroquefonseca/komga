@@ -25,6 +25,8 @@
            :width="calcWidth(page)"
            :id="`page${page.number}`"
            :style="`margin: ${i === 0 ? 0 : pageMargin}px auto;`"
+           @load="pageImageSettled(page.number)"
+           @error="pageImageSettled(page.number)"
            v-intersect="onIntersect"
       />
       <div class="edge-pull" :style="pullIndicatorStyle('next')" aria-live="polite">
@@ -86,6 +88,7 @@ export default Vue.extend({
       pullHoldDuration: 650,
       positioning: true,
       positionFrame: null as number | null,
+      positionTimeout: null as number | null,
     }
   },
   props: {
@@ -154,7 +157,7 @@ export default Vue.extend({
   },
   destroyed() {
     this.cancelPullTimer()
-    if (this.positionFrame !== null) window.cancelAnimationFrame(this.positionFrame)
+    this.cancelPositioning()
     window.removeEventListener('keydown', this.keyPressed)
   },
   mounted() {
@@ -178,21 +181,53 @@ export default Vue.extend({
   methods: {
     positionAtRequestedPage() {
       this.positioning = true
-      if (this.positionFrame !== null) window.cancelAnimationFrame(this.positionFrame)
+      this.cancelPositioning()
+      // Make the destination and its neighbours eligible for loading before
+      // trying to scroll there. Otherwise a lazy final image can have no
+      // intrinsic height yet and the browser computes the wrong bottom.
+      this.currentPage = this.page
       this.$nextTick(() => {
         this.positionFrame = window.requestAnimationFrame(() => {
           window.scrollTo(0, 0)
           this.$vuetify.goTo(`#page${this.page}`, {duration: 0})
-          // Let image dimensions and the browser's scroll restoration settle
-          // before page intersections are allowed to update progress again.
-          this.positionFrame = window.requestAnimationFrame(() => {
-            this.$vuetify.goTo(`#page${this.page}`, {duration: 0})
-            this.currentPage = this.page
-            this.positioning = false
-            this.positionFrame = null
-          })
+          const target = document.getElementById(`page${this.page}`) as HTMLImageElement | null
+          if (target?.complete) this.finishPositioning()
+          else this.positionTimeout = window.setTimeout(this.finishPositioning, 10000)
         })
       })
+    },
+    pageImageSettled(page: number) {
+      if (!this.positioning) return
+      // Re-pin as nearby images acquire their real dimensions. The requested
+      // image completing is the signal that the destination is ready.
+      this.$vuetify.goTo(`#page${this.page}`, {duration: 0})
+      if (page === this.page) this.finishPositioning()
+    },
+    finishPositioning() {
+      if (!this.positioning) return
+      if (this.positionTimeout !== null) {
+        window.clearTimeout(this.positionTimeout)
+        this.positionTimeout = null
+      }
+      this.positionFrame = window.requestAnimationFrame(() => {
+        this.$vuetify.goTo(`#page${this.page}`, {duration: 0})
+        this.positionFrame = window.requestAnimationFrame(() => {
+          this.$vuetify.goTo(`#page${this.page}`, {duration: 0})
+          this.currentPage = this.page
+          this.positioning = false
+          this.positionFrame = null
+        })
+      })
+    },
+    cancelPositioning() {
+      if (this.positionFrame !== null) {
+        window.cancelAnimationFrame(this.positionFrame)
+        this.positionFrame = null
+      }
+      if (this.positionTimeout !== null) {
+        window.clearTimeout(this.positionTimeout)
+        this.positionTimeout = null
+      }
     },
     pullIndicatorStyle(direction: 'previous' | 'next') {
       const active = this.pullDirection === direction
