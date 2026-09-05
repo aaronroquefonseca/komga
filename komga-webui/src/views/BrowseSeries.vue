@@ -90,7 +90,6 @@
             :item="series"
             thumbnail-only
             no-link
-            :link-to="resumeLocation"
             :fab-to-override="resumeLocation"
             :action-menu="false"
           ></item-card>
