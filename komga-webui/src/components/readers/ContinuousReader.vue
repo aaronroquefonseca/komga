@@ -132,6 +132,10 @@ export default Vue.extend({
       type: Boolean,
       default: false,
     },
+    navigationPosition: {
+      type: String,
+      default: undefined,
+    },
   },
   watch: {
     pages: {
@@ -189,7 +193,7 @@ export default Vue.extend({
       this.$nextTick(() => {
         this.positionFrame = window.requestAnimationFrame(() => {
           window.scrollTo(0, 0)
-          this.$vuetify.goTo(`#page${this.page}`, {duration: 0})
+          this.goToRequestedPosition()
           const target = document.getElementById(`page${this.page}`) as HTMLImageElement | null
           if (target?.complete) this.finishPositioning()
           else this.positionTimeout = window.setTimeout(this.finishPositioning, 10000)
@@ -200,7 +204,7 @@ export default Vue.extend({
       if (!this.positioning) return
       // Re-pin as nearby images acquire their real dimensions. The requested
       // image completing is the signal that the destination is ready.
-      this.$vuetify.goTo(`#page${this.page}`, {duration: 0})
+      this.goToRequestedPosition()
       if (page === this.page) this.finishPositioning()
     },
     finishPositioning() {
@@ -210,14 +214,22 @@ export default Vue.extend({
         this.positionTimeout = null
       }
       this.positionFrame = window.requestAnimationFrame(() => {
-        this.$vuetify.goTo(`#page${this.page}`, {duration: 0})
+        this.goToRequestedPosition()
         this.positionFrame = window.requestAnimationFrame(() => {
-          this.$vuetify.goTo(`#page${this.page}`, {duration: 0})
+          this.goToRequestedPosition()
           this.currentPage = this.page
           this.positioning = false
           this.positionFrame = null
         })
       })
+    },
+    goToRequestedPosition() {
+      if (this.navigationPosition === 'end') {
+        const root = document.scrollingElement
+        window.scrollTo(0, root?.scrollHeight || document.documentElement.scrollHeight)
+      } else {
+        this.$vuetify.goTo(`#page${this.page}`, {duration: 0})
+      }
     },
     cancelPositioning() {
       if (this.positionFrame !== null) {

@@ -135,6 +135,7 @@
         :previous-available="!$_.isEmpty(siblingPrevious)"
         :next-available="!$_.isEmpty(siblingNext)"
         :navigation-locked="readerTransitioning"
+        :navigation-position="readerNavigationPosition"
         @menu="toggleToolbars()"
         @jump-previous="jumpToPrevious()"
         @jump-next="jumpToNext()"
@@ -425,6 +426,7 @@ export default Vue.extend({
       goToPage: 1,
       setupRevision: 0,
       readerTransitioning: false,
+      readerNavigationPosition: undefined as string | undefined,
       settings: {
         pageLayout: PagedReaderLayout.SINGLE_PAGE,
         pagedTransition: PagedReaderTransition.DEFAULT,
@@ -817,6 +819,7 @@ export default Vue.extend({
       }
       // Publish the target before the pages. ContinuousReader then positions the
       // new page set before it starts accepting intersections or touch input.
+      this.readerNavigationPosition = position
       this.page = targetPage
       this.pages = pages
       this.readerTransitioning = false
