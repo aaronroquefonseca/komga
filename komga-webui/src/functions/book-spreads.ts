@@ -10,10 +10,12 @@ export function buildSpreads(pages: PageDtoWithUrl[], pageLayout: PagedReaderLay
     const spreads = [] as PageDtoWithUrl[][]
     const pagesClone = cloneDeep(pages)
     let lastPages = undefined
+    let firstSourceIsLandscape = false
 
     if (pageLayout === PagedReaderLayout.DOUBLE_PAGES) {
       const firstPage = pagesClone.shift() as PageDtoWithUrl
-      if (isPageLandscape(firstPage))
+      firstSourceIsLandscape = isPageLandscape(firstPage)
+      if (firstSourceIsLandscape)
         spreads.push([firstPage] as PageDtoWithUrl[])
       else
         // The empty side outside the front cover is not a sheet of paper. Keep
@@ -30,6 +32,19 @@ export function buildSpreads(pages: PageDtoWithUrl[], pageLayout: PagedReaderLay
       }
     }
 
+    // Match the single-page physical model: if the first wide source is
+    // misaligned, move its one parity correction to the inside of the cover
+    // (or immediately after page one in the no-cover layout). This lets the
+    // first wide source occupy a real opening without surrounding it with
+    // synthetic pages.
+    if (!firstSourceIsLandscape) {
+      const firstWideIndex = pagesClone.findIndex(isPageLandscape)
+      if (firstWideIndex % 2 === 1) {
+        const correctionAt = pageLayout === PagedReaderLayout.DOUBLE_PAGES ? 0 : 1
+        pagesClone.splice(correctionAt, 0, createPaperBlankPage(pagesClone[0]))
+      }
+    }
+
     // Portrait and synthetic blank faces wait here until they have a physical
     // partner. Landscape sources remain atomic because one source image already
     // represents both visible pages of an open spread.
@@ -42,14 +57,13 @@ export function buildSpreads(pages: PageDtoWithUrl[], pageLayout: PagedReaderLay
         if (pendingFace) {
           // This landscape source would occupy the second face of an ordinary
           // pair, so it is physically misaligned. Finish the preceding spread
-          // with a white blank, render the wide source, then insert a matching
-          // white face after it. The second blank restores the original parity
-          // so this correction cannot shift the rest of the book.
+          // with one white blank, then render the wide source. The correction
+          // permanently changes parity; there is deliberately no blank after
+          // the wide source.
           const blankBefore = createPaperBlankPage(pendingFace)
-          const blankAfter = createPaperBlankPage(pendingFace)
           spreads.push([pendingFace, blankBefore])
           spreads.push([page])
-          pendingFace = blankAfter
+          pendingFace = undefined
         } else {
           // Already aligned: no synthetic faces are necessary around this wide
           // source.
@@ -68,8 +82,7 @@ export function buildSpreads(pages: PageDtoWithUrl[], pageLayout: PagedReaderLay
 
     if (pendingFace) {
       // Preserve the existing book-boundary behavior for an unmatched final
-      // physical face. If this is the blank after a compensated wide scan it is
-      // still kept; only the outside-of-book partner is transparent.
+      // physical face; only the outside-of-book partner is transparent.
       spreads.push([pendingFace, createBoundaryEmptyPage(pendingFace)])
     }
 

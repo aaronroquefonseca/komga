@@ -1,6 +1,7 @@
 <template>
   <div
     class="continuous-reader"
+    :class="{'navigation-locked': navigationLocked || positioning}"
     @touchstart="pullStart"
     @touchmove="pullMove"
     @touchend="pullEnd"
@@ -24,6 +25,8 @@
            :width="calcWidth(page)"
            :id="`page${page.number}`"
            :style="`margin: ${i === 0 ? 0 : pageMargin}px auto;`"
+           @load="pageImageSettled(page.number)"
+           @error="pageImageSettled(page.number)"
            v-intersect="onIntersect"
       />
       <div class="edge-pull" :style="pullIndicatorStyle('next')" aria-live="polite">
@@ -83,6 +86,9 @@ export default Vue.extend({
       pullSettling: false,
       pullThreshold: 82,
       pullHoldDuration: 650,
+      positioning: true,
+      positionFrame: null as number | null,
+      positionTimeout: null as number | null,
     }
   },
   props: {
@@ -122,18 +128,26 @@ export default Vue.extend({
       type: Boolean,
       default: false,
     },
+    navigationLocked: {
+      type: Boolean,
+      default: false,
+    },
+    navigationPosition: {
+      type: String,
+      default: undefined,
+    },
   },
   watch: {
     pages: {
       handler(val) {
         this.seen = new Array(val.length).fill(false)
-        if (this.page === 1) window.scrollTo(0, 0)
+        if (val.length) this.positionAtRequestedPage()
       },
       immediate: true,
     },
     page: {
       handler(val) {
-        if (val != this.currentPage) {
+        if (!this.positioning && val != this.currentPage) {
           this.$vuetify.goTo(`#page${val}`, {
             duration: 0,
           })
@@ -147,14 +161,11 @@ export default Vue.extend({
   },
   destroyed() {
     this.cancelPullTimer()
+    this.cancelPositioning()
     window.removeEventListener('keydown', this.keyPressed)
   },
   mounted() {
-    if (this.page != this.currentPage) {
-      this.$vuetify.goTo(`#page${this.page}`, {
-        duration: 0,
-      })
-    }
+    if (this.pages.length) this.positionAtRequestedPage()
   },
   computed: {
     canPrev(): boolean {
@@ -172,6 +183,64 @@ export default Vue.extend({
     },
   },
   methods: {
+    positionAtRequestedPage() {
+      this.positioning = true
+      this.cancelPositioning()
+      // Make the destination and its neighbours eligible for loading before
+      // trying to scroll there. Otherwise a lazy final image can have no
+      // intrinsic height yet and the browser computes the wrong bottom.
+      this.currentPage = this.page
+      this.$nextTick(() => {
+        this.positionFrame = window.requestAnimationFrame(() => {
+          window.scrollTo(0, 0)
+          this.goToRequestedPosition()
+          const target = document.getElementById(`page${this.page}`) as HTMLImageElement | null
+          if (target?.complete) this.finishPositioning()
+          else this.positionTimeout = window.setTimeout(this.finishPositioning, 10000)
+        })
+      })
+    },
+    pageImageSettled(page: number) {
+      if (!this.positioning) return
+      // Re-pin as nearby images acquire their real dimensions. The requested
+      // image completing is the signal that the destination is ready.
+      this.goToRequestedPosition()
+      if (page === this.page) this.finishPositioning()
+    },
+    finishPositioning() {
+      if (!this.positioning) return
+      if (this.positionTimeout !== null) {
+        window.clearTimeout(this.positionTimeout)
+        this.positionTimeout = null
+      }
+      this.positionFrame = window.requestAnimationFrame(() => {
+        this.goToRequestedPosition()
+        this.positionFrame = window.requestAnimationFrame(() => {
+          this.goToRequestedPosition()
+          this.currentPage = this.page
+          this.positioning = false
+          this.positionFrame = null
+        })
+      })
+    },
+    goToRequestedPosition() {
+      if (this.navigationPosition === 'end') {
+        const root = document.scrollingElement
+        window.scrollTo(0, root?.scrollHeight || document.documentElement.scrollHeight)
+      } else {
+        this.$vuetify.goTo(`#page${this.page}`, {duration: 0})
+      }
+    },
+    cancelPositioning() {
+      if (this.positionFrame !== null) {
+        window.cancelAnimationFrame(this.positionFrame)
+        this.positionFrame = null
+      }
+      if (this.positionTimeout !== null) {
+        window.clearTimeout(this.positionTimeout)
+        this.positionTimeout = null
+      }
+    },
     pullIndicatorStyle(direction: 'previous' | 'next') {
       const active = this.pullDirection === direction
       return {
@@ -215,6 +284,7 @@ export default Vue.extend({
         : 'bookreader.webtoon_pull_next').toString()
     },
     pullStart(e: TouchEvent) {
+      if (this.navigationLocked || this.positioning) return
       if (e.touches.length !== 1 || this.pullSettling) return
       const root = document.scrollingElement
       if (!root) return
@@ -231,6 +301,10 @@ export default Vue.extend({
       this.pullHoldProgress = 0
     },
     pullMove(e: TouchEvent) {
+      if (this.navigationLocked || this.positioning) {
+        e.preventDefault()
+        return
+      }
       if (!this.pullTracking || e.touches.length !== 1) return
       const dx = e.touches[0].clientX - this.pullStartX
       const dy = e.touches[0].clientY - this.pullStartY
@@ -271,7 +345,7 @@ export default Vue.extend({
       if (!this.pullTracking) return
       const direction = this.pullDirection
       const trigger = this.pullArmed && direction !== null
-      this.resetPull()
+      this.resetPull(trigger)
       if (trigger) {
         this.vibrate([18, 30, 24])
         this.$emit(direction === 'previous' ? 'edge-previous' : 'edge-next')
@@ -280,13 +354,18 @@ export default Vue.extend({
     pullCancel() {
       if (this.pullTracking) this.resetPull()
     },
-    resetPull() {
+    resetPull(navigating: boolean = false) {
       const wasNext = this.pullDirection === 'next'
       this.cancelPullHold(false)
       this.pullTracking = false
       this.pullArmed = false
       this.pullSettling = true
       this.pullDistance = 0
+      if (navigating) {
+        this.pullDirection = null
+        this.pullSettling = false
+        return
+      }
       window.setTimeout(() => {
         this.pullDirection = null
         this.pullSettling = false
@@ -342,13 +421,21 @@ export default Vue.extend({
       }
     }, 500),
     onScroll(e: any) {
+      if (this.navigationLocked || this.positioning) return
       this.offsetTop = e.target.scrollingElement.scrollTop
       this.totalHeight = e.target.scrollingElement.scrollHeight
     },
     onIntersect(entries: any) {
       if (entries[0].isIntersecting) {
         const page = parseInt(entries[0].target.id.replace('page', ''))
-        this.seen.splice(page - 1, 1, true)
+        const pageIndex = this.pages.findIndex(candidate => candidate.number === page)
+        if (pageIndex >= 0) this.seen.splice(pageIndex, 1, true)
+
+        // Visibility must still make the image load during initial positioning.
+        // Only suppress navigation state changes until the requested page is
+        // stable, otherwise an already-intersecting placeholder stays black
+        // until another scroll produces a fresh observer event.
+        if (this.navigationLocked || this.positioning) return
         this.currentPage = page
         this.$emit('update:page', page)
       }
@@ -403,6 +490,11 @@ export default Vue.extend({
 <style scoped>
 .continuous-reader {
   min-height: 100%;
+}
+
+.continuous-reader.navigation-locked {
+  pointer-events: none;
+  touch-action: none;
 }
 
 .edge-pull {
