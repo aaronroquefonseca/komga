@@ -199,9 +199,12 @@
     "manual_ordering": "manual ordering"
   },
   "browse_series": {
+    "continue_reading": "Continue with #{number}",
     "earliest_year_from_release_dates": "This is the earliest year from the release dates from all books in the series",
     "remove_from_collection": "Remove series from collection",
+    "resume_reading": "Resume #{number}",
     "series_no_summary": "This series has no summary, so we picked one for you!",
+    "start_reading": "Start reading #{number}",
     "summary_from_book": "Summary from book {number}:"
   },
   "collections_expansion_panel": {
