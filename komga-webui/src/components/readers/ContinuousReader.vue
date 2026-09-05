@@ -414,10 +414,16 @@ export default Vue.extend({
       this.totalHeight = e.target.scrollingElement.scrollHeight
     },
     onIntersect(entries: any) {
-      if (this.navigationLocked || this.positioning) return
       if (entries[0].isIntersecting) {
         const page = parseInt(entries[0].target.id.replace('page', ''))
-        this.seen.splice(page - 1, 1, true)
+        const pageIndex = this.pages.findIndex(candidate => candidate.number === page)
+        if (pageIndex >= 0) this.seen.splice(pageIndex, 1, true)
+
+        // Visibility must still make the image load during initial positioning.
+        // Only suppress navigation state changes until the requested page is
+        // stable, otherwise an already-intersecting placeholder stays black
+        // until another scroll produces a fresh observer event.
+        if (this.navigationLocked || this.positioning) return
         this.currentPage = page
         this.$emit('update:page', page)
       }
