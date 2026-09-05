@@ -4,7 +4,7 @@
       <v-card
         :width="width"
         @click="onClick"
-        :class="noLink ? 'no-link' : ''"
+        :class="!linkTo && noLink ? 'no-link' : ''"
         :ripple="false"
       >
         <!--      Thumbnail-->
@@ -201,6 +201,12 @@ export default Vue.extend({
       type: Boolean,
       default: false,
     },
+    // Optional destination used when a card represents a contextual action
+    // instead of the entity's normal detail page.
+    linkTo: {
+      type: Object as () => RawLocation,
+      default: undefined,
+    },
     width: {
       type: [String, Number],
       required: false,
@@ -374,12 +380,12 @@ export default Vue.extend({
     onClick(e: MouseEvent) {
       if (this.preselect && this.onSelected !== undefined) {
         this.selectItem(e)
-      } else if (!this.noLink) {
+      } else if (this.linkTo || !this.noLink) {
         this.goto()
       }
     },
     goto() {
-      this.$router.push(this.computedItem.to())
+      this.$router.push(this.linkTo || this.computedItem.to())
     },
     selectItem(e: MouseEvent) {
       if (this.onSelected !== undefined) {

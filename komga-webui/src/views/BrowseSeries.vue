@@ -90,8 +90,15 @@
             :item="series"
             thumbnail-only
             no-link
+            :link-to="resumeLocation"
             :action-menu="false"
           ></item-card>
+          <div
+            v-if="resumeBook"
+            class="text-caption text-center mt-1"
+          >
+            {{ resumeActionLabel }}
+          </div>
         </v-col>
 
         <v-col cols="8">
@@ -166,19 +173,6 @@
 
               <v-col cols="auto" v-else>
                 {{ $tc('common.books_n', series.booksCount) }}
-              </v-col>
-            </v-row>
-
-            <v-row v-if="resumeBook" class="align-center">
-              <v-col cols="auto">
-                <v-btn
-                  color="accent"
-                  :disabled="!canResumeReading"
-                  :to="resumeLocation"
-                >
-                  <v-icon left>mdi-book-open-page-variant</v-icon>
-                  {{ resumeActionLabel }}
-                </v-btn>
               </v-col>
             </v-row>
 
@@ -761,7 +755,7 @@ export default Vue.extend({
       return this.$store.getters.mePageStreaming && !this.unavailable && this.resumeBook?.media.status === 'READY'
     },
     resumeLocation(): RawLocation | undefined {
-      if (!this.resumeBook) return undefined
+      if (!this.resumeBook || !this.canResumeReading) return undefined
       return {
         name: getBookReadRouteFromMedia(this.resumeBook.media),
         params: {bookId: this.resumeBook.id},
