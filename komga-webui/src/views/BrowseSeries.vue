@@ -91,6 +91,7 @@
             thumbnail-only
             no-link
             :link-to="resumeLocation"
+            :fab-to-override="resumeLocation"
             :action-menu="false"
           ></item-card>
           <div
@@ -200,6 +201,18 @@
               </read-more>
 
               <v-row class="align-center">
+                <v-col v-if="resumeBook" cols="auto">
+                  <v-btn
+                    color="accent"
+                    small
+                    :title="resumeActionLabel"
+                    :to="resumeLocation"
+                  >
+                    <v-icon left small>mdi-book-open-page-variant</v-icon>
+                    {{ resumeActionLabel }}
+                  </v-btn>
+                </v-col>
+
                 <v-col cols="auto">
                   <v-btn :title="$t('menu.download_series')"
                          small
@@ -262,6 +275,18 @@
 
         <!--   Download button     -->
         <v-row class="align-center">
+          <v-col v-if="resumeBook" cols="auto">
+            <v-btn
+              color="accent"
+              small
+              :title="resumeActionLabel"
+              :to="resumeLocation"
+            >
+              <v-icon left small>mdi-book-open-page-variant</v-icon>
+              {{ resumeActionLabel }}
+            </v-btn>
+          </v-col>
+
           <v-col cols="auto">
             <v-btn :title="$t('menu.download_series')"
                    small
@@ -579,7 +604,6 @@ import {
   SearchOperatorIsTrue,
 } from '@/types/komga-search'
 import {objIsEqual} from '@/functions/object'
-import {getBookReadRouteFromMedia} from '@/functions/book-format'
 import i18n from '@/i18n'
 import {
   FILTER_ANY,
@@ -751,14 +775,11 @@ export default Vue.extend({
     canDownload(): boolean {
       return this.$store.getters.meFileDownload && !this.unavailable
     },
-    canResumeReading(): boolean {
-      return this.$store.getters.mePageStreaming && !this.unavailable && this.resumeBook?.media.status === 'READY'
-    },
     resumeLocation(): RawLocation | undefined {
-      if (!this.resumeBook || !this.canResumeReading) return undefined
+      if (!this.resumeBook) return undefined
       return {
-        name: getBookReadRouteFromMedia(this.resumeBook.media),
-        params: {bookId: this.resumeBook.id},
+        name: this.resumeBook.oneshot ? 'browse-oneshot' : 'browse-book',
+        params: {seriesId: this.resumeBook.seriesId, bookId: this.resumeBook.id},
       }
     },
     resumeActionLabel(): string {

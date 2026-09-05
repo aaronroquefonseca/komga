@@ -207,6 +207,12 @@ export default Vue.extend({
       type: Object as () => RawLocation,
       default: undefined,
     },
+    // Optional destination for a contextual cover action, such as opening the
+    // current book selected from a series.
+    fabToOverride: {
+      type: Object as () => RawLocation,
+      default: undefined,
+    },
     width: {
       type: [String, Number],
       required: false,
@@ -345,13 +351,14 @@ export default Vue.extend({
       return false
     },
     showFab(): boolean {
-      return !this.disableFab && this.bookReady && !this.selected && !this.preselect && this.canReadPages
+      const canShowBookFab = this.bookReady && this.canReadPages
+      return !this.disableFab && !!(this.fabToOverride || canShowBookFab) && !this.selected && !this.preselect
     },
     to(): RawLocation {
       return this.computedItem.to()
     },
     fabTo(): RawLocation {
-      return this.computedItem.fabTo()
+      return this.fabToOverride || this.computedItem.fabTo()
     },
   },
   methods: {
