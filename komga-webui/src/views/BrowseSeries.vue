@@ -90,8 +90,15 @@
             :item="series"
             thumbnail-only
             no-link
+            :fab-to-override="resumeLocation"
             :action-menu="false"
           ></item-card>
+          <div
+            v-if="resumeBook"
+            class="text-caption text-center mt-1"
+          >
+            {{ resumeActionLabel }}
+          </div>
         </v-col>
 
         <v-col cols="8">
@@ -193,6 +200,18 @@
               </read-more>
 
               <v-row class="align-center">
+                <v-col v-if="resumeBook" cols="auto">
+                  <v-btn
+                    color="accent"
+                    small
+                    :title="resumeActionLabel"
+                    :to="resumeLocation"
+                  >
+                    <v-icon left small>mdi-book-open-page-variant</v-icon>
+                    {{ resumeActionLabel }}
+                  </v-btn>
+                </v-col>
+
                 <v-col cols="auto">
                   <v-btn :title="$t('menu.download_series')"
                          small
@@ -255,6 +274,18 @@
 
         <!--   Download button     -->
         <v-row class="align-center">
+          <v-col v-if="resumeBook" cols="auto">
+            <v-btn
+              color="accent"
+              small
+              :title="resumeActionLabel"
+              :to="resumeLocation"
+            >
+              <v-icon left small>mdi-book-open-page-variant</v-icon>
+              {{ resumeActionLabel }}
+            </v-btn>
+          </v-col>
+
           <v-col cols="auto">
             <v-btn :title="$t('menu.download_series')"
                    small
@@ -638,6 +669,7 @@ export default Vue.extend({
       },
       readMore: false,
       readMoreTitles: false,
+      resumeBook: undefined as BookDto | undefined,
     }
   },
   computed: {
@@ -741,6 +773,22 @@ export default Vue.extend({
     },
     canDownload(): boolean {
       return this.$store.getters.meFileDownload && !this.unavailable
+    },
+    resumeLocation(): RawLocation | undefined {
+      if (!this.resumeBook) return undefined
+      return {
+        name: this.resumeBook.oneshot ? 'browse-oneshot' : 'browse-book',
+        params: {seriesId: this.resumeBook.seriesId, bookId: this.resumeBook.id},
+      }
+    },
+    resumeActionLabel(): string {
+      if (!this.resumeBook) return ''
+      const number = this.resumeBook.metadata.number
+      if (this.resumeBook.readProgress && !this.resumeBook.readProgress.completed)
+        return this.$t('browse_series.resume_reading', {number}).toString()
+      if (this.series.booksReadCount > 0 && this.series.booksReadCount < this.series.booksCount)
+        return this.$t('browse_series.continue_reading', {number}).toString()
+      return this.$t('browse_series.start_reading', {number}).toString()
     },
     fileUrl(): string {
       return seriesFileUrl(this.seriesId)
@@ -857,6 +905,7 @@ export default Vue.extend({
       this.totalPages = 1
       this.totalElements = null
       this.books = []
+      this.resumeBook = undefined
       this.collections = []
 
       this.loadSeries(to.params.seriesId)
@@ -979,6 +1028,7 @@ export default Vue.extend({
         this.reloadPage()
         this.reloadSeries()
       }
+      this.loadResumeBook(this.seriesId)
     },
     collectionChanged(event: CollectionSseDto) {
       if (event.seriesIds.includes(this.seriesId) || this.collections.map(x => x.id).includes(event.collectionId)) {
@@ -1014,6 +1064,34 @@ export default Vue.extend({
       }
 
       await this.loadPage(seriesId, this.page, this.sortActive)
+      await this.loadResumeBook(seriesId)
+    },
+    async getFirstBookWithStatus(seriesId: string, status: ReadStatus): Promise<BookDto | undefined> {
+      const page = await this.$komgaBooks.getBooksList({
+        condition: new SearchConditionAllOfBook([
+          new SearchConditionSeriesId(new SearchOperatorIs(seriesId)),
+          new SearchConditionReadStatus(new SearchOperatorIs(status)),
+        ]),
+      }, {page: 0, size: 1, sort: ['metadata.numberSort,asc']})
+      return page.content[0]
+    },
+    async loadResumeBook(seriesId: string) {
+      const inProgress = await this.getFirstBookWithStatus(seriesId, ReadStatus.IN_PROGRESS)
+      if (inProgress) {
+        this.resumeBook = inProgress
+        return
+      }
+
+      const unread = await this.getFirstBookWithStatus(seriesId, ReadStatus.UNREAD)
+      if (unread) {
+        this.resumeBook = unread
+        return
+      }
+
+      const first = await this.$komgaBooks.getBooksList({
+        condition: new SearchConditionSeriesId(new SearchOperatorIs(seriesId)),
+      }, {page: 0, size: 1, sort: ['metadata.numberSort,asc']})
+      this.resumeBook = first.content[0]
     },
     parseQuerySortOrDefault(querySort: any): SortActive {
       return parseQuerySort(querySort, this.sortOptions) || this.$_.clone(this.sortDefault)

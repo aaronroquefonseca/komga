@@ -4,7 +4,7 @@
       <v-card
         :width="width"
         @click="onClick"
-        :class="noLink ? 'no-link' : ''"
+        :class="!linkTo && noLink ? 'no-link' : ''"
         :ripple="false"
       >
         <!--      Thumbnail-->
@@ -201,6 +201,18 @@ export default Vue.extend({
       type: Boolean,
       default: false,
     },
+    // Optional destination used when a card represents a contextual action
+    // instead of the entity's normal detail page.
+    linkTo: {
+      type: Object as () => RawLocation,
+      default: undefined,
+    },
+    // Optional destination for a contextual cover action, such as opening the
+    // current book selected from a series.
+    fabToOverride: {
+      type: Object as () => RawLocation,
+      default: undefined,
+    },
     width: {
       type: [String, Number],
       required: false,
@@ -339,13 +351,14 @@ export default Vue.extend({
       return false
     },
     showFab(): boolean {
-      return !this.disableFab && this.bookReady && !this.selected && !this.preselect && this.canReadPages
+      const canShowBookFab = this.bookReady && this.canReadPages
+      return !this.disableFab && !!(this.fabToOverride || canShowBookFab) && !this.selected && !this.preselect
     },
     to(): RawLocation {
       return this.computedItem.to()
     },
     fabTo(): RawLocation {
-      return this.computedItem.fabTo()
+      return this.fabToOverride || this.computedItem.fabTo()
     },
   },
   methods: {
@@ -374,12 +387,12 @@ export default Vue.extend({
     onClick(e: MouseEvent) {
       if (this.preselect && this.onSelected !== undefined) {
         this.selectItem(e)
-      } else if (!this.noLink) {
+      } else if (this.linkTo || !this.noLink) {
         this.goto()
       }
     },
     goto() {
-      this.$router.push(this.computedItem.to())
+      this.$router.push(this.linkTo || this.computedItem.to())
     },
     selectItem(e: MouseEvent) {
       if (this.onSelected !== undefined) {
