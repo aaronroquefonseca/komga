@@ -1,42 +1,12 @@
 <template>
   <v-app-bar>
-    <LibraryHeader
-      class="ms-4"
-      :library-id="series?.libraryId"
-      link
-    />
+    <template #prepend>
+      <NavigationBreadcrumbs />
+    </template>
 
-    <ChipCount
-      class="ms-2"
-      :count="totalElements"
-    />
-
-    <v-spacer />
-
-    <PosterSizeSlider />
-
-    <PresentationSelector
-      v-if="display.smAndUp.value"
-      v-model="presentationMode"
-      :modes="['grid', 'list']"
-      toggle
-    />
-
-    <PageSizeSelector
-      v-if="isBrowsingPaged"
-      v-model="appStore.browsingPageSize"
-      allow-unpaged
-    />
-
-    <PagingSelector
-      v-model="appStore.browsingPaging"
-      class="px-2"
-    />
-
-    <FilterButton
-      :count="filterCount"
-      @click="filterDrawer = true"
-    />
+    <template #append>
+      <CollectionNavigation :series-id="seriesId" />
+    </template>
   </v-app-bar>
 
   <TempDrawer v-model="filterDrawer">
@@ -95,13 +65,21 @@
             include="BOOK"
           />
         </FilterExpansionPanel>
+
+        <FilterExpansionPanel
+          :title="$formatMessage(commonMessages.filterPanelPoster)"
+          :count="filters.poster.count"
+          @clear="filters.poster.clear()"
+        >
+          <FilterByPoster v-model="filters.poster.filter.v" />
+        </FilterExpansionPanel>
       </v-expansion-panels>
 
-      <v-divider
-        ><span class="text-body-medium text-medium-emphasis">{{
+      <v-divider>
+        <span class="text-body-medium text-medium-emphasis">{{
           $formatMessage(commonMessages.filterPanelContributors)
-        }}</span></v-divider
-      >
+        }}</span>
+      </v-divider>
 
       <v-expansion-panels
         v-model="filterExpansionPanels"
@@ -111,27 +89,66 @@
         tile
       >
         <FilterExpansionPanel
-          v-for="(filterAuthor, role) in filterContributors"
+          v-for="(filterContributor, role) in filterContributors"
           :key="role"
           :title="
             contributorsRolesMessages?.[role]
               ? $formatMessage(contributorsRolesMessages?.[role])
               : role
           "
-          :count="countFilter(filterAuthor)"
+          :count="countFilter(filterContributor)"
           @clear="filterContributorsClear(role)"
         >
-          <FilterByAuthor
-            v-model="filterAuthor.v"
-            v-model:mode="filterAuthor.m"
+          <FilterByContributor
+            v-model="filterContributor.v"
+            v-model:mode="filterContributor.m"
             :role="role"
+          />
+        </FilterExpansionPanel>
+      </v-expansion-panels>
+
+      <v-divider>
+        <span class="text-body-medium text-medium-emphasis">{{
+          $formatMessage(commonMessages.filterPanelNotableEntities)
+        }}</span>
+      </v-divider>
+
+      <v-expansion-panels
+        v-model="filterExpansionPanels"
+        variant="accordion"
+        class="no-padding"
+        flat
+        tile
+      >
+        <FilterExpansionPanel
+          v-for="(filterNotableEntity, kind) in filterNotableEntities"
+          :key="kind"
+          :title="
+            notableEntitiesKindsMessages?.[kind]
+              ? $formatMessage(notableEntitiesKindsMessages?.[kind])
+              : kind
+          "
+          :count="countFilter(filterNotableEntity)"
+          @clear="filterNotableEntitiesClear(kind)"
+        >
+          <FilterByNotableEntity
+            v-model="filterNotableEntity.v"
+            v-model:mode="filterNotableEntity.m"
+            :kind="kind"
           />
         </FilterExpansionPanel>
       </v-expansion-panels>
 
       <v-divider />
 
-      <v-list-subheader>{{ $formatMessage(commonMessages.filterPanelSort) }}</v-list-subheader>
+      <v-list-subheader>
+        <span>{{ $formatMessage(commonMessages.filterPanelSort) }}</span>
+        <SortRestore
+          v-if="!sortIsDefault"
+          class="position-absolute right-0 me-6"
+          @restore="sortRestore()"
+        />
+      </v-list-subheader>
 
       <SortList
         v-model="sortActive"
@@ -145,7 +162,10 @@
     fluid
     class="pa-0 pa-sm-4"
   >
-    <div v-if="isPending">
+    <div
+      v-if="isPending"
+      class="pa-4 pa-sm-0"
+    >
       <v-row>
         <v-col cols="3">
           <v-skeleton-loader type="image" />
@@ -166,7 +186,39 @@
     <template v-else-if="series">
       <SeriesView :series="series" />
 
-      <v-divider />
+      <v-divider class="mb-1 mx-2" />
+
+      <div class="sticky-bar d-flex align-center pa-2">
+        <ChipCount :count="totalElements" />
+
+        <v-spacer />
+
+        <!-- Append -->
+        <div class="d-flex ga-2">
+          <PosterSizeSlider />
+
+          <PresentationSelector
+            v-if="display.smAndUp.value"
+            v-model="presentationMode"
+            :modes="['grid', 'list']"
+            toggle
+          />
+
+          <PageSizeSelector
+            v-if="isBrowsingPaged"
+            v-model="appStore.browsingPageSize"
+            allow-unpaged
+          />
+
+          <PagingSelector v-model="appStore.browsingPaging" />
+
+          <FilterButton
+            :count="filterCount"
+            :dot="!sortIsDefault"
+            @click="filterDrawer = true"
+          />
+        </div>
+      </div>
 
       <EmptyStateFilterNoResults
         v-if="totalElements === 0 && filterCount > 0"
@@ -191,6 +243,7 @@
             :selected="isSelected"
             :pre-select="preSelect"
             :width="display.xs.value ? 'auto' : appStore.gridCardWidth"
+            :sort-active="sortActive"
             @selection="(_val, event) => toggleSelect(event as MouseEvent)"
           />
         </template>
@@ -201,24 +254,24 @@
 
 <script lang="ts" setup>
 import { useInfiniteQuery, useQuery } from '@pinia/colada'
-import { seriesDetailQuery } from '@/colada/series'
 import EmptyStateNetworkError from '@/components/EmptyStateNetworkError.vue'
-import { useBooks } from '@/composables/book/useBooks'
 import { filterKeys } from '@/types/filter'
 import { usePagination } from '@/composables/pagination'
 import { useSelectionStore } from '@/stores/selection'
-import { PageRequest } from '@/types/PageRequest'
+import { PageRequest, type Sort } from '@/types/PageRequest'
 import { useDisplay } from 'vuetify/framework'
 import { useAppStore } from '@/stores/app'
 import { storeToRefs } from 'pinia'
 import { usePresentationMode } from '@/composables/presentationMode'
 import { useIntlFormatter } from '@/composables/intlFormatter'
 import { sortBooks } from '@/types/sort'
-import { useFilterContributors, useFilters } from '@/composables/filter'
+import { useFilterContributors, useFilterNotableEntities, useFilters } from '@/composables/filter'
 import {
   countFilter,
-  schemaFilterAuthorsToConditions,
+  schemaFilterContributorsToConditions,
   schemaFilterIncludeExcludeToConditions,
+  schemaFilterNotableEntitiesToConditions,
+  schemaFilterPosterToConditions,
   schemaFilterReadStatusToConditions,
   schemaFilterStringToConditions,
   valuesToConditions,
@@ -229,43 +282,25 @@ import FilterButton from '@/components/filter/FilterButton.vue'
 import ChipCount from '@/components/ChipCount.vue'
 import PosterSizeSlider from '@/components/PosterSizeSlider.vue'
 import { commonMessages } from '@/utils/i18n/common-messages'
-import { contributorsRolesMessages } from '@/types/referential'
 import { useSelectionContextualActions } from '@/composables/selection'
-import { logger } from '@/services/logtape'
 import type { SearchConditionBook } from '@/generated/openapi'
-
-// oneshot redirection
-definePage({
-  beforeEnter: async (to) => {
-    logger.debug('navigation guard: check if series is oneshot')
-    const params = to.params as { id: string }
-
-    const { data, refresh } = useQuery(seriesDetailQuery({ seriesId: params.id }))
-    await refresh()
-
-    if (data.value?.oneshot) {
-      logger.debug('navigation guard: series is oneshot, fetch book for redirection')
-      const { getFirstBookInParent } = useBooks(params.id)
-      const book = await getFirstBookInParent(false)
-      if (book) {
-        logger.debug('navigation guard: book found, redirect to book page')
-        return {
-          name: '/book/[id]',
-          params: { id: book.id },
-          query: to.query,
-          replace: true,
-        }
-      }
-    }
-  },
-})
+import { seriesDetailQuery } from '@/colada/series'
+import { BrowsingContextKey, pushBrowsingContext } from '@/functions/browsing-context'
+import { useBrowsingContext } from '@/composables/browsingContext'
+import { useSort } from '@/composables/sort'
+import { contributorsRolesMessages } from '@/types/referential/contributor'
+import { notableEntitiesKindsMessages } from '@/types/referential/notableEntity'
 
 const route = useRoute('/series/[id]')
 const seriesId = computed(() => route.params.id)
 
+const filterContext = computed(() => ({ series_id: [seriesId.value] }))
+provide(filterKeys.context, filterContext)
+
+const { context } = useBrowsingContext()
 provide(
-  filterKeys.context,
-  computed(() => ({ series_id: [seriesId.value] })),
+  BrowsingContextKey,
+  computed(() => pushBrowsingContext(context.value, { type: 'series', id: seriesId.value })),
 )
 
 const {
@@ -287,30 +322,42 @@ const selectionStore = useSelectionStore()
 
 function clearFilters() {
   filterContributorsClearAll()
+  filterNotableEntitiesClearAll()
   filtersClearAll()
 }
 
-const filterCount = computed(() => filterContributorsCount.value + filtersCountAll.value)
+const filterCount = computed(
+  () => filterContributorsCount.value + filterNotableEntitiesCount.value + filtersCountAll.value,
+)
 
 const { convertSortOptionDescriptor } = useIntlFormatter()
-const sortActive = appStore.getSortActive(viewName.value, [
-  { key: 'metadata.numberSort', order: 'asc' },
-])
+const sortDefault: Sort[] = [{ key: 'metadata.numberSort', order: 'asc' }]
 const sortOptions = sortBooks
   .filter((it) => it.key !== 'series')
   .map((it) => convertSortOptionDescriptor(it))
+const {
+  sortActive,
+  isDefault: sortIsDefault,
+  restore: sortRestore,
+} = useSort(sortDefault, sortOptions, false)
 
 const {
   filter: filterContributors,
   countAll: filterContributorsCount,
   clearAll: filterContributorsClearAll,
   clear: filterContributorsClear,
-} = useFilterContributors()
+} = useFilterContributors(filterContext)
+const {
+  filter: filterNotableEntities,
+  countAll: filterNotableEntitiesCount,
+  clearAll: filterNotableEntitiesClearAll,
+  clear: filterNotableEntitiesClear,
+} = useFilterNotableEntities(filterContext)
 const {
   filters,
   clearAll: filtersClearAll,
   countAll: filtersCountAll,
-} = useFilters(['mediaStatus', 'profile', 'read', 'tag', 'unavailable', 'oneshot'])
+} = useFilters(['mediaStatus', 'profile', 'read', 'tag', 'unavailable', 'oneshot', 'poster'])
 
 const conds = computed(() => ({
   allOf: [
@@ -318,11 +365,15 @@ const conds = computed(() => ({
     schemaFilterIncludeExcludeToConditions(filters.value.unavailable.filter, 'deleted'),
     schemaFilterIncludeExcludeToConditions(filters.value.oneshot.filter, 'oneShot'),
     schemaFilterReadStatusToConditions(filters.value.read.filter),
+    schemaFilterPosterToConditions(filters.value.poster.filter),
     valuesToConditions(filters.value.mediaStatus.filter.v, 'mediaStatus'),
     valuesToConditions(filters.value.profile.filter.v, 'mediaProfile'),
     schemaFilterStringToConditions(filters.value.tag.filter, 'tag', true),
     ...Object.entries(filterContributors.value).map(([role, filter]) =>
-      schemaFilterAuthorsToConditions(filter, role),
+      schemaFilterContributorsToConditions(filter, role),
+    ),
+    ...Object.entries(filterNotableEntities.value).map(([kind, filter]) =>
+      schemaFilterNotableEntitiesToConditions(filter, kind),
     ),
   ].filter(Boolean) as SearchConditionBook[],
 }))

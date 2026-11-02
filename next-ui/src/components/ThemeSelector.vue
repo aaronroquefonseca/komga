@@ -1,6 +1,6 @@
 <template>
   <v-icon-btn
-    v-tooltip:bottom="
+    v-ktooltip:bottom="
       $formatMessage({
         description: 'Theme selector button: tooltip',
         defaultMessage: 'Theme',
@@ -49,7 +49,3 @@ function cycleTheme() {
   appStore.theme = themes[newIndex]!.value
 }
 </script>
-
-<script lang="ts"></script>
-
-<style scoped></style>

@@ -62,6 +62,11 @@ export const commonMessages = {
     defaultMessage: 'Contributors',
     id: 'rkpCD1',
   }),
+  filterPanelNotableEntities: defineMessage({
+    description: 'Filter panel sub-section: Notable entities',
+    defaultMessage: 'Notable entities',
+    id: 'sMmke1',
+  }),
   filterPanelSort: defineMessage({
     description: 'Filter panel sub-section: Sort',
     defaultMessage: 'SORT',
@@ -102,6 +107,11 @@ export const commonMessages = {
     defaultMessage: 'Tag',
     id: 'NwK2Kv',
   }),
+  filterPanelPoster: defineMessage({
+    description: 'Filter panel: Poster',
+    defaultMessage: 'Poster',
+    id: 'viKuRl',
+  }),
   filterPanelPublisher: defineMessage({
     description: 'Filter panel: Publisher',
     defaultMessage: 'Publisher',
@@ -141,5 +151,90 @@ export const commonMessages = {
     description: 'Button to show extra actions: tooltip',
     defaultMessage: 'More',
     id: '1VkZao',
+  }),
+  notificationOpen: defineMessage({
+    description: 'Notification: button text to open element',
+    defaultMessage: 'Open',
+    id: 'XCwAkR',
+  }),
+  readListCreated: defineMessage({
+    description: 'Create read list notification: read list created',
+    defaultMessage: 'Read list created',
+    id: 'estf95',
+  }),
+  seriesFormEditSharing: defineMessage({
+    description: 'Form edit series: Sharing',
+    defaultMessage: 'Sharing',
+    id: 'oB2hG3',
+  }),
+  seriesFormGeneralTitleSort: defineMessage({
+    description: 'Form edit series: General - series sort title',
+    defaultMessage: 'Sort title',
+    id: 'ayrmyn',
+  }),
+  seriesFormGeneralPublisher: defineMessage({
+    description: 'Form edit series: General - series publisher',
+    defaultMessage: 'Publisher',
+    id: 'CW0idP',
+  }),
+  seriesFormGeneralReadingDirection: defineMessage({
+    description: 'Form edit series: General - series reading direction',
+    defaultMessage: 'Reading direction',
+    id: 'hPYi11',
+  }),
+  seriesFormGeneralAgeRating: defineMessage({
+    description: 'Form edit series: General - series age rating',
+    defaultMessage: 'Age rating',
+    id: 'tLFumw',
+  }),
+  seriesFormGeneralLanguage: defineMessage({
+    description: 'Form edit series: General - language',
+    defaultMessage: 'Language',
+    id: 'aR6KDt',
+  }),
+  seriesFormGeneralLanguageHint: defineMessage({
+    description: 'Form edit series: General - language, hint',
+    defaultMessage: 'IETF BCP 47 language tag',
+    id: '083NeH',
+  }),
+  bcp47Error: defineMessage({
+    description: 'Form edit series: General - language, error code',
+    defaultMessage: 'Must be a valid BCP 47 language code',
+    id: 'v3beFf',
+  }),
+  libraryPinned: defineMessage({
+    description: 'Library tab navigation: library selection: pinned',
+    defaultMessage: 'Pinned',
+    id: '1qIfds',
+  }),
+  libraryUnpinned: defineMessage({
+    description: 'Library tab navigation: library selection: unpinned',
+    defaultMessage: 'Unpinned',
+    id: '9oA9gw',
+  }),
+  libraryAll: defineMessage({
+    description: 'Library tab navigation: library selection: all',
+    defaultMessage: 'All',
+    id: '8/BXfN',
+  }),
+  containerChipSubTitleReadList: defineMessage({
+    description: 'Container chip, subtitle for read list',
+    defaultMessage: 'Read list',
+    id: 'Q7tJAG',
+  }),
+  containerChipSubTitleCollection: defineMessage({
+    description: 'Container chip, subtitle for collection',
+    defaultMessage: 'Collection',
+    id: 'nWgSSS',
+  }),
+  cardSubtitleNoReleaseDate:defineMessage({
+    description: 'Card subtitle: no release date',
+    defaultMessage: 'No release date',
+    id: '9mujmD',
+  }),
+  cardSubtitleUnread:defineMessage({
+    description: 'Card subtitle: unread',
+    defaultMessage: 'Unread',
+    id: 'wESuod',
   }),
 }
