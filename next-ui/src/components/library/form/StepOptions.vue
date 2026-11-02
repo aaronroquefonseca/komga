@@ -208,9 +208,10 @@
         <div class="text-label-large">
           {{
             $formatMessage({
-              description: 'Form add/edit library: Options - section header for default reading direction',
+              description:
+                'Form add/edit library: Options - section header for default reading direction',
               defaultMessage: 'Default reading direction',
-              id: 'library.defaultReadingDirection',
+              id: 'avI9aZ',
             })
           }}
         </div>
@@ -220,7 +221,7 @@
               description: 'Form add/edit library: Options - default reading direction help text',
               defaultMessage:
                 'Applied to newly discovered series. Explicit ComicInfo or EPUB metadata can still override it.',
-              id: 'library.defaultReadingDirectionHelp',
+              id: 'DH5sQz',
             })
           }}
         </div>
@@ -271,7 +272,7 @@ const readingDirectionOptions = [
     title: intl.formatMessage({
       description: 'Library default reading direction: automatic option',
       defaultMessage: 'Automatic (from metadata)',
-      id: 'library.defaultReadingDirectionAutomatic',
+      id: '+0esWu',
     }),
     value: null,
   },

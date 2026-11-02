@@ -1,4 +1,8 @@
 {
+  "+0esWu": {
+    "defaultMessage": "Automatic (from metadata)",
+    "description": "Library default reading direction: automatic option"
+  },
   "+6DtMH": {
     "defaultMessage": "User interface",
     "description": "Server settings: section header for UI settings"
@@ -722,6 +726,10 @@
   "DG4tYb": {
     "defaultMessage": "{count, plural, one {# book} other {# books} }",
     "description": "Read list add to: read list item subtitle: count of books"
+  },
+  "DH5sQz": {
+    "defaultMessage": "Applied to newly discovered series. Explicit ComicInfo or EPUB metadata can still override it.",
+    "description": "Form add/edit library: Options - default reading direction help text"
   },
   "DK4PsD": {
     "defaultMessage": "Series books",
@@ -1966,6 +1974,10 @@
   "app.user-create-dialog.all_libraries": {
     "defaultMessage": "All libraries",
     "description": "User creation/edit dialog: Shared Libraries field, value shown when user has access to all libraries"
+  },
+  "avI9aZ": {
+    "defaultMessage": "Default reading direction",
+    "description": "Form add/edit library: Options - section header for default reading direction"
   },
   "ayrmyn": {
     "defaultMessage": "Sort title",
