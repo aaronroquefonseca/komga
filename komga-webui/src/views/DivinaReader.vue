@@ -406,6 +406,8 @@ export default Vue.extend({
       context: {} as Context,
       contextName: '',
       incognito: false,
+      // set when the reader was opened from the new UI: closing goes back there
+      source: '',
       siblingPrevious: {} as BookDto,
       siblingNext: {} as BookDto,
       jumpToNextBook: false,
@@ -800,6 +802,9 @@ export default Vue.extend({
       // parse query params to get incognito mode
       this.incognito = !!(this.$route.query.incognito && this.$route.query.incognito.toString().toLowerCase() === 'true')
 
+      // remember where the reader was opened from, so closing can go back there
+      this.source = this.$route.query.source ? this.$route.query.source.toString() : ''
+
       const pageDtos = (await this.$komgaBooks.getBookPages(bookId))
       if (revision !== this.setupRevision) return
       pageDtos.forEach((p: any) => p['url'] = this.getPageUrl(p, bookId))
@@ -888,7 +893,7 @@ export default Vue.extend({
         this.$router.push({
           name: getBookReadRouteFromMedia(this.siblingPrevious.media),
           params: {bookId: this.siblingPrevious.id.toString()},
-          query: {position: 'end', context: this.context.origin, contextId: this.context.id, incognito: this.incognito.toString()},
+          query: {position: 'end', context: this.context.origin, contextId: this.context.id, incognito: this.incognito.toString(), ...(this.source ? {source: this.source} : {})},
         }).catch(() => {
           this.readerTransitioning = false
         })
@@ -908,7 +913,7 @@ export default Vue.extend({
         this.$router.push({
           name: getBookReadRouteFromMedia(this.siblingNext.media),
           params: {bookId: this.siblingNext.id.toString()},
-          query: {position: 'start', context: this.context.origin, contextId: this.context.id, incognito: this.incognito.toString()},
+          query: {position: 'start', context: this.context.origin, contextId: this.context.id, incognito: this.incognito.toString(), ...(this.source ? {source: this.source} : {})},
         }).catch(() => {
           this.readerTransitioning = false
         })
@@ -934,12 +939,18 @@ export default Vue.extend({
           context: this.context.origin,
           contextId: this.context.id,
           incognito: this.incognito.toString(),
+          ...(this.source ? {source: this.source} : {}),
         },
       } as Location)
     },
     closeBook() {
       if (this.$offline.state.offlineMode || !this.$offline.state.online) {
         this.$router.push({name: 'offline-downloads'})
+        return
+      }
+      if (this.source === 'nextui' && window.history.length > 1) {
+        // opened from the new UI: history back returns there instead of the classic book page
+        this.$router.go(-1)
         return
       }
       this.$router.push(

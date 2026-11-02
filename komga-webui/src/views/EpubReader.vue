@@ -345,6 +345,8 @@ export default Vue.extend({
       siblingPrevious: {} as BookDto,
       siblingNext: {} as BookDto,
       incognito: false,
+      // set when the reader was opened from the new UI: closing goes back there
+      source: '',
       context: {} as Context,
       contextName: '',
       showSettings: false,
@@ -647,7 +649,7 @@ export default Vue.extend({
         this.$router.push({
           name: getBookReadRouteFromMedia(this.siblingPrevious.media),
           params: {bookId: this.siblingPrevious.id.toString()},
-          query: {context: this.context.origin, contextId: this.context.id, incognito: this.incognito.toString()},
+          query: {context: this.context.origin, contextId: this.context.id, incognito: this.incognito.toString(), ...(this.source ? {source: this.source} : {})},
         })
       }
     },
@@ -659,7 +661,7 @@ export default Vue.extend({
         this.$router.push({
           name: getBookReadRouteFromMedia(this.siblingNext.media),
           params: {bookId: this.siblingNext.id.toString()},
-          query: {context: this.context.origin, contextId: this.context.id, incognito: this.incognito.toString()},
+          query: {context: this.context.origin, contextId: this.context.id, incognito: this.incognito.toString(), ...(this.source ? {source: this.source} : {})},
         })
       }
     },
@@ -748,6 +750,9 @@ export default Vue.extend({
 
       // parse query params to get incognito mode
       this.incognito = !!(this.$route.query.incognito && this.$route.query.incognito.toString().toLowerCase() === 'true')
+
+      // remember where the reader was opened from, so closing can go back there
+      this.source = this.$route.query.source ? this.$route.query.source.toString() : ''
 
       const fontFamiliesInjectables = this.fontFamiliesAdditional.map(x => ({
         type: 'style',
@@ -918,6 +923,11 @@ export default Vue.extend({
       this.closeBook()
     },
     closeBook() {
+      if (this.source === 'nextui' && window.history.length > 1) {
+        // opened from the new UI: history back returns there instead of the classic book page
+        this.$router.go(-1)
+        return
+      }
       this.$router.push(
         {
           name: this.book.oneshot ? 'browse-oneshot' : 'browse-book',
