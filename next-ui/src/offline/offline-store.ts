@@ -461,11 +461,11 @@ export const useOfflineLibraryStore = defineStore('offline-library', () => {
     notificationCloseTimers.set(tag, timer)
   }
 
-  async function persistDownloadProgress(record: OfflineDownloadRecord): Promise<void> {
+  async function persistDownloadProgress(record: OfflineDownloadRecord): Promise<boolean> {
     const now = Date.now()
     const previous = persistedProgressAt.get(record.bookId) ?? 0
     const finished = record.completedPages >= record.totalPages
-    if (!finished && now - previous < 500) return
+    if (!finished && now - previous < 500) return false
     persistedProgressAt.set(record.bookId, now)
     await offlinePut(OFFLINE_STORES.downloads, clone(record))
     // Reactive sync is much coarser than the IndexedDB persist, and skips
@@ -475,7 +475,7 @@ export const useOfflineLibraryStore = defineStore('offline-library', () => {
     const synced = syncedProgressAt.get(record.bookId) ?? 0
     const percent = Math.floor((record.completedPages / Math.max(1, record.totalPages)) * 100)
     const lastPercent = syncedProgressPercent.get(record.bookId) ?? -1
-    if (!finished && (now - synced < 2000 || percent === lastPercent)) return
+    if (!finished && (now - synced < 2000 || percent === lastPercent)) return false
     syncedProgressAt.set(record.bookId, now)
     syncedProgressPercent.set(record.bookId, percent)
     const existing = downloads.value.find((x) => x.bookId === record.bookId)
@@ -487,6 +487,7 @@ export const useOfflineLibraryStore = defineStore('offline-library', () => {
       downloads.value.unshift(clone(record))
     }
     notifyServiceWorker(record.bookId)
+    return true
   }
 
   async function showGroupedDownloadNotification(
@@ -642,8 +643,10 @@ export const useOfflineLibraryStore = defineStore('offline-library', () => {
             await stagingCache.put(request, response)
             record.bytes += await sizePromise
             record.completedPages += 1
-            await persistDownloadProgress(record)
-            await showDownloadProgressNotification(record)
+            // Notification check rides on the reactive sync points only: the
+            // per-page filter+summarize would otherwise run hundreds of times
+            // per second during bulk downloads.
+            if (await persistDownloadProgress(record)) await showDownloadProgressNotification(record)
           }
         },
       )
