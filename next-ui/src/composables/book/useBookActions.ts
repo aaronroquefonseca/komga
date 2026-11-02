@@ -168,7 +168,7 @@ export function useBookActions(
       action: ActionName.OpenReader,
       disabled: !canRead.value,
       onClick: () => {
-        window.open(bookReaderUrl(toValue(book).id, isEpubReader.value), '_blank')
+        window.open(bookReaderUrl(toValue(book).id, isEpubReader.value), '_self')
         callback(ActionName.OpenReader)
       },
     },
@@ -178,7 +178,7 @@ export function useBookActions(
       action: ActionName.OpenReaderIncognito,
       disabled: !canRead.value,
       onClick: () => {
-        window.open(bookReaderUrl(toValue(book).id, isEpubReader.value, true), '_blank')
+        window.open(bookReaderUrl(toValue(book).id, isEpubReader.value, true), '_self')
         callback(ActionName.OpenReaderIncognito)
       },
     },
