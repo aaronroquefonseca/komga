@@ -94,6 +94,7 @@ export const useOfflineLibraryStore = defineStore('offline-library', () => {
   const notifiedProgress = new Map<string, number>()
   const persistedProgressAt = new Map<string, number>()
   const syncedProgressAt = new Map<string, number>()
+  const syncedProgressPercent = new Map<string, number>()
   const notificationCloseTimers = new Map<string, number>()
   const openReaderBooks = new Set<string>()
   const deferredCompletions = new Set<string>()
@@ -467,12 +468,16 @@ export const useOfflineLibraryStore = defineStore('offline-library', () => {
     if (!finished && now - previous < 500) return
     persistedProgressAt.set(record.bookId, now)
     await offlinePut(OFFLINE_STORES.downloads, clone(record))
-    // Reactive sync is throttled harder than the IndexedDB persist, and done
-    // in place: cards and menus keyed on status (not on these counters) skip
-    // re-render, so bulk downloads no longer thrash the UI thread.
+    // Reactive sync is much coarser than the IndexedDB persist, and skips
+    // ticks that would not visibly move the bar: the downloads page and
+    // every book/series card re-render on each sync, which saturates the
+    // main thread (scroll jank) during bulk downloads with high concurrency.
     const synced = syncedProgressAt.get(record.bookId) ?? 0
-    if (!finished && now - synced < 1000) return
+    const percent = Math.floor((record.completedPages / Math.max(1, record.totalPages)) * 100)
+    const lastPercent = syncedProgressPercent.get(record.bookId) ?? -1
+    if (!finished && (now - synced < 2000 || percent === lastPercent)) return
     syncedProgressAt.set(record.bookId, now)
+    syncedProgressPercent.set(record.bookId, percent)
     const existing = downloads.value.find((x) => x.bookId === record.bookId)
     if (existing) {
       existing.completedPages = record.completedPages
