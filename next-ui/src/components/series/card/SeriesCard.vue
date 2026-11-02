@@ -2,7 +2,7 @@
   <ItemCard
     :id="id"
     :title="title"
-    :lines="[footer]"
+    :lines="lines"
     :poster-url="seriesPosterUrl(series.id, cacheStore.getVersion(series.id))"
     :top-right="unreadCount"
     :top-right-icon="isRead ? 'i-mdi:check' : undefined"
@@ -37,6 +37,7 @@ import { useBooks } from '@/composables/book/useBooks'
 import { useSeries } from '@/composables/series/useSeries'
 import type { SeriesDto } from '@/generated/openapi'
 import { useImageCacheStore } from '@/stores/image-cache'
+import { useOfflineLibraryStore } from '@/offline'
 import { BrowsingContextKey, formatBrowsingContextAsQueryParam } from '@/functions/browsing-context'
 import type { RouteLocationObject } from '@/types/route'
 import type { SortKeysSeries } from '@/types/sort'
@@ -44,6 +45,41 @@ import { commonMessages } from '@/utils/i18n/common-messages'
 
 const intl = useIntl()
 const cacheStore = useImageCacheStore()
+const offline = useOfflineLibraryStore()
+void offline.whenReady()
+
+const offlineLine = computed<ItemCardLine | undefined>(() => {
+  const records = offline.downloads.filter((record) => record.book.seriesId === series.value.id)
+  if (records.length === 0) return undefined
+  const downloaded = records.filter((record) => offline.isDownloaded(record.bookId)).length
+  if (downloaded === 0) return undefined
+  const needsUpdate = records.some(
+    (record) => record.updateAvailable === true && !record.sourceMissing,
+  )
+  if (needsUpdate)
+    return {
+      text: intl.formatMessage({
+        description: 'Offline badge: update available',
+        defaultMessage: 'Offline update available',
+        id: 'U7M5+U',
+      }),
+      classes: 'text-warning',
+    }
+  if (series.value.booksCount > 0 && downloaded >= series.value.booksCount)
+    return {
+      text: intl.formatMessage({
+        description: 'Offline badge: available',
+        defaultMessage: 'Offline',
+        id: 'tYL+3r',
+      }),
+      classes: 'text-success',
+    }
+  return undefined
+})
+
+const lines = computed<ItemCardLine[]>(() =>
+  offlineLine.value ? [footer.value, offlineLine.value] : [footer.value],
+)
 
 const id = useId()
 

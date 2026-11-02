@@ -22,6 +22,9 @@ import { bookReaderUrl } from '@/api/links'
 import type { BookDto } from '@/generated/openapi'
 import { useAddToReadListDialog } from '@/composables/book/useAddToReadListDialog'
 import { useAddToCollectionDialog } from '@/composables/series/useAddToCollectionDialog'
+import { useOfflineLibraryStore } from '@/offline'
+import { isStandalonePwa } from '@/functions/pwa'
+import { MediaStatus } from '@/types/MediaStatus'
 
 export function useBookActions(
   book: MaybeRefOrGetter<BookDto>,
@@ -29,13 +32,229 @@ export function useBookActions(
 ) {
   const { isAdmin, hasRole } = useCurrentUser()
   const intl = useIntl()
+  const router = useRouter()
   const { confirm: dialogConfirm } = storeToRefs(useDialogsStore())
   const messagesStore = useMessagesStore()
   const display = useDisplay()
   const { canRead, isEpubReader } = useBook(book)
   const { inProgress } = useBookReadProgress(book)
 
+  const offline = useOfflineLibraryStore()
+  void offline.whenReady()
+
+  const canSaveOffline = computed(
+    () =>
+      isStandalonePwa() &&
+      hasRole('FILE_DOWNLOAD') &&
+      toValue(book).media?.status === MediaStatus.Ready,
+  )
+  const download = computed(() => offline.getDownload(toValue(book).id))
+  const offlineBusy = computed(() => !offline.online || offline.offlineMode)
+
+  function openReader(incognito = false) {
+    offline.readerOpened(toValue(book).id)
+    window.open(bookReaderUrl(toValue(book).id, isEpubReader.value, incognito), '_self')
+  }
+
+  async function saveOffline() {
+    try {
+      await offline.downloadBook(toValue(book).id)
+    } catch (error) {
+      messagesStore.messages.push(
+        error instanceof Error ? error.message : commonMessages.networkError,
+      )
+    }
+    callback(ActionName.SaveOffline)
+  }
+
+  async function retryDownload() {
+    try {
+      await offline.downloadBook(toValue(book).id)
+    } catch (error) {
+      messagesStore.messages.push(
+        error instanceof Error ? error.message : commonMessages.networkError,
+      )
+    }
+    callback(ActionName.RetryDownload)
+  }
+
+  async function resumeDownload() {
+    try {
+      await offline.resumeDownload(toValue(book).id)
+    } catch (error) {
+      messagesStore.messages.push(
+        error instanceof Error ? error.message : commonMessages.networkError,
+      )
+    }
+    callback(ActionName.RetryDownload)
+  }
+
+  async function removeDownload() {
+    try {
+      await offline.removeDownload(toValue(book).id)
+    } catch (error) {
+      messagesStore.messages.push(
+        error instanceof Error ? error.message : commonMessages.networkError,
+      )
+    }
+    callback(ActionName.RemoveDownload)
+  }
+
+  const offlineActions = computed<Action<ActionName>[]>(() => {
+    if (!canSaveOffline.value) return []
+    const record = download.value
+    const busyLabel =
+      record?.status === 'updating'
+        ? intl.formatMessage({
+            description: 'Downloads page: updating',
+            defaultMessage: 'Updating',
+            id: 'zmI2mA',
+          })
+        : intl.formatMessage({
+            description: 'Downloads page: downloading',
+            defaultMessage: 'Downloading',
+            id: 'omwGFp',
+          })
+
+    if (!record) {
+      return [
+        {
+          title: intl.formatMessage(actionDetails[ActionName.SaveOffline].message),
+          icon: actionDetails[ActionName.SaveOffline].icon,
+          action: ActionName.SaveOffline,
+          disabled: offlineBusy.value,
+          onClick: () => void saveOffline(),
+        },
+      ]
+    }
+
+    if (['queued', 'downloading', 'updating'].includes(record.status)) {
+      return [
+        {
+          title: intl.formatMessage(
+            {
+              description: 'Book menu: downloading with progress',
+              defaultMessage: 'Downloading {done}/{total}',
+              id: 'Qol9qn',
+            },
+            { done: record.completedPages, total: record.totalPages },
+          ),
+          icon: 'i-mdi:download',
+          action: ActionName.SaveOffline,
+          disabled: true,
+          onClick: () => {},
+        },
+        {
+          title: intl.formatMessage(actionDetails[ActionName.RemoveDownload].message),
+          icon: actionDetails[ActionName.RemoveDownload].icon,
+          action: ActionName.RemoveDownload,
+          onClick: () => void removeDownload(),
+        },
+      ]
+    }
+
+    if (record.status === 'paused') {
+      return [
+        {
+          title: intl.formatMessage({
+            description: 'Book menu: paused',
+            defaultMessage: 'Download paused',
+            id: 'plmAPV',
+          }),
+          icon: 'i-mdi:pause-circle',
+          action: ActionName.RetryDownload,
+          disabled: true,
+          onClick: () => {},
+        },
+        {
+          title: intl.formatMessage(actionDetails[ActionName.RetryDownload].message),
+          icon: actionDetails[ActionName.RetryDownload].icon,
+          action: ActionName.RetryDownload,
+          disabled: offlineBusy.value,
+          onClick: () => void resumeDownload(),
+        },
+        {
+          title: intl.formatMessage(actionDetails[ActionName.RemoveDownload].message),
+          icon: actionDetails[ActionName.RemoveDownload].icon,
+          action: ActionName.RemoveDownload,
+          onClick: () => void removeDownload(),
+        },
+      ]
+    }
+
+    if (record.status === 'error') {
+      return [
+        {
+          title: intl.formatMessage(actionDetails[ActionName.RetryDownload].message),
+          icon: actionDetails[ActionName.RetryDownload].icon,
+          action: ActionName.RetryDownload,
+          disabled: offlineBusy.value,
+          onClick: () => void retryDownload(),
+        },
+        {
+          title: intl.formatMessage(actionDetails[ActionName.RemoveDownload].message),
+          icon: actionDetails[ActionName.RemoveDownload].icon,
+          action: ActionName.RemoveDownload,
+          onClick: () => void removeDownload(),
+        },
+      ]
+    }
+
+    // downloaded (possibly with updateAvailable / sourceMissing / kept-copy error)
+    const rows: Action<ActionName>[] = [
+      {
+        title: intl.formatMessage({
+          description: 'Book menu: available offline',
+          defaultMessage: 'Available offline',
+          id: '4ir1Tm',
+        }),
+        icon: 'i-mdi:check-circle',
+        action: ActionName.SaveOffline,
+        disabled: true,
+        onClick: () => {},
+      },
+    ]
+    if (busyLabel && record.updateAvailable && !record.sourceMissing) {
+      rows.push({
+        title: intl.formatMessage({
+          description: 'Book menu: update available',
+          defaultMessage: 'Update available',
+          id: '2MahXh',
+        }),
+        icon: 'i-mdi:update',
+        action: ActionName.RetryDownload,
+        disabled: offlineBusy.value,
+        onClick: () => void retryDownload(),
+      })
+    }
+    rows.push({
+      title: intl.formatMessage(actionDetails[ActionName.RemoveDownload].message),
+      icon: actionDetails[ActionName.RemoveDownload].icon,
+      action: ActionName.RemoveDownload,
+      onClick: () => void removeDownload(),
+    })
+    return rows
+  })
+
+  const manageDownloadsAction = computed<Action<ActionName>[]>(() =>
+    canSaveOffline.value
+      ? [
+          {
+            title: intl.formatMessage(actionDetails[ActionName.ManageDownloads].message),
+            icon: actionDetails[ActionName.ManageDownloads].icon,
+            action: ActionName.ManageDownloads,
+            onClick: () => {
+              void router.push('/downloads')
+              callback(ActionName.ManageDownloads)
+            },
+          },
+        ]
+      : [],
+  )
+
   const actions = computed<Action<ActionName>[]>(() => [
+    ...offlineActions.value,
+    ...manageDownloadsAction.value,
     ...(isAdmin.value && toValue(book).oneshot
       ? [
           {
@@ -168,7 +387,7 @@ export function useBookActions(
       action: ActionName.OpenReader,
       disabled: !canRead.value,
       onClick: () => {
-        window.open(bookReaderUrl(toValue(book).id, isEpubReader.value), '_self')
+        openReader(false)
         callback(ActionName.OpenReader)
       },
     },
@@ -178,7 +397,7 @@ export function useBookActions(
       action: ActionName.OpenReaderIncognito,
       disabled: !canRead.value,
       onClick: () => {
-        window.open(bookReaderUrl(toValue(book).id, isEpubReader.value, true), '_self')
+        openReader(true)
         callback(ActionName.OpenReaderIncognito)
       },
     },

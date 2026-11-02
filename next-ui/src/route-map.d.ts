@@ -94,6 +94,13 @@ declare module 'vue-router/auto-routes' {
       { id: ParamValue<false> },
       | never
     >,
+    '/downloads': RouteRecordInfo<
+      '/downloads',
+      '/downloads',
+      Record<never, never>,
+      Record<never, never>,
+      | never
+    >,
     '/error': RouteRecordInfo<
       '/error',
       '/error',
@@ -372,6 +379,14 @@ declare module 'vue-router/auto-routes' {
         | never
       pathParamNames:
         | 'id'
+    }
+    'src/pages/downloads.vue': {
+      routes:
+        | '/downloads'
+      views:
+        | never
+      pathParamNames:
+        | never
     }
     'src/pages/error.vue': {
       routes:

@@ -21,6 +21,9 @@ import { useSeries } from '@/composables/series/useSeries'
 import type { SeriesDto } from '@/generated/openapi'
 import { useAddToReadListDialog } from '@/composables/book/useAddToReadListDialog'
 import { useAddToCollectionDialog } from '@/composables/series/useAddToCollectionDialog'
+import { useOfflineLibraryStore } from '@/offline'
+import { isStandalonePwa } from '@/functions/pwa'
+import { komgaGetBooks } from '@/generated/openapi'
 
 export function useSeriesActions(
   series: MaybeRefOrGetter<SeriesDto>,
@@ -28,13 +31,169 @@ export function useSeriesActions(
 ) {
   const { isAdmin, hasRole } = useCurrentUser()
   const intl = useIntl()
+  const router = useRouter()
   const { confirm: dialogConfirm } = storeToRefs(useDialogsStore())
   const messagesStore = useMessagesStore()
   const display = useDisplay()
   const { readFirstBook } = useBooks(series)
   const { canRead, inProgress } = useSeries(series)
 
+  const offline = useOfflineLibraryStore()
+  void offline.whenReady()
+
+  const canSaveOffline = computed(() => isStandalonePwa() && hasRole('FILE_DOWNLOAD'))
+  const offlineBusy = computed(() => !offline.online || offline.offlineMode)
+  const seriesDownloading = ref(false)
+
+  const seriesDownloads = computed(() =>
+    offline.downloads.filter((record) => record.book.seriesId === toValue(series).id),
+  )
+  const downloadedBookCount = computed(
+    () => seriesDownloads.value.filter((record) => offline.isDownloaded(record.bookId)).length,
+  )
+  const seriesAllDownloaded = computed(
+    () => toValue(series).booksCount > 0 && downloadedBookCount.value >= toValue(series).booksCount,
+  )
+  const seriesNeedsUpdate = computed(() =>
+    seriesDownloads.value.some(
+      (record) => record.updateAvailable === true && !record.sourceMissing,
+    ),
+  )
+  const seriesHasActive = computed(() =>
+    seriesDownloads.value.some((record) =>
+      ['queued', 'downloading', 'updating'].includes(record.status),
+    ),
+  )
+  const seriesBusy = computed(() => seriesDownloading.value || seriesHasActive.value)
+
+  async function downloadSeries() {
+    seriesDownloading.value = true
+    try {
+      const page = await komgaGetBooks({
+        body: { condition: { seriesId: { operator: 'is', value: toValue(series).id } } },
+        query: { unpaged: true, sort: ['metadata.numberSort'] },
+      })
+      const books = page.content ?? []
+      const pending = books.filter((book) => {
+        const existing = offline.getDownload(book.id)
+        return !offline.isDownloaded(book.id) || !!existing?.updateAvailable
+      })
+      await offline.downloadBooks(pending, toValue(series).id)
+    } catch (error) {
+      messagesStore.messages.push(
+        error instanceof Error ? error.message : commonMessages.networkError,
+      )
+    } finally {
+      seriesDownloading.value = false
+    }
+    callback(ActionName.SaveOffline)
+  }
+
+  async function removeSeriesDownloads() {
+    try {
+      const bookIds = seriesDownloads.value.map((record) => record.bookId)
+      for (const bookId of bookIds) await offline.removeDownload(bookId)
+    } catch (error) {
+      messagesStore.messages.push(
+        error instanceof Error ? error.message : commonMessages.networkError,
+      )
+    }
+    callback(ActionName.RemoveDownload)
+  }
+
+  const offlineActions = computed<Action<ActionName>[]>(() => {
+    if (!canSaveOffline.value) return []
+    const rows: Action<ActionName>[] = []
+    const total = toValue(series).booksCount
+
+    if (seriesBusy.value) {
+      rows.push({
+        title: intl.formatMessage(
+          {
+            description: 'Series menu: downloading with progress',
+            defaultMessage: 'Downloading {downloaded}/{total}',
+            id: '72+FCB',
+          },
+          { downloaded: downloadedBookCount.value, total },
+        ),
+        icon: 'i-mdi:download',
+        action: ActionName.SaveOffline,
+        disabled: true,
+        onClick: () => {},
+      })
+      return rows
+    }
+
+    if (!seriesAllDownloaded.value || seriesNeedsUpdate.value) {
+      const title =
+        seriesAllDownloaded.value && seriesNeedsUpdate.value
+          ? intl.formatMessage({
+              description: 'Series menu: update series',
+              defaultMessage: 'Update offline series',
+              id: 'eoPZ4l',
+            })
+          : downloadedBookCount.value === 0
+            ? intl.formatMessage({
+                description: 'Series menu: save offline',
+                defaultMessage: 'Save series offline',
+                id: 'u4D78u',
+              })
+            : intl.formatMessage(
+                {
+                  description: 'Series menu: download remaining',
+                  defaultMessage: 'Download remaining ({downloaded}/{total})',
+                  id: '55nOFo',
+                },
+                { downloaded: downloadedBookCount.value, total },
+              )
+      rows.push({
+        title,
+        icon: seriesNeedsUpdate.value ? 'i-mdi:update' : 'i-mdi:download-multiple',
+        action: ActionName.SaveOffline,
+        disabled: offlineBusy.value,
+        onClick: () => void downloadSeries(),
+      })
+    }
+
+    if (downloadedBookCount.value > 0) {
+      rows.push({
+        title: intl.formatMessage({
+          description: 'Series menu: remove downloads',
+          defaultMessage: 'Remove offline copies',
+          id: 'Te5oRu',
+        }),
+        icon: 'i-mdi:download-off',
+        action: ActionName.RemoveDownload,
+        onClick: () => void removeSeriesDownloads(),
+      })
+    }
+
+    return rows
+  })
+
+  const manageDownloadsAction = computed<Action<ActionName>[]>(() =>
+    canSaveOffline.value
+      ? [
+          {
+            title: intl.formatMessage({
+              description: 'Series menu: manage downloads',
+              defaultMessage: 'Manage downloads',
+              id: 'Lijq0W',
+            }),
+            icon: actionDetails[ActionName.ManageDownloads].icon,
+            action: ActionName.ManageDownloads,
+            onClick: () => {
+              void router.push('/downloads')
+              callback(ActionName.ManageDownloads)
+            },
+          },
+        ]
+      : [],
+  )
+
   const actions = computed<Action<ActionName>[]>(() => [
+    ...offlineActions.value,
+    ...manageDownloadsAction.value,
     ...(isAdmin.value
       ? [
           {
@@ -126,6 +285,7 @@ export function useSeriesActions(
       ? [
           {
             title: intl.formatMessage(actionDetails[ActionName.Analyze].message),
+
             action: ActionName.Analyze,
             onClick: () => {
               analyzeSeries()

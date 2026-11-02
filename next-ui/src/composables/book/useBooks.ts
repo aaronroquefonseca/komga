@@ -4,6 +4,7 @@ import { useMessagesStore } from '@/stores/messages'
 import { type ReadListDto, type SeriesDto } from '@/generated/openapi'
 import { isReadList } from '@/functions/entity'
 import { getFirstBookInParent } from '@/functions/book-container'
+import { useOfflineLibraryStore } from '@/offline'
 
 /**
  * Provide functions to retrieve books from either a series or a read list
@@ -11,6 +12,8 @@ import { getFirstBookInParent } from '@/functions/book-container'
  */
 export function useBooks(parent: MaybeRefOrGetter<SeriesDto | ReadListDto>) {
   const messagesStore = useMessagesStore()
+  const offline = useOfflineLibraryStore()
+  void offline.whenReady()
 
   async function readFirstBook(incognito: boolean = false) {
     let book = await getFirstBookInParent(toValue(parent), true)
@@ -21,6 +24,7 @@ export function useBooks(parent: MaybeRefOrGetter<SeriesDto | ReadListDto>) {
       const { canRead, isEpubReader } = useBook(book)
       if (canRead.value) {
         const parentValue = toValue(parent)
+        offline.readerOpened(book.id)
         window.open(
           bookReaderUrl(
             book.id,

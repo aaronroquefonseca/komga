@@ -54,6 +54,8 @@ export {
   clearCachedSessionUser,
 } from './offline-readers'
 export { useOfflineLibraryStore } from './offline-store'
+export { formatBytes, getDownloadBadges, groupDownloadsBySeries } from './offline-downloads'
+export type { DownloadBadge, DownloadGroup } from './offline-downloads'
 export {
   clone,
   conditionMatches,

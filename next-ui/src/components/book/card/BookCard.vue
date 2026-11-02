@@ -38,6 +38,7 @@ import { useBook } from '@/composables/book/useBook'
 import { bookReaderUrl } from '@/api/links'
 import type { BookDto } from '@/generated/openapi'
 import { useImageCacheStore } from '@/stores/image-cache'
+import { useOfflineLibraryStore } from '@/offline'
 import { BrowsingContextKey, formatBrowsingContextAsQueryParam } from '@/functions/browsing-context'
 import type { RouteLocationObject } from '@/types/route'
 import type { SortKeysBook } from '@/types/sort'
@@ -46,6 +47,31 @@ import { getFileSize } from '@/functions/filesize'
 
 const intl = useIntl()
 const cacheStore = useImageCacheStore()
+const offline = useOfflineLibraryStore()
+void offline.whenReady()
+
+const offlineLine = computed<ItemCardLine | undefined>(() => {
+  const record = offline.getDownload(book.value.id)
+  if (!record) return undefined
+  if (!offline.isDownloaded(book.value.id)) return undefined
+  if (record.updateAvailable)
+    return {
+      text: intl.formatMessage({
+        description: 'Offline badge: update available',
+        defaultMessage: 'Offline update available',
+        id: 'U7M5+U',
+      }),
+      classes: 'text-warning',
+    }
+  return {
+    text: intl.formatMessage({
+      description: 'Offline badge: available',
+      defaultMessage: 'Offline',
+      id: 'tYL+3r',
+    }),
+    classes: 'text-success',
+  }
+})
 
 const id = useId()
 
@@ -147,10 +173,11 @@ other {# pages}
 })
 
 const titleAndLines = computed<{ title: ItemCardTitle; lines: ItemCardLine[] }>(() => {
+  const extra = offlineLine.value ? [offlineLine.value] : []
   if (book.value.oneshot) {
     return {
       title: { text: book.value.metadata.title, lines: 2, routerLink: linkTo.value },
-      lines: [footer.value],
+      lines: [footer.value, ...extra],
     }
   } else {
     const numberedTitle = `${book.value.metadata.number} - ${book.value.metadata.title}`
@@ -165,12 +192,16 @@ const titleAndLines = computed<{ title: ItemCardTitle; lines: ItemCardLine[] }>(
             query: formatBrowsingContextAsQueryParam(toValue(context)),
           },
         },
-        lines: [{ text: numberedTitle, lines: 1, routerLink: linkTo.value }, footer.value],
+        lines: [
+          { text: numberedTitle, lines: 1, routerLink: linkTo.value },
+          footer.value,
+          ...extra,
+        ],
       }
     else
       return {
         title: { text: numberedTitle, lines: 2, routerLink: linkTo.value },
-        lines: [footer.value],
+        lines: [footer.value, ...extra],
       }
   }
 })
@@ -210,6 +241,7 @@ const menuActivator = ref()
 function openReader() {
   // Same-tab: '_blank' escapes an installed PWA into the system browser
   // (URL banner, no fullscreen). The classic reader is same-origin/in-scope.
+  offline.readerOpened(book.value.id)
   window.open(bookReaderUrl(book.value.id, isEpubReader.value), '_self')
 }
 </script>
