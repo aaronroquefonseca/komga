@@ -1,7 +1,8 @@
 import type { Router } from 'vue-router'
-import { currentUserQuery } from '@/colada/users'
+import { currentUserQuery, QUERY_KEYS_USERS } from '@/colada/users'
 import { useQueryCache } from '@pinia/colada'
 import { isApiErrorWithCause } from '@/api/komga-client'
+import type { UserDto } from '@/generated/openapi'
 
 /**
  * Check if the user is authenticated before navigating to any page.
@@ -12,6 +13,13 @@ export function useLoginGuard(router: Router) {
   router.beforeEach(async (to) => {
     if (!to.meta.noAuth) {
       const queryCache = useQueryCache()
+      if (typeof navigator !== 'undefined' && navigator.onLine === false) {
+        // Offline: never force a network refresh (it always fails and would
+        // bounce to /error). Trust the restored cached session instead.
+        const cached = queryCache.getQueryData<UserDto>(QUERY_KEYS_USERS.currentUser())
+        if (cached) return
+        return { name: '/login' }
+      }
       const entry = queryCache.ensure(currentUserQuery)
       try {
         const state = await queryCache.refresh(entry)
