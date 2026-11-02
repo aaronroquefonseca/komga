@@ -6,6 +6,8 @@ import { describe, expect, test } from 'vitest'
 import {
   buildShellManifest,
   collectShellEntries,
+  criticalAssetRank,
+  orderShellEntries,
   writeShellManifest,
 } from './generate-shell-manifest'
 
@@ -36,6 +38,75 @@ describe('collectShellEntries', () => {
     } finally {
       await rm(dist, { recursive: true, force: true })
     }
+  })
+
+  test('emits critical fallback chunks before the rest of the shell', async () => {
+    const dist = await mkdtemp(join(tmpdir(), 'nextui-dist-'))
+    try {
+      await mkdir(join(dist, 'assets'), { recursive: true })
+      for (const name of [
+        'zzz-last.js',
+        'error-aaa.js',
+        'books-bbb.js',
+        'login-ccc.js',
+        'layout-ddd.js',
+        'index-eee.js',
+      ]) {
+        await writeFile(join(dist, 'assets', name), 'x')
+      }
+      const entries = await collectShellEntries(dist, new Set())
+      expect(entries.map((entry) => entry.url)).toEqual([
+        'assets/index-eee.js',
+        'assets/login-ccc.js',
+        'assets/error-aaa.js',
+        'assets/layout-ddd.js',
+        'assets/books-bbb.js',
+        'assets/zzz-last.js',
+      ])
+    } finally {
+      await rm(dist, { recursive: true, force: true })
+    }
+  })
+})
+
+describe('criticalAssetRank', () => {
+  test('ranks the boot and fallback chunks before everything else', () => {
+    expect(criticalAssetRank('assets/index-abc123.js')).toBe(0)
+    expect(criticalAssetRank('assets/login-def456.js')).toBe(1)
+    expect(criticalAssetRank('assets/error-ghi789.js')).toBe(2)
+    expect(criticalAssetRank('assets/layout-jkl012.js')).toBe(3)
+    expect(criticalAssetRank('assets/VNavigationDrawer-mno345.js')).toBe(4)
+    expect(criticalAssetRank('assets/books-pqr678.js')).toBe(5)
+  })
+
+  test('does not promote lookalike chunk names', () => {
+    expect(criticalAssetRank('assets/errorCodeFormatter-abc.js')).toBe(5)
+    expect(criticalAssetRank('assets/EmptyStateNetworkError-abc.js')).toBe(5)
+  })
+})
+
+describe('orderShellEntries', () => {
+  test('moves critical chunks first and keeps sorted order within each tier', () => {
+    const entries = [
+      'assets/VNavigationDrawer-jkl.js',
+      'assets/books-abc.js',
+      'assets/error-ghi.js',
+      'assets/index-mno.js',
+      'assets/layout-pqr.js',
+      'assets/login-def.js',
+      'assets/zzz.js',
+      'fonts/font.woff2',
+    ].map((url) => ({ url, size: 1, sha256: 'x' }))
+    expect(orderShellEntries(entries).map((entry) => entry.url)).toEqual([
+      'assets/index-mno.js',
+      'assets/login-def.js',
+      'assets/error-ghi.js',
+      'assets/layout-pqr.js',
+      'assets/VNavigationDrawer-jkl.js',
+      'assets/books-abc.js',
+      'assets/zzz.js',
+      'fonts/font.woff2',
+    ])
   })
 })
 

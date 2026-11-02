@@ -120,6 +120,12 @@
             )
           }}
         </div>
+        <div
+          v-if="offline.shellReady !== 'unknown'"
+          class="text-caption text-medium-emphasis mt-1"
+        >
+          {{ shellStatusText }}
+        </div>
         <v-alert
           v-if="storage.quota > 0"
           type="warning"
@@ -741,6 +747,23 @@ const storagePercent = computed(() => {
   return Math.min(100, (storage.value.usage / storage.value.quota) * 100)
 })
 const storageHeadroom = computed(() => Math.max(0, storage.value.quota - storage.value.usage))
+const shellStatusText = computed(() => {
+  if (offline.shellReady === 'ready')
+    return intl.formatMessage({
+      description: 'Downloads page: offline shell ready',
+      defaultMessage: 'Offline app shell is ready',
+      id: '7cqTpL',
+    })
+  const precache = offline.shellPrecache
+  return intl.formatMessage(
+    {
+      description: 'Downloads page: offline shell preparing',
+      defaultMessage: 'Preparing offline app shell: {done} of {expected}',
+      id: '4GWZ2Y',
+    },
+    { done: precache?.done ?? 0, expected: precache?.expected ?? 0 },
+  )
+})
 const storageText = computed(() => {
   if (!storage.value.quota)
     return intl.formatMessage({

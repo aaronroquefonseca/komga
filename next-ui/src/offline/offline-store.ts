@@ -32,6 +32,8 @@ import type {
   OfflinePage,
   OfflinePageRequest,
   OfflineSetting,
+  OfflineShellPrecacheProgress,
+  OfflineShellReadiness,
   QueuedProgress,
 } from './offline-types'
 import { DEFAULT_DOWNLOAD_PREFERENCES } from './offline-types'
@@ -87,6 +89,8 @@ export const useOfflineLibraryStore = defineStore('offline-library', () => {
   const downloads = ref<OfflineDownloadRecord[]>([])
   const cachedBooks = ref(0)
   const cachedSeries = ref(0)
+  const shellReady = ref<OfflineShellReadiness>('unknown')
+  const shellPrecache = ref<OfflineShellPrecacheProgress | null>(null)
   const preferences = ref<OfflineDownloadPreferences>({ ...DEFAULT_DOWNLOAD_PREFERENCES })
 
   const activeJobs = new Map<string, AbortController>()
@@ -246,6 +250,18 @@ export const useOfflineLibraryStore = defineStore('offline-library', () => {
     })
     notifyServiceWorker()
     if (!enabled) processQueue()
+  }
+
+  /**
+   * Precached app-shell progress. Written only by the offline-shell service
+   * flow; views treat `shellReady`/`shellPrecache` as read-only.
+   */
+  function setShellReadiness(
+    readiness: OfflineShellReadiness,
+    precache: OfflineShellPrecacheProgress | null,
+  ): void {
+    shellReady.value = readiness
+    shellPrecache.value = precache ? { ...precache } : null
   }
 
   async function setDownloadPreferences(
@@ -943,9 +959,12 @@ export const useOfflineLibraryStore = defineStore('offline-library', () => {
     downloads,
     cachedBooks,
     cachedSeries,
+    shellReady,
+    shellPrecache,
     preferences,
     whenReady,
     setOfflineMode,
+    setShellReadiness,
     setDownloadPreferences,
     isDownloaded,
     getDownload,

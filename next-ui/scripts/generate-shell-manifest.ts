@@ -36,7 +36,7 @@ export interface WriteShellManifestOptions {
   extraExcludes?: string[]
 }
 
-/** Recursively list every file under `distDir`, sorted by posix-relative URL. */
+/** Recursively list every file under `distDir`: critical fallback chunks first, then posix-relative URL order. */
 export async function collectShellEntries(
   distDir: string,
   excludeFileNames: ReadonlySet<string> = new Set(),
@@ -67,11 +67,41 @@ export async function collectShellEntries(
 
   await walk(distDir)
   entries.sort((a, b) => (a.url < b.url ? -1 : a.url > b.url ? 1 : 0))
-  return entries
+  return orderShellEntries(entries)
 }
 
 export function buildShellManifest(app: string, files: ShellManifestEntry[]): ShellManifest {
   return { app, version: 1, files }
+}
+
+/**
+ * Basename patterns for the chunks that must survive a partial precache, in
+ * cache order: the entry chunk first (the app cannot boot without it), then
+ * the routes a broken shell falls back to (login, error), then the
+ * surrounding layout chrome. Patterns are matched against the full
+ * dist-relative URL; login/error are anchored to the basename so lookalikes
+ * like `errorCodeFormatter-*` keep their normal rank.
+ */
+export const CRITICAL_ASSET_PATTERNS: RegExp[] = [
+  /(^|\/)index-[^/]*$/i,
+  /(^|\/)login-[^/]*$/i,
+  /(^|\/)error-[^/]*$/i,
+  /layout/i,
+  /drawer/i,
+]
+
+/** Cache rank of one manifest URL: critical fallback chunks first, then everything else. */
+export function criticalAssetRank(url: string): number {
+  const rank = CRITICAL_ASSET_PATTERNS.findIndex((pattern) => pattern.test(url))
+  return rank === -1 ? CRITICAL_ASSET_PATTERNS.length : rank
+}
+
+/**
+ * Critical fallback chunks first, everything else in its existing order
+ * (Array.sort is stable, so callers pass URL-sorted entries).
+ */
+export function orderShellEntries<T extends { url: string }>(entries: T[]): T[] {
+  return [...entries].sort((a, b) => criticalAssetRank(a.url) - criticalAssetRank(b.url))
 }
 
 export async function writeShellManifest(

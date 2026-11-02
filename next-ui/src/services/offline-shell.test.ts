@@ -2,18 +2,28 @@ import { afterEach, beforeEach, describe, expect, test, vi, type Mock } from 'vi
 import type { Router } from 'vue-router'
 import {
   getOfflineShellAssets,
+  isPrecacheCompleteForBatch,
+  KOMGA_OFFLINE_STATUS,
   mergeShellAssets,
   parseShellManifest,
   prepareOfflineShell,
+  queryOfflineShellStatus,
   resetOfflineShellStateForTests,
   resolveShellAssetUrls,
   setServiceWorkerOfflineMode,
   setupOfflineShell,
+  waitForPrecacheCompletion,
 } from '@/services/offline-shell'
+
+const { setShellReadinessMock } = vi.hoisted(() => ({ setShellReadinessMock: vi.fn() }))
+vi.mock('@/offline/offline-store', () => ({
+  useOfflineLibraryStore: () => ({ setShellReadiness: setShellReadinessMock }),
+}))
 
 afterEach(() => {
   document.head.innerHTML = ''
   document.body.innerHTML = ''
+  setShellReadinessMock.mockClear()
   vi.restoreAllMocks()
   vi.unstubAllGlobals()
   resetOfflineShellStateForTests()
@@ -201,5 +211,138 @@ describe('prepareOfflineShell precaching', () => {
     const message = postMessage.mock.calls[0]?.[0] as { type: string; assets: string[] }
     expect(message.type).toBe('KOMGA_PREPARE_OFFLINE_SHELL')
     expect(message.assets).toEqual(getOfflineShellAssets())
+  })
+
+  test('tags the batch and publishes preparing state to the store', async () => {
+    prepareOfflineShell()
+    await vi.waitFor(() => expect(postMessage).toHaveBeenCalledTimes(1))
+
+    const message = postMessage.mock.calls[0]?.[0] as { type: string; batchId: unknown }
+    expect(typeof message.batchId).toBe('string')
+    expect(message.batchId).not.toBe('')
+    await vi.waitFor(() =>
+      expect(setShellReadinessMock).toHaveBeenCalledWith(
+        'preparing',
+        expect.objectContaining({ done: 0 }),
+      ),
+    )
+  })
+})
+
+describe('queryOfflineShellStatus', () => {
+  afterEach(() => {
+    // @ts-expect-error happy-dom has no service workers; remove the stub
+    delete navigator.serviceWorker
+  })
+
+  test('resolves undefined without a service worker', async () => {
+    expect('serviceWorker' in navigator).toBe(false)
+    await expect(queryOfflineShellStatus(10)).resolves.toBeUndefined()
+  })
+
+  test('posts KOMGA_OFFLINE_STATUS and resolves with the worker reply', async () => {
+    const postMessage = vi.fn((message: unknown, transfer: MessagePort[]) => {
+      expect(message).toEqual({ type: KOMGA_OFFLINE_STATUS })
+      transfer[0]?.postMessage({ shellReady: true, precache: null })
+    })
+    Object.defineProperty(navigator, 'serviceWorker', {
+      value: { ready: Promise.resolve({ active: { postMessage } }), controller: null },
+      configurable: true,
+    })
+
+    await expect(queryOfflineShellStatus(1000)).resolves.toEqual({
+      shellReady: true,
+      precache: null,
+    })
+    expect(postMessage).toHaveBeenCalledTimes(1)
+  })
+
+  test('resolves undefined when the worker never replies', async () => {
+    const postMessage = vi.fn()
+    Object.defineProperty(navigator, 'serviceWorker', {
+      value: { ready: Promise.resolve({ active: { postMessage } }), controller: null },
+      configurable: true,
+    })
+
+    await expect(queryOfflineShellStatus(20)).resolves.toBeUndefined()
+  })
+})
+
+describe('isPrecacheCompleteForBatch', () => {
+  test('matches only the tracked batch at full progress', () => {
+    expect(
+      isPrecacheCompleteForBatch({ precache: { batchId: 'b1', expected: 3, done: 3 } }, 'b1'),
+    ).toBe(true)
+    expect(
+      isPrecacheCompleteForBatch({ precache: { batchId: 'b1', expected: 3, done: 2 } }, 'b1'),
+    ).toBe(false)
+    expect(
+      isPrecacheCompleteForBatch({ precache: { batchId: 'b2', expected: 3, done: 3 } }, 'b1'),
+    ).toBe(false)
+    expect(isPrecacheCompleteForBatch({ precache: null }, 'b1')).toBe(false)
+    expect(isPrecacheCompleteForBatch(undefined, 'b1')).toBe(false)
+    // Empty batches complete on the first matching reply.
+    expect(
+      isPrecacheCompleteForBatch({ precache: { batchId: 'b1', expected: 0, done: 0 } }, 'b1'),
+    ).toBe(true)
+  })
+})
+
+describe('waitForPrecacheCompletion', () => {
+  const immediate = () => Promise.resolve()
+
+  test('resolves complete once the tracked batch is fully cached', async () => {
+    const replies = [
+      { precache: { batchId: 'b1', expected: 2, done: 1 } },
+      { precache: { batchId: 'b1', expected: 2, done: 2 } },
+    ]
+    const onProgress = vi.fn()
+    const result = await waitForPrecacheCompletion('b1', 2, {
+      queryStatus: () => Promise.resolve(replies.shift()),
+      delay: immediate,
+      timeoutMs: 1000,
+      intervalMs: 0,
+      onProgress,
+    })
+    expect(result).toEqual({ complete: true, precache: { expected: 2, done: 2 } })
+    expect(onProgress).toHaveBeenNthCalledWith(1, { expected: 2, done: 1 })
+    expect(onProgress).toHaveBeenNthCalledWith(2, { expected: 2, done: 2 })
+  })
+
+  test('ignores other batches, failures, and empty replies until the timeout', async () => {
+    const onProgress = vi.fn()
+    let calls = 0
+    const result = await waitForPrecacheCompletion('b1', 2, {
+      queryStatus: () => {
+        calls += 1
+        if (calls === 1)
+          return Promise.resolve({ precache: { batchId: 'b0', expected: 2, done: 2 } })
+        if (calls === 2) return Promise.reject(new Error('gone'))
+        return Promise.resolve({ precache: null })
+      },
+      delay: immediate,
+      timeoutMs: 30,
+      intervalMs: 0,
+      onProgress,
+    })
+    expect(result.complete).toBe(false)
+    expect(result.precache).toEqual({ expected: 2, done: 0 })
+    expect(onProgress).not.toHaveBeenCalled()
+    expect(calls).toBeGreaterThan(2)
+  })
+
+  test('stops immediately when cancelled', async () => {
+    const queryStatus = vi.fn(() =>
+      Promise.resolve({ precache: { batchId: 'b1', expected: 1, done: 1 } }),
+    )
+    const result = await waitForPrecacheCompletion('b1', 1, {
+      queryStatus,
+      delay: immediate,
+      timeoutMs: 1000,
+      intervalMs: 0,
+      isCancelled: () => true,
+    })
+    expect(result).toEqual({ complete: false, precache: { expected: 1, done: 0 } })
+    expect(queryStatus).not.toHaveBeenCalled()
   })
 })

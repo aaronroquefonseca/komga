@@ -11,6 +11,14 @@ export const OFFLINE_BOOK_CACHE_PREFIX = 'komga-offline-book-v2-'
 export const OFFLINE_SESSION_KEY = 'sessionUser'
 export const OFFLINE_LIBRARIES_KEY = 'libraries'
 
+/** Precached app-shell state for offline cold boots. Unknown until the first preparation runs. */
+export type OfflineShellReadiness = 'unknown' | 'preparing' | 'ready'
+
+export interface OfflineShellPrecacheProgress {
+  expected: number
+  done: number
+}
+
 export type OfflineDownloadStatus =
   'queued' | 'downloading' | 'updating' | 'downloaded' | 'paused' | 'error'
 

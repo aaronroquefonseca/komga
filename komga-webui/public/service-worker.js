@@ -11,6 +11,10 @@ const SETTINGS_STORE = 'settings'
 const DOWNLOADS_STORE = 'downloads'
 let offlineMode
 const activeDownloads = new Map()
+// Progress of the latest KOMGA_PREPARE_OFFLINE_SHELL batch, so the page can
+// poll KOMGA_OFFLINE_STATUS until the precache set is complete. Reset per
+// batch; a worker restart drops it back to null (unknown).
+let precacheProgress = null
 
 function offlineShellUrl() {
   return new URL(OFFLINE_SHELL_PATH, self.registration.scope).href
@@ -117,7 +121,7 @@ async function fetchAndCacheShell(url) {
   return true
 }
 
-async function cacheShellAssets(urls) {
+async function cacheShellAssets(urls, onAssetSettled) {
   const cache = await caches.open(SHELL_CACHE)
   for (const assetUrl of urls || []) {
     try {
@@ -128,11 +132,13 @@ async function cacheShellAssets(urls) {
       if (response.ok) await cache.put(new Request(url.href, {credentials: 'include'}), response)
     } catch (_) {
       // One optional icon/font/chunk must not prevent the rest of the shell being cached.
+    } finally {
+      if (onAssetSettled) onAssetSettled()
     }
   }
 }
 
-async function prepareOfflineShell(pageUrl, assets) {
+async function prepareOfflineShell(pageUrl, assets, batchId) {
   let shellReady = false
   const candidates = [pageUrl, scopeRootUrl()].filter(Boolean)
   for (const candidate of candidates) {
@@ -145,7 +151,12 @@ async function prepareOfflineShell(pageUrl, assets) {
       // Try the next known SPA URL.
     }
   }
-  await cacheShellAssets(assets)
+  const batch = batchId || null
+  const expected = Array.isArray(assets) ? assets.length : 0
+  precacheProgress = {batchId: batch, expected, done: 0}
+  await cacheShellAssets(assets, () => {
+    if (precacheProgress && precacheProgress.batchId === batch) precacheProgress.done += 1
+  })
   return shellReady
 }
 
@@ -155,6 +166,9 @@ async function offlineStatus() {
     version: SHELL_CACHE,
     scope: self.registration.scope,
     shellReady: !!(await cache.match(offlineShellUrl())),
+    precache: precacheProgress
+      ? {batchId: precacheProgress.batchId, expected: precacheProgress.expected, done: precacheProgress.done}
+      : null,
   }
 }
 
@@ -192,7 +206,7 @@ self.addEventListener('message', event => {
   } else if (event.data.type === 'KOMGA_DOWNLOAD_CHANGED' && event.data.bookId) {
     activeDownloads.delete(event.data.bookId)
   } else if (event.data.type === 'KOMGA_PREPARE_OFFLINE_SHELL') {
-    event.waitUntil(prepareOfflineShell(event.data.pageUrl, event.data.assets))
+    event.waitUntil(prepareOfflineShell(event.data.pageUrl, event.data.assets, event.data.batchId))
   } else if (event.data.type === 'KOMGA_CACHE_ASSETS') {
     event.waitUntil(cacheShellAssets(event.data.assets))
   } else if (event.data.type === 'KOMGA_OFFLINE_STATUS' && event.ports && event.ports[0]) {

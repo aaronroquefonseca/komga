@@ -24,6 +24,8 @@ export type {
   OfflinePageRequest,
   OfflineSeriesSearch,
   OfflineSetting,
+  OfflineShellPrecacheProgress,
+  OfflineShellReadiness,
   QueuedProgress,
 } from './offline-types'
 export { DEFAULT_DOWNLOAD_PREFERENCES } from './offline-types'
