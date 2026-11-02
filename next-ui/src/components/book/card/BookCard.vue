@@ -208,6 +208,8 @@ function showEditMetadataDialog() {
 const menuActivator = ref()
 
 function openReader() {
-  window.open(bookReaderUrl(book.value.id, isEpubReader.value), '_blank')
+  // Same-tab: '_blank' escapes an installed PWA into the system browser
+  // (URL banner, no fullscreen). The classic reader is same-origin/in-scope.
+  window.open(bookReaderUrl(book.value.id, isEpubReader.value), '_self')
 }
 </script>

@@ -28,7 +28,7 @@ export function useBooks(parent: MaybeRefOrGetter<SeriesDto | ReadListDto>) {
             incognito,
             isReadList(parentValue) ? parentValue.id : undefined,
           ),
-          '_blank',
+          '_self',
         )
       } else {
         messagesStore.messages.push({
