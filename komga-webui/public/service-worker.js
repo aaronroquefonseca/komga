@@ -123,10 +123,14 @@ async function fetchAndCacheShell(url) {
 
 async function cacheShellAssets(urls, onAssetSettled) {
   const cache = await caches.open(SHELL_CACHE)
-  for (const assetUrl of urls || []) {
+  const list = urls || []
+  // Fetch in bounded-parallel batches: 345 sequential fetches take minutes
+  // on mobile networks, so a full precache would rarely complete on a phone.
+  const CONCURRENCY = 8
+  async function cacheOne(assetUrl) {
     try {
       const url = new URL(assetUrl, self.registration.scope)
-      if (url.origin !== self.location.origin) continue
+      if (url.origin !== self.location.origin) return
       const request = new Request(url.href, {credentials: 'include', cache: 'no-store'})
       const response = await fetch(request)
       if (response.ok) await cache.put(new Request(url.href, {credentials: 'include'}), response)
@@ -135,6 +139,9 @@ async function cacheShellAssets(urls, onAssetSettled) {
     } finally {
       if (onAssetSettled) onAssetSettled()
     }
+  }
+  for (let i = 0; i < list.length; i += CONCURRENCY) {
+    await Promise.all(list.slice(i, i + CONCURRENCY).map(cacheOne))
   }
 }
 

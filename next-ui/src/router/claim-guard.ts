@@ -9,6 +9,8 @@ import { isRefreshTimeout, refreshWithTimeout } from '@/router/refresh-with-time
 export function useClaimGuard(router: Router) {
   router.beforeEach(async (to) => {
     if (to.name === '/claim' || to.name === '/login') {
+      // Offline: let the entry page render instead of bouncing to /error.
+      if (typeof navigator !== 'undefined' && navigator.onLine === false) return
       // check cache
       const queryCache = useQueryCache()
 
