@@ -4,7 +4,7 @@
     :title="titleAndLines.title"
     :lines="titleAndLines.lines"
     :poster-url="bookPosterUrl(book.id, cacheStore.getVersion(book.id))"
-    :top-right-icon="isRead ? 'i-mdi:check' : undefined"
+    :top-right-icon="cornerIcon ?? (isRead ? 'i-mdi:check' : undefined)"
     :progress-percent="progressPercent"
     :fab-icon="canRead ? 'i-mdi:play' : undefined"
     :quick-action-icon="quickActionIcon"
@@ -50,27 +50,15 @@ const cacheStore = useImageCacheStore()
 const offline = useOfflineLibraryStore()
 void offline.whenReady()
 
-const offlineLine = computed<ItemCardLine | undefined>(() => {
+// Fixed corner badge (no layout shift): downloaded state takes the top-right
+// slot, since it is the actionable device state; read state stays visible
+// via the progress bar.
+const cornerIcon = computed<string | undefined>(() => {
   const record = offline.getDownload(book.value.id)
   if (!record) return undefined
   if (!offline.isDownloaded(book.value.id)) return undefined
-  if (record.updateAvailable)
-    return {
-      text: intl.formatMessage({
-        description: 'Offline badge: update available',
-        defaultMessage: 'Offline update available',
-        id: 'U7M5+U',
-      }),
-      classes: 'text-warning',
-    }
-  return {
-    text: intl.formatMessage({
-      description: 'Offline badge: available',
-      defaultMessage: 'Offline',
-      id: 'tYL+3r',
-    }),
-    classes: 'text-success',
-  }
+  if (record.updateAvailable) return 'i-mdi:cloud-alert'
+  return 'i-mdi:cloud-download'
 })
 
 const id = useId()
@@ -173,11 +161,10 @@ other {# pages}
 })
 
 const titleAndLines = computed<{ title: ItemCardTitle; lines: ItemCardLine[] }>(() => {
-  const extra = offlineLine.value ? [offlineLine.value] : []
   if (book.value.oneshot) {
     return {
       title: { text: book.value.metadata.title, lines: 2, routerLink: linkTo.value },
-      lines: [footer.value, ...extra],
+      lines: [footer.value],
     }
   } else {
     const numberedTitle = `${book.value.metadata.number} - ${book.value.metadata.title}`
@@ -195,13 +182,12 @@ const titleAndLines = computed<{ title: ItemCardTitle; lines: ItemCardLine[] }>(
         lines: [
           { text: numberedTitle, lines: 1, routerLink: linkTo.value },
           footer.value,
-          ...extra,
         ],
       }
     else
       return {
         title: { text: numberedTitle, lines: 2, routerLink: linkTo.value },
-        lines: [footer.value, ...extra],
+        lines: [footer.value],
       }
   }
 })

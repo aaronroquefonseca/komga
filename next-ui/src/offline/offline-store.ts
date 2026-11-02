@@ -140,12 +140,8 @@ export const useOfflineLibraryStore = defineStore('offline-library', () => {
     return !!download?.cacheName && ['downloaded', 'updating'].includes(download.status)
   }
 
-  async function updateDownload(
-    record: OfflineDownloadRecord,
-    opts?: { reactive?: boolean },
-  ): Promise<void> {
+  async function updateDownload(record: OfflineDownloadRecord): Promise<void> {
     await offlinePut(OFFLINE_STORES.downloads, clone(record))
-    if (opts?.reactive === false) return
     const index = downloads.value.findIndex((x) => x.bookId === record.bookId)
     if (index >= 0) downloads.value.splice(index, 1, clone(record))
     else downloads.value.unshift(clone(record))
@@ -470,13 +466,22 @@ export const useOfflineLibraryStore = defineStore('offline-library', () => {
     const finished = record.completedPages >= record.totalPages
     if (!finished && now - previous < 500) return
     persistedProgressAt.set(record.bookId, now)
-    // The reactive list (and its full re-render) is throttled harder than the
-    // IndexedDB persist: progress ticks must not keep the UI thread busy while
-    // many books download at once. Status transitions elsewhere stay immediate.
+    await offlinePut(OFFLINE_STORES.downloads, clone(record))
+    // Reactive sync is throttled harder than the IndexedDB persist, and done
+    // in place: cards and menus keyed on status (not on these counters) skip
+    // re-render, so bulk downloads no longer thrash the UI thread.
     const synced = syncedProgressAt.get(record.bookId) ?? 0
-    const reactive = finished || now - synced >= 1000
-    if (reactive) syncedProgressAt.set(record.bookId, now)
-    await updateDownload(record, reactive ? undefined : { reactive: false })
+    if (!finished && now - synced < 1000) return
+    syncedProgressAt.set(record.bookId, now)
+    const existing = downloads.value.find((x) => x.bookId === record.bookId)
+    if (existing) {
+      existing.completedPages = record.completedPages
+      existing.bytes = record.bytes
+      existing.status = record.status
+    } else {
+      downloads.value.unshift(clone(record))
+    }
+    notifyServiceWorker(record.bookId)
   }
 
   async function showGroupedDownloadNotification(

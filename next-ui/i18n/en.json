@@ -1555,10 +1555,6 @@
     "defaultMessage": "Password",
     "description": "Claim server screen: password field label"
   },
-  "U7M5+U": {
-    "defaultMessage": "Offline update available",
-    "description": "Offline badge: update available"
-  },
   "UBdoAo": {
     "defaultMessage": "Remove {count} offline books from {title}?",
     "description": "Downloads page: confirm remove series"
@@ -3298,10 +3294,6 @@
   "tPD6YO": {
     "defaultMessage": "Search series",
     "description": "Series picker dialog: search field label"
-  },
-  "tYL+3r": {
-    "defaultMessage": "Offline",
-    "description": "Offline badge: available"
   },
   "tbNQ5v": {
     "defaultMessage": "{rating}+",

@@ -5,7 +5,7 @@
     :lines="lines"
     :poster-url="seriesPosterUrl(series.id, cacheStore.getVersion(series.id))"
     :top-right="unreadCount"
-    :top-right-icon="isRead ? 'i-mdi:check' : undefined"
+    :top-right-icon="cornerIcon ?? (isRead ? 'i-mdi:check' : undefined)"
     :fab-icon="canRead ? 'i-mdi:play' : undefined"
     :quick-action-icon="quickActionIcon"
     :quick-action-props="quickActionProps"
@@ -48,7 +48,11 @@ const cacheStore = useImageCacheStore()
 const offline = useOfflineLibraryStore()
 void offline.whenReady()
 
-const offlineLine = computed<ItemCardLine | undefined>(() => {
+const lines = computed<ItemCardLine[]>(() => [footer.value])
+
+// Fixed corner badge (no layout shift): downloaded state takes the top-right
+// slot, since it is the actionable device state.
+const cornerIcon = computed<string | undefined>(() => {
   const records = offline.downloads.filter((record) => record.book.seriesId === series.value.id)
   if (records.length === 0) return undefined
   const downloaded = records.filter((record) => offline.isDownloaded(record.bookId)).length
@@ -56,30 +60,9 @@ const offlineLine = computed<ItemCardLine | undefined>(() => {
   const needsUpdate = records.some(
     (record) => record.updateAvailable === true && !record.sourceMissing,
   )
-  if (needsUpdate)
-    return {
-      text: intl.formatMessage({
-        description: 'Offline badge: update available',
-        defaultMessage: 'Offline update available',
-        id: 'U7M5+U',
-      }),
-      classes: 'text-warning',
-    }
-  if (series.value.booksCount > 0 && downloaded >= series.value.booksCount)
-    return {
-      text: intl.formatMessage({
-        description: 'Offline badge: available',
-        defaultMessage: 'Offline',
-        id: 'tYL+3r',
-      }),
-      classes: 'text-success',
-    }
-  return undefined
+  if (needsUpdate) return 'i-mdi:cloud-alert'
+  return 'i-mdi:cloud-download'
 })
-
-const lines = computed<ItemCardLine[]>(() =>
-  offlineLine.value ? [footer.value, offlineLine.value] : [footer.value],
-)
 
 const id = useId()
 
