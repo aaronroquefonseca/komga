@@ -1,6 +1,7 @@
 import type { Router } from 'vue-router'
 import { currentUserQuery, QUERY_KEYS_USERS } from '@/colada/users'
 import { useQueryCache } from '@pinia/colada'
+import { refreshWithTimeout } from '@/router/refresh-with-timeout'
 import type { UserDto } from '@/generated/openapi'
 
 /**
@@ -22,13 +23,16 @@ export function useRoleGuard(router: Router) {
       }
       const entry = queryCache.ensure(currentUserQuery)
       try {
-        const state = await queryCache.refresh(entry)
+        const state = await refreshWithTimeout(queryCache.refresh(entry))
 
         if (!state.data?.roles?.includes(to.meta.requiresRole)) {
           return { name: '/' }
         }
-      } catch (ignored) {
-        return { name: '/error' }
+      } catch {
+        // Offline or unreachable: judge from the restored cached session.
+        const cached = queryCache.getQueryData<UserDto>(QUERY_KEYS_USERS.currentUser())
+        if (!cached) return { name: '/login' }
+        if (!cached.roles?.includes(to.meta.requiresRole)) return { name: '/' }
       }
     }
   })
