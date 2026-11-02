@@ -323,6 +323,10 @@
     "defaultMessage": "Import series metadata",
     "description": "Form add/edit library: Metadata - epub series metadata"
   },
+  "4GWZ2Y": {
+    "defaultMessage": "Preparing offline app shell: {done} of {expected}",
+    "description": "Downloads page: offline shell preparing"
+  },
   "4IKM3R": {
     "defaultMessage": "Label",
     "description": "Form edit: Alternate titles - Label field label"
@@ -466,6 +470,10 @@
   "7RfNiY": {
     "defaultMessage": "Summary",
     "description": "Form edit book: General - book summary"
+  },
+  "7cqTpL": {
+    "defaultMessage": "Offline app shell is ready",
+    "description": "Downloads page: offline shell ready"
   },
   "7gdpKG": {
     "defaultMessage": "Create",

@@ -10,6 +10,7 @@ import { routes } from 'vue-router/auto-routes'
 import { parse, stringify } from 'qs'
 
 import { scrollerQuery, scrollMap } from '@/router/scroll'
+import { decideDynamicImportRecovery } from '@/router/dynamic-import-failure'
 
 const router = createRouter({
   history: createWebHistory(
@@ -39,14 +40,26 @@ const router = createRouter({
 
 // Workaround for https://github.com/vitejs/vite/issues/11804
 router.onError((err, to) => {
-  if (err?.message?.includes?.('Failed to fetch dynamically imported module')) {
-    if (!localStorage.getItem('vuetify:dynamic-reload')) {
-      console.log('Reloading page to fix dynamic import error')
-      localStorage.setItem('vuetify:dynamic-reload', 'true')
-      location.assign(to.fullPath)
-    } else {
-      console.error('Dynamic import error, reloading page did not fix it', err)
-    }
+  const recovery = decideDynamicImportRecovery({
+    error: err,
+    online: typeof navigator === 'undefined' ? true : navigator.onLine,
+    alreadyRetried: localStorage.getItem('vuetify:dynamic-reload') !== null,
+    isErrorRoute: to.path === '/error',
+  })
+  if (recovery === 'reload') {
+    console.log('Reloading page to fix dynamic import error')
+    localStorage.setItem('vuetify:dynamic-reload', 'true')
+    location.assign(to.fullPath)
+  } else if (recovery === 'error-page') {
+    // A reload can never succeed while offline; fall back to the precached
+    // /error route instead of sitting on a blank view.
+    console.error('Dynamic import error while offline, showing the error page instead', err)
+    void router.push('/error').catch((pushError: unknown) => console.error(pushError))
+  } else if (
+    err?.message?.includes?.('Failed to fetch dynamically imported module') &&
+    localStorage.getItem('vuetify:dynamic-reload')
+  ) {
+    console.error('Dynamic import error, reloading page did not fix it', err)
   } else {
     console.error(err)
   }
