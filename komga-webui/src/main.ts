@@ -51,7 +51,8 @@ import router from './router'
 import store from './store'
 import i18n from './i18n'
 import urls from './functions/urls'
-import {isStandalonePwa} from './functions/pwa'
+import { isStandalonePwa } from './functions/pwa'
+import { mergeShellAssets, parseShellManifest, resolveShellAssetUrls, WEBUI_SHELL_MANIFEST_FILENAME } from './functions/offline-shell-manifest'
 import OfflineDownloads from './views/OfflineDownloads.vue'
 
 Vue.prototype.$_ = _
@@ -149,19 +150,59 @@ function getOfflineShellAssets(): string[] {
 
 let serviceWorkerRegistration: Promise<ServiceWorkerRegistration | undefined> = Promise.resolve(undefined)
 
+// Minimum delay between shell preparations; afterEach/online triggers fire often.
+const PREPARE_MIN_INTERVAL_MS = 30000
+let shellManifestUrls: string[] | undefined
+let shellManifestRequest: Promise<string[]> | undefined
+let lastPrepareAt = 0
+let inFlightPrepare: Promise<void> | undefined
+
+function shellManifestUrl(): string {
+  return `${urls.base}${WEBUI_SHELL_MANIFEST_FILENAME}`
+}
+
+async function loadManifestAssetUrls(): Promise<string[]> {
+  if (shellManifestUrls) return shellManifestUrls
+  if (!shellManifestRequest) {
+    shellManifestRequest = (async () => {
+      try {
+        const response = await fetch(shellManifestUrl(), { cache: 'no-store' })
+        if (!response.ok) return []
+        const resolved = resolveShellAssetUrls(parseShellManifest(await response.json()), urls.origin)
+        shellManifestUrls = resolved
+        return resolved
+      } catch (error) {
+        Vue.prototype.$warn('Komga offline shell manifest fetch failed', error)
+        return []
+      } finally {
+        shellManifestRequest = undefined
+      }
+    })()
+  }
+  return shellManifestRequest
+}
+
 function prepareOfflineShell(): void {
   if (!('serviceWorker' in navigator) || !Vue.prototype.$offline.state.online) return
-  serviceWorkerRegistration
-    .then(registration => {
-      const worker = registration?.active
-      if (!worker) return
-      worker.postMessage({
+  if (inFlightPrepare) return
+  const now = Date.now()
+  if (now - lastPrepareAt < PREPARE_MIN_INTERVAL_MS) return
+  lastPrepareAt = now
+  inFlightPrepare = (async () => {
+    try {
+      const assets = mergeShellAssets(getOfflineShellAssets(), await loadManifestAssetUrls())
+      const registration = await serviceWorkerRegistration
+      registration?.active?.postMessage({
         type: 'KOMGA_PREPARE_OFFLINE_SHELL',
         pageUrl: window.location.href,
-        assets: getOfflineShellAssets(),
+        assets,
       })
-    })
-    .catch(error => Vue.prototype.$warn('Komga offline shell preparation failed', error))
+    } catch (error) {
+      Vue.prototype.$warn('Komga offline shell preparation failed', error)
+    } finally {
+      inFlightPrepare = undefined
+    }
+  })()
 }
 
 if ('serviceWorker' in navigator) {

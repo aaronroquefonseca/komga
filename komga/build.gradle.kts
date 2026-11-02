@@ -193,6 +193,7 @@ tasks {
     group = "web"
     from("$webui/dist/")
     into("$projectDir/src/main/resources/public/")
+    // NOTE: webui-shell.json (offline precache manifest) must keep flowing through; do not exclude it.
   }
 
   register<Copy>("webuiCopyIndex") {
@@ -214,6 +215,7 @@ tasks {
     from("$nextui/dist/")
     into("$projectDir/src/main/resources/public/")
     excludes.add("index.html") // will be copied by 'nextuiCopyIndex'
+    // NOTE: nextui-shell.json (offline precache manifest) must keep flowing through; do not exclude it.
     mustRunAfter(getByName("webuiCopyDist"))
   }
 
