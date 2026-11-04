@@ -332,6 +332,10 @@ try {
     assert.equal(errors.length, 0, errors.join('\n'))
     await page.goto(base + '/classic/book/offline-book/read-epub?source=nextui')
     await page.getByText('Unavailable offline', { exact: true }).waitFor()
+    assert.equal(
+      await page.getByRole('link', { name: 'Open Downloads', exact: true }).getAttribute('href'),
+      '/next/downloads',
+    )
     await page.goto(base + '/classic/book/offline-book/read?source=nextui')
     await page.evaluate(async () => {
       const cacheName = await new Promise((resolve) => {
@@ -528,8 +532,16 @@ try {
     await page.goto(base + '/downloads')
     await page.getByText('Books saved on this device for offline reading').waitFor()
     assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth))
-    await page.evaluate(() => {document.querySelector('#app').__vue_app__.config.globalProperties.$pinia._s.get('app').drawer = false})
-    await page.screenshot({ path: '/tmp/komga-offline-mobile.png' })
+    await page.evaluate(() => {
+      document
+        .querySelector('#app')
+        .__vue_app__.config.globalProperties.$pinia._s.get('app').drawer = false
+    })
+    await page.waitForFunction(() => {
+      const drawer = document.querySelector('.v-navigation-drawer')
+      return !drawer || drawer.getBoundingClientRect().right <= 1
+    })
+    await page.screenshot({ path: '/tmp/komga-offline-mobile.png', animations: 'disabled' })
     networkDown = false
     await context.setOffline(false)
     await page.close()
@@ -604,7 +616,11 @@ try {
     await page.reload()
     await page.getByText('Super Duck', { exact: true }).first().waitFor()
     for (const other of context.pages()) if (other !== page) await other.close()
-    await page.evaluate(() => {document.querySelector('#app').__vue_app__.config.globalProperties.$pinia._s.get('app').drawer = true})
+    await page.evaluate(() => {
+      document
+        .querySelector('#app')
+        .__vue_app__.config.globalProperties.$pinia._s.get('app').drawer = true
+    })
     await page.getByText('Logout', { exact: true }).click()
     await page.getByLabel('Email', { exact: true }).waitFor()
     networkDown = true

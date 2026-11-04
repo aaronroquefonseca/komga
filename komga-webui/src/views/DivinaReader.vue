@@ -6,7 +6,7 @@
     <v-alert v-if="unavailablePage" type="warning" style="position:fixed;top:16px;left:16px;right:16px;z-index:100">
       Page {{ unavailablePage }} is unavailable. Reconnect or download this book again to restore missing pages.
       <v-btn text @click="retryUnavailablePage">Retry page</v-btn>
-      <v-btn text :href="source === 'nextui' ? `${resourceBase}downloads` : `${resourceBase}classic/downloads`">Open Downloads</v-btn>
+      <v-btn text :href="source === 'nextui' ? `${resourceBase}next/downloads` : `${resourceBase}classic/downloads`">Open Downloads</v-btn>
     </v-alert>
     <div>
       <v-slide-y-transition>
@@ -802,7 +802,7 @@ export default Vue.extend({
         await this.setupBook(bookId, page, position)
       } catch (error) {
         this.$warn('Reader setup failed', error)
-        this.$router.replace({name: 'offline-unavailable'})
+        this.$router.replace({name: 'offline-unavailable', query: {source: this.$route.query.source}})
       }
     },
     async setupBook(bookId: string, page?: number, position?: string) {

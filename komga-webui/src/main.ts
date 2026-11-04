@@ -122,7 +122,7 @@ router.addRoute({
       return h('div', {style: {font: '16px system-ui', padding: '48px', maxWidth: '36rem', margin: 'auto'}}, [
         h('h1', 'Unavailable offline'),
         h('p', 'This book is not saved for offline reading. EPUB reading requires a connection.'),
-        h('a', {attrs: {href: urls.base + 'downloads'}}, 'Open Downloads'),
+        h('a', {attrs: {href: urls.base + (this.$route.query.source === 'nextui' ? 'next/downloads' : 'classic/downloads')}}, 'Open Downloads'),
       ])
     },
   }),
@@ -133,7 +133,7 @@ router.beforeEach(async (to, from, next) => {
   if (['read-book', 'read-epub'].includes(to.name || '') &&
     (Vue.prototype.$offline.state.offlineMode || !Vue.prototype.$offline.state.online) &&
     (to.name === 'read-epub' || !Vue.prototype.$offline.isDownloaded(to.params.bookId))) {
-    next({name: 'offline-unavailable'})
+    next({name: 'offline-unavailable', query: {source: to.query.source}})
     return
   }
   next()
