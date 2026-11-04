@@ -149,7 +149,7 @@ export function conditionMatches(item: OfflineFilterItem, condition: unknown): b
   if (Array.isArray(record.allOf))
     return (record.allOf as unknown[]).every((x) => conditionMatches(item, x))
   if (Array.isArray(record.anyOf))
-    return (record.anyOf as unknown[]).every((x) => conditionMatches(item, x))
+    return (record.anyOf as unknown[]).some((x) => conditionMatches(item, x))
 
   return Object.entries(record).every(([key, operator]) => {
     switch (key) {

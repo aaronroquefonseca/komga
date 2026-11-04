@@ -298,16 +298,40 @@ self.addEventListener('fetch', event => {
     return
   }
 
-  const thumbnailBookId = bookIdFromThumbnail(url)
-  if (thumbnailBookId) {
+  const thumbnail = url.pathname.match(/\/api\/v1\/(books|series)\/([^/]+)\/thumbnail\/?$/)
+  if (thumbnail) {
     event.respondWith((async () => {
-      const cached = await cachedBookMedia(thumbnailBookId, request)
-      if (cached) return cached
-      if (await readOfflineMode()) return new Response('', {status: 503})
+      if (thumbnail[1] === 'books') {
+        const downloaded = await cachedBookMedia(decodeURIComponent(thumbnail[2]), request)
+        if (downloaded) return downloaded
+      }
+      const [session, prefs] = await Promise.all([
+        readStore(SETTINGS_STORE, 'sessionUser'), readStore(SETTINGS_STORE, 'downloadPreferences'),
+      ])
+      const userId = session?.value?.id
+      const keepCovers = !!userId && prefs?.value?.cacheCovers === true
+      const cache = keepCovers ? await caches.open('komga-offline-covers-' + encodeURIComponent(DB_NAME) + '-' + encodeURIComponent(userId)) : null
+      const localOnly = await readOfflineMode() || self.navigator.onLine === false
+      const cached = cache && await cache.match(request, {ignoreSearch: localOnly})
+      if (cached && (await readStore(SETTINGS_STORE, 'sessionUser'))?.value?.id === userId) return cached
+      if (localOnly) return new Response('', {status: 503})
       try {
-        return await boundedFetch(request)
+        const response = await boundedFetch(request)
+        if (cache && response.ok && (response.headers.get('content-type') || '').startsWith('image/')) {
+          const [currentSession, currentPrefs] = await Promise.all([
+            readStore(SETTINGS_STORE, 'sessionUser'), readStore(SETTINGS_STORE, 'downloadPreferences'),
+          ])
+          if (currentSession?.value?.id === userId && currentPrefs?.value?.cacheCovers === true) {
+            // Keep one optional cover per item, even after version-query updates.
+            const key = new URL(request.url)
+            key.search = ''
+            await cache.put(new Request(key.href, {credentials: 'include'}), response.clone()).catch(() => undefined)
+          }
+        }
+        return response
       } catch (_) {
-        return new Response('', {status: 503})
+        const currentSession = await readStore(SETTINGS_STORE, 'sessionUser')
+        return (currentSession?.value?.id === userId && cache && await cache.match(request, {ignoreSearch: true})) || new Response('', {status: 503})
       }
     })())
     return

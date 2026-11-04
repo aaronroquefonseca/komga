@@ -227,6 +227,10 @@
     "defaultMessage": "Metrics",
     "description": "Drawer menu for Server > Metrics"
   },
+  "2gNaKC": {
+    "defaultMessage": "Keep browsed covers offline",
+    "description": "Downloads cover caching preference"
+  },
   "2p+JVw": {
     "defaultMessage": "This Komga server is not yet active, you need to create a user account to be able to access it.",
     "description": "Claim server screen: information banner"
@@ -374,6 +378,10 @@
   "55nOFo": {
     "defaultMessage": "Download remaining ({downloaded}/{total})",
     "description": "Series menu: download remaining"
+  },
+  "57AL+B": {
+    "defaultMessage": "Saving catalog: {done} of {total} entries in this batch",
+    "description": "Downloads catalog sync progress"
   },
   "5AAGkA": {
     "defaultMessage": "Password",
@@ -999,6 +1007,10 @@
     "defaultMessage": "Manually",
     "description": "Form edit collection: General - series ordering: manually"
   },
+  "H25Rdx": {
+    "defaultMessage": "Off by default. Saves book and series covers as you browse, using additional device storage. Turning this off removes these extra covers; downloaded book covers are kept.",
+    "description": "Downloads cover caching explanation"
+  },
   "H2B6uF": {
     "defaultMessage": "Choose a series",
     "description": "Import reading list: status message: choose a series"
@@ -1146,6 +1158,10 @@
   "JbF1nK": {
     "defaultMessage": "Password changed for user: {email}",
     "description": "Snackbar notification shown upon successful user's password modification"
+  },
+  "JiSU+K": {
+    "defaultMessage": "Catalog sync did not finish. Saved entries remain available. Reconnect and retry Sync catalog.",
+    "description": "Downloads catalog sync error"
   },
   "Jj4uO/": {
     "defaultMessage": "Number of pages",
@@ -1423,6 +1439,10 @@
     "defaultMessage": "Email",
     "description": "Login screen: email field label"
   },
+  "QJFkAI": {
+    "defaultMessage": "Full catalog has not been saved yet. Stay online and sync it for offline browsing.",
+    "description": "Downloads catalog not ready"
+  },
   "QM5+gW": {
     "defaultMessage": "Delete count",
     "description": "Known Duplicate Page Table header: delete count"
@@ -1438,6 +1458,10 @@
   "Qz1UTX": {
     "defaultMessage": "Close",
     "description": "File name picker dialog: Close button"
+  },
+  "R43wiM": {
+    "defaultMessage": "Sync catalog",
+    "description": "Downloads sync catalog button"
   },
   "REmxIM": {
     "defaultMessage": "Modified",
@@ -3374,6 +3398,10 @@
   "u4D78u": {
     "defaultMessage": "Save series offline",
     "description": "Series menu: save offline"
+  },
+  "u8EmZl": {
+    "defaultMessage": "Full catalog saved on this device. Last synced {date}.",
+    "description": "Downloads catalog ready"
   },
   "uBqZMx": {
     "defaultMessage": "Existing",

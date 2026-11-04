@@ -1,9 +1,12 @@
 import { defineStore } from 'pinia'
 import { ApiBaseUrl } from '@/api/base'
+import { syncCatalogPages } from './catalog-sync'
 import { bookPosterUrl } from '@/api/images'
 import {
   komgaGetBookById,
   komgaGetCurrentUser,
+  komgaGetLibraries,
+  komgaGetUserSettings,
   type UserDto,
   komgaGetBookPages,
   komgaGetBooks,
@@ -19,9 +22,11 @@ import {
 } from '@/generated/openapi'
 import {
   OFFLINE_STORES,
+  OFFLINE_DB_NAME,
   offlineDelete,
   offlineGet,
   offlineGetAll,
+  offlineCount,
   offlinePut,
   offlinePutMany,
   openOfflineDatabase,
@@ -91,6 +96,11 @@ export const useOfflineLibraryStore = defineStore('offline-library', () => {
   const offlineMode = ref(false)
   const online = ref(isBrowser() ? navigator.onLine : true)
   const syncingMetadata = ref(false)
+  const catalogSyncedAt = ref<string | null>(null)
+  const catalogError = ref<string | null>(null)
+  const catalogProgress = ref<{ kind: 'books' | 'series'; done: number; total: number } | null>(
+    null,
+  )
   const syncingProgress = ref(false)
   const downloads = ref<OfflineDownloadRecord[]>([])
   const cachedBooks = ref(0)
@@ -163,14 +173,14 @@ export const useOfflineLibraryStore = defineStore('offline-library', () => {
   async function refreshState(): Promise<void> {
     const [storedDownloads, books, series] = await Promise.all([
       offlineGetAll<OfflineDownloadRecord>(OFFLINE_STORES.downloads),
-      offlineGetAll<BookDto>(OFFLINE_STORES.books),
-      offlineGetAll<SeriesDto>(OFFLINE_STORES.series),
+      offlineCount(OFFLINE_STORES.books),
+      offlineCount(OFFLINE_STORES.series),
     ])
     downloads.value = storedDownloads.sort((a, b) =>
       `${b.downloadedAt || ''}`.localeCompare(`${a.downloadedAt || ''}`),
     )
-    cachedBooks.value = books.length
-    cachedSeries.value = series.length
+    cachedBooks.value = books
+    cachedSeries.value = series
   }
 
   async function cleanupOrphanedBookCaches(): Promise<void> {
@@ -224,6 +234,11 @@ export const useOfflineLibraryStore = defineStore('offline-library', () => {
       ...DEFAULT_DOWNLOAD_PREFERENCES,
       ...(storedPreferences?.value ?? {}),
     })
+    const catalog = await offlineGet<OfflineSetting<string>>(
+      OFFLINE_STORES.settings,
+      'catalogSyncedAt',
+    )
+    catalogSyncedAt.value = catalog?.value ?? null
     await refreshState()
     await recoverInterruptedDownloads()
     await cleanupOrphanedBookCaches()
@@ -279,27 +294,43 @@ export const useOfflineLibraryStore = defineStore('offline-library', () => {
       key: 'downloadPreferences',
       value: clone(preferences.value),
     })
+    if (partial.cacheCovers === false) await clearCachedCovers()
     processQueue()
+  }
+
+  async function clearCachedCovers(): Promise<void> {
+    const session = await offlineGet<OfflineSetting<UserDto>>(
+      OFFLINE_STORES.settings,
+      'sessionUser',
+    )
+    if (session?.value && 'caches' in window) {
+      const name =
+        'komga-offline-covers-' +
+        encodeURIComponent(OFFLINE_DB_NAME) +
+        '-' +
+        encodeURIComponent(session.value.id)
+      await caches.delete(name)
+    }
   }
 
   async function cacheBook(book: BookDto): Promise<void> {
     await offlinePut(OFFLINE_STORES.books, clone(book))
-    cachedBooks.value = (await offlineGetAll<BookDto>(OFFLINE_STORES.books)).length
+    cachedBooks.value = await offlineCount(OFFLINE_STORES.books)
   }
 
   async function cacheBooks(books: BookDto[]): Promise<void> {
     await offlinePutMany(OFFLINE_STORES.books, books.map(clone))
-    cachedBooks.value = (await offlineGetAll<BookDto>(OFFLINE_STORES.books)).length
+    cachedBooks.value = await offlineCount(OFFLINE_STORES.books)
   }
 
   async function cacheSeriesItem(series: SeriesDto): Promise<void> {
     await offlinePut(OFFLINE_STORES.series, clone(series))
-    cachedSeries.value = (await offlineGetAll<SeriesDto>(OFFLINE_STORES.series)).length
+    cachedSeries.value = await offlineCount(OFFLINE_STORES.series)
   }
 
   async function cacheSeries(items: SeriesDto[]): Promise<void> {
     await offlinePutMany(OFFLINE_STORES.series, items.map(clone))
-    cachedSeries.value = (await offlineGetAll<SeriesDto>(OFFLINE_STORES.series)).length
+    cachedSeries.value = await offlineCount(OFFLINE_STORES.series)
   }
 
   async function cachePages(bookId: string, pages: PageDto[]): Promise<void> {
@@ -398,21 +429,54 @@ export const useOfflineLibraryStore = defineStore('offline-library', () => {
     if (!online.value || offlineMode.value || syncingMetadata.value) return
     syncingMetadata.value = true
     try {
-      const [booksPage, seriesPage] = await Promise.all([
-        komgaGetBooks({ body: {}, query: { unpaged: true } }),
-        komgaGetSeries({ body: {}, query: { unpaged: true } }),
-      ])
+      catalogError.value = null
+      // Libraries and view preferences are required to navigate a cold offline catalog.
+      const libraries = await komgaGetLibraries()
       assertOfflineAccount(accountToken)
-
-      const books = booksPage.content ?? []
-      const series = seriesPage.content ?? []
-      await Promise.all([cacheBooks(books), cacheSeries(series)])
+      await offlinePut(OFFLINE_STORES.settings, { key: 'libraries', value: clone(libraries) })
+      const userSettings = await komgaGetUserSettings()
       assertOfflineAccount(accountToken)
-
+      await offlinePut(OFFLINE_STORES.settings, { key: 'userSettings', value: clone(userSettings) })
+      const books = await syncCatalogPages<BookDto>(
+        (page, size) => komgaGetBooks({ body: {}, query: { page, size, sort: ['url,asc'] } }),
+        async (items) => {
+          assertOfflineAccount(accountToken)
+          await cacheBooks(items)
+          assertOfflineAccount(accountToken)
+        },
+        (done, total) => {
+          catalogProgress.value = { kind: 'books', done, total }
+        },
+      )
+      assertOfflineAccount(accountToken)
+      await syncCatalogPages<SeriesDto>(
+        (page, size) =>
+          komgaGetSeries({
+            body: {},
+            query: { page, size, sort: ['createdDate,asc', 'name,asc'] },
+          }),
+        async (items) => {
+          assertOfflineAccount(accountToken)
+          await cacheSeries(items)
+          assertOfflineAccount(accountToken)
+        },
+        (done, total) => {
+          catalogProgress.value = { kind: 'series', done, total }
+        },
+      )
+      assertOfflineAccount(accountToken)
+      const syncedAt = new Date().toISOString()
+      await offlinePut(OFFLINE_STORES.settings, { key: 'catalogSyncedAt', value: syncedAt })
+      assertOfflineAccount(accountToken)
+      catalogSyncedAt.value = syncedAt
       await checkDownloadUpdates(books)
       assertOfflineAccount(accountToken)
+    } catch (error) {
+      if (isOfflineAccount(accountToken)) catalogError.value = errorMessage(error)
+      throw error
     } finally {
       syncingMetadata.value = false
+      catalogProgress.value = null
     }
   }
 
@@ -1093,6 +1157,13 @@ export const useOfflineLibraryStore = defineStore('offline-library', () => {
       activeJobs.forEach((controller) => controller.abort())
       activeJobs.clear()
       downloads.value = []
+      catalogSyncedAt.value = null
+      catalogError.value = null
+      const catalog = await offlineGet<OfflineSetting<string>>(
+        OFFLINE_STORES.settings,
+        'catalogSyncedAt',
+      )
+      catalogSyncedAt.value = catalog?.value ?? null
       await refreshState()
       const [mode, prefs] = await Promise.all([
         offlineGet<OfflineSetting<boolean>>(OFFLINE_STORES.settings, 'offlineMode'),
@@ -1124,6 +1195,9 @@ export const useOfflineLibraryStore = defineStore('offline-library', () => {
     offlineMode,
     online,
     syncingMetadata,
+    catalogSyncedAt,
+    catalogError,
+    catalogProgress,
     syncingProgress,
     downloads,
     cachedBooks,
@@ -1139,6 +1213,7 @@ export const useOfflineLibraryStore = defineStore('offline-library', () => {
     setOfflineMode,
     setShellReadiness,
     setDownloadPreferences,
+    clearCachedCovers,
     isDownloaded,
     getDownload,
     refreshState,

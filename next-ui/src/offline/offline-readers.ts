@@ -12,6 +12,8 @@ import {
   komgaGetGenres,
   komgaGetLanguages,
   komgaGetLibraries,
+  komgaGetUserSettings,
+  type ClientSettingDto,
   komgaGetLibraryById,
   komgaGetPublishers,
   komgaGetSeries,
@@ -594,4 +596,27 @@ export async function getSeriesUpdatedOfflineFirst(
   }
   const items = (await cachedSeriesForLibraries(libraryIds)).filter((item) => !item.oneshot)
   return pageFromItems(items, { ...pageRequest, sort: ['lastModified,desc'] })
+}
+
+/** Preserve library pinning and view preferences for offline navigation. */
+export async function getUserSettingsOfflineFirst(): Promise<Record<string, ClientSettingDto>> {
+  const account = offlineAccountToken()
+  const local = async () =>
+    (
+      await offlineGet<OfflineSetting<Record<string, ClientSettingDto>>>(
+        OFFLINE_STORES.settings,
+        'userSettings',
+      )
+    )?.value ?? {}
+  if (isLocalOnly()) return local()
+  try {
+    const settings = await komgaGetUserSettings()
+    assertOfflineAccount(account)
+    await offlinePut(OFFLINE_STORES.settings, { key: 'userSettings', value: settings }).catch(
+      () => undefined,
+    )
+    return settings
+  } catch {
+    return local()
+  }
 }

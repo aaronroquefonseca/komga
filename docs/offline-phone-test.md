@@ -1,6 +1,6 @@
 # Offline behavior and verification
 
-Next UI caches visited catalog metadata. **Downloads** contains the books whose
+Next UI automatically saves the full accessible book and series catalog after sign-in, in pages of 200 entries. **Downloads** contains the books whose
 page images are saved on this device. Cached catalog entries can be browsed but
 are not readable until their download finishes. Reading opens the classic
 reader; offline setup therefore prepares both application shells.
@@ -82,3 +82,21 @@ Databases and media cache names are scoped by deployment and account. Existing
 root-deployment data is retained for its original account; changing accounts
 selects another database. Logging out removes the local session and retains the
 account's downloaded copies for its next sign-in.
+
+## Catalog and optional covers
+
+Downloads shows the last complete catalog sync, progress, and failures. **Sync
+catalog** retries without discarding saved entries. Catalog metadata is saved
+regardless of the cover setting. Offline library browsing retains library/view
+preferences and matches alternative library/media filters using OR semantics.
+
+**Keep browsed covers offline** is off by default. When enabled, covers are saved
+as they are viewed; it does not fetch every cover in a large library. Turning it
+off removes those optional covers but keeps the covers belonging to downloaded
+books. Optional cover caches are isolated by account and server deployment.
+
+The production regression uses 201 books across multiple catalog requests and
+two libraries. It verifies automatic sync after delayed authentication, then
+cold-starts offline and opens an unvisited, undownloaded book and the normal
+library grid. It also checks opt-in cover storage and cleanup while preserving
+downloaded covers.

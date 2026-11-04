@@ -121,6 +121,42 @@
           }}
         </div>
         <div
+          class="text-body-2 mt-2"
+          role="status"
+        >
+          {{ catalogStatusText }}
+          <v-btn
+            :disabled="!offline.online || offline.offlineMode"
+            :loading="offline.syncingMetadata"
+            variant="text"
+            size="small"
+            :text="
+              $formatMessage({
+                defaultMessage: 'Sync catalog',
+                id: 'R43wiM',
+                description: 'Downloads sync catalog button',
+              })
+            "
+            @click="syncCatalog"
+          />
+        </div>
+        <v-alert
+          v-if="offline.catalogError"
+          type="warning"
+          variant="tonal"
+          density="compact"
+          class="mt-2"
+        >
+          {{
+            $formatMessage({
+              defaultMessage:
+                'Catalog sync did not finish. Saved entries remain available. Reconnect and retry Sync catalog.',
+              id: 'JiSU+K',
+              description: 'Downloads catalog sync error',
+            })
+          }}
+        </v-alert>
+        <div
           v-if="offline.shellReady !== 'unknown'"
           class="text-caption text-medium-emphasis mt-1"
         >
@@ -210,6 +246,26 @@
             />
           </v-col>
         </v-row>
+        <v-switch
+          :model-value="offline.preferences.cacheCovers"
+          :label="
+            $formatMessage({
+              defaultMessage: 'Keep browsed covers offline',
+              id: '2gNaKC',
+              description: 'Downloads cover caching preference',
+            })
+          "
+          :hint="
+            $formatMessage({
+              defaultMessage:
+                'Off by default. Saves book and series covers as you browse, using additional device storage. Turning this off removes these extra covers; downloaded book covers are kept.',
+              id: 'H25Rdx',
+              description: 'Downloads cover caching explanation',
+            })
+          "
+          persistent-hint
+          @update:model-value="(value) => setPreference('cacheCovers', value === true)"
+        />
         <v-switch
           :model-value="notificationsEnabled"
           :label="
@@ -763,6 +819,36 @@ const storagePercent = computed(() => {
   return Math.min(100, (storage.value.usage / storage.value.quota) * 100)
 })
 const storageHeadroom = computed(() => Math.max(0, storage.value.quota - storage.value.usage))
+const catalogStatusText = computed(() => {
+  if (offline.syncingMetadata)
+    return intl.formatMessage(
+      {
+        defaultMessage: 'Saving catalog: {done} of {total} entries in this batch',
+        id: '57AL+B',
+        description: 'Downloads catalog sync progress',
+      },
+      { done: offline.catalogProgress?.done ?? 0, total: offline.catalogProgress?.total ?? 0 },
+    )
+  if (offline.catalogSyncedAt)
+    return intl.formatMessage(
+      {
+        defaultMessage: 'Full catalog saved on this device. Last synced {date}.',
+        id: 'u8EmZl',
+        description: 'Downloads catalog ready',
+      },
+      { date: new Date(offline.catalogSyncedAt).toLocaleString() },
+    )
+  return intl.formatMessage({
+    defaultMessage:
+      'Full catalog has not been saved yet. Stay online and sync it for offline browsing.',
+    id: 'QJFkAI',
+    description: 'Downloads catalog not ready',
+  })
+})
+async function syncCatalog() {
+  await offline.syncCatalogMetadata().catch(() => undefined)
+}
+
 const shellStatusText = computed(() => {
   if (offline.shellReady === 'ready')
     return intl.formatMessage({

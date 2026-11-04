@@ -322,3 +322,37 @@ describe('stringifyFilterValue and errorMessage', () => {
     expect(errorMessage('plain')).toBe('plain')
   })
 })
+
+describe('offline catalog alternatives', () => {
+  test('matches either library and either media profile, like the server and classic UI', () => {
+    const condition = {
+      allOf: [
+        {
+          anyOf: [
+            { libraryId: { operator: 'is', value: 'one' } },
+            { libraryId: { operator: 'is', value: 'two' } },
+          ],
+        },
+        {
+          anyOf: [
+            { mediaProfile: { operator: 'is', value: 'DIVINA' } },
+            { mediaProfile: { operator: 'is', value: 'PDF' } },
+          ],
+        },
+      ],
+    }
+    expect(
+      conditionMatches({ libraryId: 'one', media: { mediaProfile: 'DIVINA' } }, condition),
+    ).toBe(true)
+    expect(conditionMatches({ libraryId: 'two', media: { mediaProfile: 'PDF' } }, condition)).toBe(
+      true,
+    )
+    expect(
+      conditionMatches({ libraryId: 'other', media: { mediaProfile: 'DIVINA' } }, condition),
+    ).toBe(false)
+    expect(conditionMatches({ libraryId: 'one', media: { mediaProfile: 'EPUB' } }, condition)).toBe(
+      false,
+    )
+    expect(conditionMatches({}, { anyOf: [] })).toBe(false)
+  })
+})

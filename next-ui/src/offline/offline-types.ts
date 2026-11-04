@@ -28,6 +28,7 @@ export interface OfflineDownloadPreferences {
   notifyWhenComplete: boolean
   removeRead: boolean
   autoDownloadNext: boolean
+  cacheCovers: boolean
 }
 
 export const DEFAULT_DOWNLOAD_PREFERENCES: OfflineDownloadPreferences = {
@@ -36,6 +37,7 @@ export const DEFAULT_DOWNLOAD_PREFERENCES: OfflineDownloadPreferences = {
   notifyWhenComplete: true,
   removeRead: false,
   autoDownloadNext: false,
+  cacheCovers: false,
 }
 
 export interface OfflineDownloadRecord {

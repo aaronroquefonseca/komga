@@ -1,4 +1,5 @@
 import { createGlobalState, useEventSource, watchImmediate } from '@vueuse/core'
+import { useOfflineLibraryStore } from '@/offline'
 import { ApiBaseUrl } from '@/api/base'
 import { logger } from '@/services/logtape'
 import { useAppStore } from '@/stores/app'
@@ -210,6 +211,7 @@ export const useSSE = createGlobalState(() => {
   const { convertErrorCodes } = useErrorCodeFormatter()
 
   const { isAuthenticated } = useCurrentUser()
+  const offline = useOfflineLibraryStore()
 
   let releaseLock: (() => void) | null = null
   let closeEventSource: (() => void) | null = null
@@ -336,10 +338,13 @@ export const useSSE = createGlobalState(() => {
   }
 
   // Watch authentication state to trigger connect/disconnect automatically
-  watchImmediate(isAuthenticated, (authenticated) => {
-    if (authenticated) connect()
-    else disconnect()
-  })
+  watchImmediate(
+    () => isAuthenticated.value && offline.online && !offline.offlineMode,
+    (connected) => {
+      if (connected) connect()
+      else disconnect()
+    },
+  )
 
   // process events
   watch(localEvent, (newEvent) => {

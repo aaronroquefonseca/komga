@@ -190,3 +190,11 @@ export async function offlineDelete(storeName: string, key: IDBValidKey): Promis
   transaction.objectStore(storeName).delete(key)
   await transactionDone(transaction)
 }
+
+export async function offlineCount(storeName: string): Promise<number> {
+  const db = await openOfflineDatabase()
+  const transaction = db.transaction(storeName, 'readonly')
+  const result = await requestResult(transaction.objectStore(storeName).count())
+  await transactionDone(transaction)
+  return result
+}

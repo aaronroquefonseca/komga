@@ -41,6 +41,16 @@ const user = {
   labelsAllow: [],
   labelsExclude: [],
 }
+const catalogBooks = [
+  book,
+  ...Array.from({ length: 200 }, (_, i) => ({
+    ...book,
+    id: `catalog-${i}`,
+    name: `Catalog ${i}`,
+    metadata: { ...book.metadata, title: `Catalog only book ${i}` },
+  })),
+]
+const catalogRequests = []
 const pages = [1, 2].map((number) => ({
   number,
   fileName: `${number}.jpg`,
@@ -110,6 +120,7 @@ const server = createServer(async (req, res) => {
         return
       }
       if (path.endsWith('/users/me')) {
+        await new Promise((resolve) => setTimeout(resolve, 150))
         if (!authorized) {
           res.writeHead(401)
           res.end()
@@ -117,7 +128,11 @@ const server = createServer(async (req, res) => {
         }
         return json(user)
       }
-      if (path.endsWith('/libraries')) return json([{ id: '1', name: 'Comics' }])
+      if (path.endsWith('/libraries'))
+        return json([
+          { id: '1', name: 'Comics' },
+          { id: '2', name: 'Other library' },
+        ])
       if (
         path.endsWith('/client-settings/user/list') ||
         path.endsWith('/client-settings/global/list')
@@ -146,6 +161,27 @@ const server = createServer(async (req, res) => {
         res.setHeader('Content-Type', 'image/jpeg')
         res.end(await readFile(resolve(root, 'next-ui/src/assets/mock-thumbnail.jpg')))
         return
+      }
+      if (path === '/api/v1/books/list' || path === '/api/v1/series/list') {
+        const query = new URL(req.url, 'http://localhost').searchParams
+        if (query.get('unpaged') === 'true') {
+          res.writeHead(503)
+          res.end()
+          return
+        }
+        const number = Number(query.get('page') || 0),
+          size = Number(query.get('size') || 50)
+        const items = path.includes('/books/') ? catalogBooks : [series]
+        catalogRequests.push({ path, number, size })
+        return json({
+          content: items.slice(number * size, (number + 1) * size),
+          totalElements: items.length,
+          totalPages: Math.ceil(items.length / size),
+          last: (number + 1) * size >= items.length,
+          first: number === 0,
+          number,
+          size,
+        })
       }
       if (path.endsWith('/list') || path.endsWith('/ondeck') || path.endsWith('/updated'))
         return json({
@@ -269,6 +305,28 @@ try {
         ),
       'Real book download did not finish',
     )
+    await waitFor(
+      () =>
+        page.evaluate(
+          () =>
+            !!document
+              .querySelector('#app')
+              .__vue_app__.config.globalProperties.$pinia._s.get('offline-library').catalogSyncedAt,
+        ),
+      'Automatic full catalog sync never completed after authentication',
+    )
+    assert.ok(
+      catalogRequests.some((r) => r.path.includes('/books/') && r.size === 200 && r.number === 1),
+    )
+    assert.equal(
+      await page.evaluate(
+        () =>
+          document
+            .querySelector('#app')
+            .__vue_app__.config.globalProperties.$pinia._s.get('offline-library').cachedBooks,
+      ),
+      201,
+    )
     await context.close()
   })
   await test('cold process offline: Downloads, book detail, unavailable content, classic handoff', async () => {
@@ -289,6 +347,23 @@ try {
     assert.equal((await status(page)).shellReady, true)
     await page.goto(base + '/book/offline-book')
     await page.getByText(book.metadata.title, { exact: true }).first().waitFor()
+    await page.goto(base + '/book/catalog-199')
+    await page.getByText('Catalog only book 199', { exact: true }).first().waitFor()
+    await page.goto(base + '/libraries/all/books')
+    await page
+      .getByText('1 - Catalog only book 0', { exact: true })
+      .first()
+      .waitFor({ timeout: 5000 })
+      .catch(async (error) => {
+        console.log(
+          'CATALOG LIST FAILURE',
+          page.url(),
+          await page.locator('body').innerText(),
+          JSON.stringify(errors),
+        )
+        throw error
+      })
+    assert.match(page.url(), /\/libraries\/all\/books/)
     await page.goto(base + '/book/not-cached')
     await page.getByText('Unavailable offline', { exact: true }).waitFor()
     await page.goto(base + '/history')
@@ -542,6 +617,54 @@ try {
       return !drawer || drawer.getBoundingClientRect().right <= 1
     })
     await page.screenshot({ path: '/tmp/komga-offline-mobile.png', animations: 'disabled' })
+    networkDown = false
+    await context.setOffline(false)
+    await page.close()
+  })
+  await test('cover caching is optional and account-local', async () => {
+    const page = await context.newPage()
+    await page.goto(base + '/downloads')
+    await page.getByText('Books saved on this device for offline reading').waitFor()
+    const result = await page.evaluate(async () => {
+      const store = document
+        .querySelector('#app')
+        .__vue_app__.config.globalProperties.$pinia._s.get('offline-library')
+      const defaultValue = store.preferences.cacheCovers
+      await fetch('/api/v1/series/57/thumbnail?off-test=1')
+      const before = (await caches.keys()).filter((n) => n.startsWith('komga-offline-covers-'))
+      await store.setDownloadPreferences({ cacheCovers: true })
+      await fetch('/api/v1/series/57/thumbnail?on-test=1')
+      await fetch('/api/v1/books/catalog-199/thumbnail')
+      return { defaultValue, before }
+    })
+    assert.equal(result.defaultValue, false)
+    assert.equal(result.before.length, 0)
+    networkDown = true
+    await context.setOffline(true)
+    assert.equal(
+      await page.evaluate(() => fetch('/api/v1/series/57/thumbnail').then((r) => r.status)),
+      200,
+    )
+    assert.equal(
+      await page.evaluate(() => fetch('/api/v1/books/catalog-199/thumbnail').then((r) => r.status)),
+      200,
+    )
+    await page.evaluate(() =>
+      document
+        .querySelector('#app')
+        .__vue_app__.config.globalProperties.$pinia._s.get('offline-library')
+        .setDownloadPreferences({ cacheCovers: false }),
+    )
+    assert.equal(
+      await page.evaluate(() => fetch('/api/v1/books/catalog-199/thumbnail').then((r) => r.status)),
+      503,
+    )
+    assert.equal(
+      await page.evaluate(() =>
+        fetch('/api/v1/books/offline-book/thumbnail').then((r) => r.status),
+      ),
+      200,
+    )
     networkDown = false
     await context.setOffline(false)
     await page.close()

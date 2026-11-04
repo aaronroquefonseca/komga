@@ -12,9 +12,6 @@ import { logger } from '@/services/logtape'
 
 const CATALOG_SYNC_INTERVAL = 5 * 60 * 1000
 
-let lastCatalogSync = 0
-let syncScheduled = false
-
 /**
  * Offline boot wiring for next-ui, mirroring the classic `main.ts` bootstrap.
  *
@@ -25,6 +22,7 @@ let syncScheduled = false
  *   read progress, throttled to 5 minutes like the classic UI.
  */
 export function useOfflineBootstrap() {
+  let syncScheduled = false
   const offline = useOfflineLibraryStore()
   const queryCache = useQueryCache()
   const router = useRouter()
@@ -83,16 +81,15 @@ export function useOfflineBootstrap() {
   function syncOfflineState(forceCatalog = false): void {
     if (!isAuthenticated.value || syncScheduled || !offline.online || offline.offlineMode) return
     syncScheduled = true
+    const owner = currentUser.value?.id
     offline.resumeDownloads()
 
-    const shouldSyncCatalog = forceCatalog || Date.now() - lastCatalogSync >= CATALOG_SYNC_INTERVAL
+    const shouldSyncCatalog =
+      forceCatalog ||
+      !offline.catalogSyncedAt ||
+      Date.now() - Date.parse(offline.catalogSyncedAt) >= CATALOG_SYNC_INTERVAL
     const reconcile = shouldSyncCatalog
-      ? offline
-          .syncCatalogMetadata()
-          .then(() => {
-            lastCatalogSync = Date.now()
-          })
-          .catch(() => undefined)
+      ? offline.syncCatalogMetadata().catch(() => undefined)
       : Promise.resolve()
 
     // Reconcile downloaded revisions before flushing progress that may have
@@ -102,8 +99,25 @@ export function useOfflineBootstrap() {
       .catch(() => undefined)
       .finally(() => {
         syncScheduled = false
+        if (currentUser.value?.id !== owner) syncOfflineState()
       })
   }
+
+  // Storage readiness can precede authentication on a cold load. Retry at the
+  // actual authenticated transition, including login and connectivity changes.
+  watch(
+    [
+      isAuthenticated,
+      () => currentUser.value?.id,
+      () => offline.initialized,
+      () => offline.online,
+      () => offline.offlineMode,
+    ],
+    () => {
+      if (offline.initialized) syncOfflineState()
+    },
+    { immediate: true },
+  )
 
   router.afterEach(() => syncOfflineState())
   window.addEventListener('focus', () => syncOfflineState())
