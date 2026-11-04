@@ -1,3 +1,4 @@
+import { useOfflineLibraryStore } from '@/offline/offline-store'
 import { ApiBaseUrl } from '@/api/base'
 import * as v from 'valibot'
 import { client } from '@/generated/openapi/client.gen'
@@ -21,6 +22,13 @@ export function isApiErrorWithCause(error: unknown): error is Error & { cause: A
 
 const responseInterceptor = async (response: Response) => {
   if (!response.ok) {
+    if (response.status >= 500) {
+      try {
+        useOfflineLibraryStore().markServerUnavailable()
+      } catch {
+        /* No active Pinia in standalone clients. */
+      }
+    }
     let body: SpringError = {}
     try {
       // Clone the response so we don't consume the readable stream
@@ -43,6 +51,11 @@ const responseInterceptor = async (response: Response) => {
 
 const errorInterceptor = (e: unknown) => {
   if (isApiErrorWithCause(e)) throw e
+  try {
+    useOfflineLibraryStore().markServerUnavailable()
+  } catch {
+    /* No active Pinia in standalone clients. */
+  }
   throw new Error('error', { cause: {} })
 }
 
@@ -53,6 +66,13 @@ export function setupOpenapiClient() {
     credentials: 'include',
     // required to avoid browser basic-auth popups
     headers: { 'X-Requested-With': 'XMLHttpRequest' },
+    // Bound unreachable-server requests so cache fallbacks and error states can render.
+    fetch: (input, init) => {
+      const request = new Request(input, init)
+      return fetch(request, {
+        signal: AbortSignal.any([request.signal, AbortSignal.timeout(8000)]),
+      })
+    },
     throwOnError: true,
   })
   client.interceptors.response.use(responseInterceptor)

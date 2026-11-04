@@ -25,6 +25,9 @@ export interface OfflineShellPrecacheStatus {
   batchId: string | null
   expected: number
   done: number
+  failed?: number
+  complete?: boolean
+  settled?: boolean
 }
 
 export interface OfflineShellStatus {
@@ -134,7 +137,10 @@ async function loadManifestAssetUrls(): Promise<string[]> {
   if (!manifestRequest) {
     manifestRequest = (async () => {
       try {
-        const response = await fetch(shellManifestUrl(), { cache: 'no-store' })
+        const response = await fetch(shellManifestUrl(), {
+          cache: 'no-store',
+          signal: AbortSignal.timeout(8000),
+        })
         if (!response.ok) return []
         const urls = resolveShellAssetUrls(
           parseShellManifest(await response.json()),
@@ -187,7 +193,14 @@ export function queryOfflineShellStatus(
   if (!('serviceWorker' in navigator) || typeof MessageChannel === 'undefined') {
     return Promise.resolve(undefined)
   }
-  return getRegistration().then(
+  const registrationWithinBudget = new Promise<ServiceWorkerRegistration | undefined>((resolve) => {
+    const timer = setTimeout(() => resolve(undefined), timeoutMs)
+    void getRegistration().then((registration) => {
+      clearTimeout(timer)
+      resolve(registration)
+    })
+  })
+  return registrationWithinBudget.then(
     (registration) =>
       new Promise<OfflineShellStatus | undefined>((resolve) => {
         const worker = registration?.active ?? navigator.serviceWorker.controller
@@ -202,6 +215,7 @@ export function queryOfflineShellStatus(
           settled = true
           window.clearTimeout(timer)
           channel.port1.onmessage = null
+          channel.port1.close()
           resolve(status)
         }
         const timer = window.setTimeout(() => finish(undefined), timeoutMs)
@@ -222,7 +236,16 @@ export function isPrecacheCompleteForBatch(
   batchId: string,
 ): boolean {
   const precache = status?.precache
-  return !!precache && precache.batchId === batchId && precache.done >= precache.expected
+  return (
+    status?.shellReady === true &&
+    !!precache &&
+    precache.batchId === batchId &&
+    precache.expected > 0 &&
+    precache.done >= precache.expected &&
+    precache.complete === true &&
+    precache.settled === true &&
+    (precache.failed ?? 0) === 0
+  )
 }
 
 export interface WaitForPrecacheOptions {
@@ -263,6 +286,8 @@ export async function waitForPrecacheCompletion(
       precache = { expected: status.precache.expected, done: status.precache.done }
       options?.onProgress?.(precache)
       if (isPrecacheCompleteForBatch(status, batchId)) return { complete: true, precache }
+      if (status.precache.settled === true && status.precache.complete === false)
+        return { complete: false, precache }
     }
   }
   return { complete: false, precache }
@@ -274,7 +299,7 @@ export async function waitForPrecacheCompletion(
  * (no Pinia yet, unit tests) keep the default `unknown` state.
  */
 function publishShellReadiness(
-  readiness: 'unknown' | 'preparing' | 'ready',
+  readiness: 'unknown' | 'preparing' | 'ready' | 'incomplete',
   precache: { expected: number; done: number },
 ): void {
   void import('@/offline/offline-store')
@@ -299,7 +324,7 @@ function trackPrecacheBatch(batchId: string, expected: number): void {
   }).then(
     ({ complete, precache }) => {
       trackingPrecache = undefined
-      if (complete && !isCancelled()) publishShellReadiness('ready', precache)
+      if (!isCancelled()) publishShellReadiness(complete ? 'ready' : 'incomplete', precache)
     },
     () => {
       trackingPrecache = undefined
@@ -307,11 +332,15 @@ function trackPrecacheBatch(batchId: string, expected: number): void {
   )
 }
 
-export function prepareOfflineShell(): void {
+export function prepareOfflineShell(force = false): void {
   if (!('serviceWorker' in navigator) || !navigator.onLine) return
-  if (inFlightPrepare) return
+  if (inFlightPrepare || (trackingPrecache && !force)) return
+  if (force) {
+    precacheTracker += 1
+    trackingPrecache = undefined
+  }
   const now = Date.now()
-  if (now - lastPrepareAt < PREPARE_MIN_INTERVAL_MS) return
+  if (!force && now - lastPrepareAt < PREPARE_MIN_INTERVAL_MS) return
   lastPrepareAt = now
   inFlightPrepare = (async () => {
     try {
@@ -357,6 +386,9 @@ export function setupOfflineShell(router: Router): void {
     if (isAuthenticated()) prepareOfflineShell()
   })
 
-  // Default until the offline data layer pushes the real state.
-  setServiceWorkerOfflineMode(false)
+  // Keep the persisted offline mode from the data layer; never reset it at boot.
+  void queryOfflineShellStatus().then((status) => {
+    if (status?.shellReady)
+      publishShellReadiness('ready', status.precache ?? { expected: 0, done: 0 })
+  })
 }

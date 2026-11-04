@@ -179,10 +179,7 @@ const titleAndLines = computed<{ title: ItemCardTitle; lines: ItemCardLine[] }>(
             query: formatBrowsingContextAsQueryParam(toValue(context)),
           },
         },
-        lines: [
-          { text: numberedTitle, lines: 1, routerLink: linkTo.value },
-          footer.value,
-        ],
+        lines: [{ text: numberedTitle, lines: 1, routerLink: linkTo.value }, footer.value],
       }
     else
       return {

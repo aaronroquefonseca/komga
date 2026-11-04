@@ -15,9 +15,8 @@
 
 <script setup lang="ts">
 import { useCurrentUser } from '@/colada/users'
-import { isStandalonePwa } from '@/functions/pwa'
 
 const { hasRole } = useCurrentUser()
 
-const visible = computed(() => isStandalonePwa() && hasRole('FILE_DOWNLOAD'))
+const visible = computed(() => hasRole('FILE_DOWNLOAD'))
 </script>

@@ -159,6 +159,8 @@ declare module 'vue' {
     LocaleSelector: typeof import('./components/LocaleSelector.vue')['default']
     LockIcon: typeof import('./components/LockIcon.vue')['default']
     NavigationBreadcrumbs: typeof import('./components/navigation/NavigationBreadcrumbs.vue')['default']
+    OfflineNotice: typeof import('./components/OfflineNotice.vue')['default']
+    OfflineUnavailable: typeof import('./components/OfflineUnavailable.vue')['default']
     OverviewSection: typeof import('./components/OverviewSection.vue')['default']
     PageHashKnownTable: typeof import('./components/pageHash/KnownTable.vue')['default']
     PageHashMatchTable: typeof import('./components/pageHash/MatchTable.vue')['default']

@@ -11,7 +11,10 @@ export type DynamicImportRecovery = 'reload' | 'error-page' | 'none'
 export function isDynamicImportError(error: unknown): boolean {
   const message = (error as { message?: unknown } | null | undefined)?.message
   return (
-    typeof message === 'string' && message.includes('Failed to fetch dynamically imported module')
+    typeof message === 'string' &&
+    /Failed to fetch dynamically imported module|Importing a module script failed|error loading dynamically imported module|Loading chunk .* failed|Unable to preload CSS/i.test(
+      message,
+    )
   )
 }
 
@@ -22,6 +25,7 @@ export function decideDynamicImportRecovery(options: {
   isErrorRoute: boolean
 }): DynamicImportRecovery {
   if (!isDynamicImportError(options.error)) return 'none'
-  if (options.alreadyRetried || options.isErrorRoute) return 'none'
-  return options.online ? 'reload' : 'error-page'
+  if (options.isErrorRoute) return 'none'
+  if (!options.online || options.alreadyRetried) return 'error-page'
+  return 'reload'
 }

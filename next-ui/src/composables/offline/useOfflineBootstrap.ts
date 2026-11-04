@@ -83,6 +83,7 @@ export function useOfflineBootstrap() {
   function syncOfflineState(forceCatalog = false): void {
     if (!isAuthenticated.value || syncScheduled || !offline.online || offline.offlineMode) return
     syncScheduled = true
+    offline.resumeDownloads()
 
     const shouldSyncCatalog = forceCatalog || Date.now() - lastCatalogSync >= CATALOG_SYNC_INTERVAL
     const reconcile = shouldSyncCatalog

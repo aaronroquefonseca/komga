@@ -198,7 +198,7 @@ describe('prepareOfflineShell precaching', () => {
 
     // A second prepare after the throttle window reuses the cached manifest.
     vi.spyOn(Date, 'now').mockReturnValue(Date.now() + 31_000)
-    prepareOfflineShell()
+    prepareOfflineShell(true)
     await vi.waitFor(() => expect(postMessage).toHaveBeenCalledTimes(2))
     expect(fetch).toHaveBeenCalledTimes(1)
   })
@@ -271,7 +271,13 @@ describe('queryOfflineShellStatus', () => {
 describe('isPrecacheCompleteForBatch', () => {
   test('matches only the tracked batch at full progress', () => {
     expect(
-      isPrecacheCompleteForBatch({ precache: { batchId: 'b1', expected: 3, done: 3 } }, 'b1'),
+      isPrecacheCompleteForBatch(
+        {
+          shellReady: true,
+          precache: { batchId: 'b1', expected: 3, done: 3, complete: true, settled: true },
+        },
+        'b1',
+      ),
     ).toBe(true)
     expect(
       isPrecacheCompleteForBatch({ precache: { batchId: 'b1', expected: 3, done: 2 } }, 'b1'),
@@ -281,11 +287,35 @@ describe('isPrecacheCompleteForBatch', () => {
     ).toBe(false)
     expect(isPrecacheCompleteForBatch({ precache: null }, 'b1')).toBe(false)
     expect(isPrecacheCompleteForBatch(undefined, 'b1')).toBe(false)
-    // Empty batches complete on the first matching reply.
+    // An empty attempt cannot establish a complete offline shell.
     expect(
       isPrecacheCompleteForBatch({ precache: { batchId: 'b1', expected: 0, done: 0 } }, 'b1'),
-    ).toBe(true)
+    ).toBe(false)
   })
+})
+
+test('never accepts failed assets or missing HTML despite settled progress', () => {
+  for (const status of [
+    {
+      shellReady: false,
+      precache: { batchId: 'x', expected: 2, done: 2, complete: true, settled: true },
+    },
+    {
+      shellReady: true,
+      precache: { batchId: 'x', expected: 2, done: 2, failed: 1, complete: false },
+    },
+  ])
+    expect(isPrecacheCompleteForBatch(status, 'x')).toBe(false)
+})
+
+test('status budget includes a worker registration that never becomes ready', async () => {
+  Object.defineProperty(navigator, 'serviceWorker', {
+    value: { ready: new Promise(() => {}) },
+    configurable: true,
+  })
+  await expect(queryOfflineShellStatus(20)).resolves.toBeUndefined()
+  // @ts-expect-error happy-dom does not implement service workers
+  delete navigator.serviceWorker
 })
 
 describe('waitForPrecacheCompletion', () => {
@@ -294,7 +324,10 @@ describe('waitForPrecacheCompletion', () => {
   test('resolves complete once the tracked batch is fully cached', async () => {
     const replies = [
       { precache: { batchId: 'b1', expected: 2, done: 1 } },
-      { precache: { batchId: 'b1', expected: 2, done: 2 } },
+      {
+        shellReady: true,
+        precache: { batchId: 'b1', expected: 2, done: 2, complete: true, settled: true },
+      },
     ]
     const onProgress = vi.fn()
     const result = await waitForPrecacheCompletion('b1', 2, {
@@ -307,6 +340,25 @@ describe('waitForPrecacheCompletion', () => {
     expect(result).toEqual({ complete: true, precache: { expected: 2, done: 2 } })
     expect(onProgress).toHaveBeenNthCalledWith(1, { expected: 2, done: 1 })
     expect(onProgress).toHaveBeenNthCalledWith(2, { expected: 2, done: 2 })
+  })
+
+  test('keeps tracking while a slow manifest has not established the asset count', async () => {
+    const replies = [
+      {
+        shellReady: false,
+        precache: { batchId: 'slow', expected: 0, done: 0, complete: false, settled: false },
+      },
+      {
+        shellReady: true,
+        precache: { batchId: 'slow', expected: 2, done: 2, complete: true, settled: true },
+      },
+    ]
+    const result = await waitForPrecacheCompletion('slow', 0, {
+      queryStatus: () => Promise.resolve(replies.shift()),
+      delay: immediate,
+      intervalMs: 0,
+    })
+    expect(result.complete).toBe(true)
   })
 
   test('ignores other batches, failures, and empty replies until the timeout', async () => {

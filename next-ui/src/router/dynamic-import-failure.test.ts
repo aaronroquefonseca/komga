@@ -8,6 +8,8 @@ const DYNAMIC_IMPORT_ERROR = new Error(
 describe('isDynamicImportError', () => {
   test('matches vite dynamic import failures only', () => {
     expect(isDynamicImportError(DYNAMIC_IMPORT_ERROR)).toBe(true)
+    expect(isDynamicImportError(new Error('Importing a module script failed.'))).toBe(true)
+    expect(isDynamicImportError(new Error('error loading dynamically imported module'))).toBe(true)
     expect(isDynamicImportError(new Error('boom'))).toBe(false)
     expect(isDynamicImportError(undefined)).toBe(false)
     expect(isDynamicImportError({ message: 42 })).toBe(false)
@@ -44,7 +46,7 @@ describe('decideDynamicImportRecovery', () => {
       alreadyRetried: false,
       isErrorRoute: false,
     }
-    expect(decideDynamicImportRecovery({ ...base, alreadyRetried: true })).toBe('none')
+    expect(decideDynamicImportRecovery({ ...base, alreadyRetried: true })).toBe('error-page')
     expect(decideDynamicImportRecovery({ ...base, isErrorRoute: true })).toBe('none')
     expect(decideDynamicImportRecovery({ ...base, error: new Error('boom') })).toBe('none')
   })

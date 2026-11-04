@@ -1,46 +1,84 @@
-# Manual phone test: offline PWA shell precache
+# Offline behavior and verification
 
-Covers the per-app shell manifests (`webui-shell.json`, `nextui-shell.json`)
-and service-worker precaching of the full app shell. Run on a real phone
-(Android Chrome and iOS Safari) against a deployed build.
+Next UI caches visited catalog metadata. **Downloads** contains the books whose
+page images are saved on this device. Cached catalog entries can be browsed but
+are not readable until their download finishes. Reading opens the classic
+reader; offline setup therefore prepares both application shells.
 
-## 1. Fresh install precaches the whole shell
+Offline and explicit offline mode show a persistent notice with Downloads and
+Reconnect actions. Server-only pages show **Unavailable offline** rather than an
+empty table or a generic error. Book/series details that were never saved show
+the same state. Editing, importing, server management and remote download actions
+are disabled offline. EPUB publications require a connection; offline downloads
+currently support image-based comics. A missing comic page shows a warning with
+Retry and Downloads actions.
 
-1. On desktop Chrome, open the app online and confirm the manifest for the UI
-   under test is served:
-   - classic: `GET <base>/webui-shell.json` (200, lists `js/*`, `css/*`, …)
-   - next UI: `GET <base>/nextui-shell.json` (200, no `index.html` entry)
-2. Open DevTools → Application → Cache Storage → `komga-shell-v3` and confirm
-   it contains every manifest-listed file, not just the current page's chunks.
-3. On the phone, open the app online once, then visit one route only
-   (e.g. the library list). Do NOT visit other routes.
+## Automated production regression
 
-## 2. Unvisited routes cold-boot offline
+From the repository root:
 
-1. On the phone, enable airplane mode.
-2. Force-close the browser/PWA and cold-boot from the home-screen icon.
-3. Open a route never visited in step 1 (e.g. settings, a reader, history):
-   expect the app shell to render, not a blank white page.
-4. Repeat for the other UI (`/classic/**` vs `/next/**`); each UI precaches
-   only its own `*-shell.json` plus the shared icons/fonts.
+```sh
+npm --prefix komga-webui run build
+npm --prefix next-ui run build:with-i18n
+npm --prefix next-ui exec -- playwright install chromium
+npm --prefix next-ui run test:offline
+```
 
-## 3. Post-update offline boots keep working
+The test serves actual production bundles with a deterministic API fixture. It
+uses the real download store, Cache Storage, IndexedDB and service worker; closes
+the entire browser process; restarts with networking disabled; and checks:
 
-1. Redeploy (new hashed JS/CSS filenames), then open the app online once so
-   the new service worker activates and the new shell is cached.
-2. Enable airplane mode, force-close, and cold-boot from the home-screen icon:
-   expect the new shell to render offline with no blank page or 504s.
-3. In DevTools (desktop), confirm the old hashed chunks are gone from the
-   shell cache and the new manifest's files are all present.
+- cold launch to Downloads and an unvisited book detail;
+- uncached details and server-only pages;
+- next UI to classic reader handoff and actual image decoding;
+- reader reload retaining `/classic/` so the correct HTML is selected;
+- network-only revision downloads with changed image bytes;
+- failed precache assets preventing readiness, followed by successful repair;
+- unavailable server responses falling back to cached HTML and catalog;
+- different accounts retaining separate downloads, without deleting old copies;
+- a removed session preventing offline authentication and cached media access.
 
-## 4. Failure signatures
+The test disables browser networking and makes the fixture server unreachable too,
+so service-worker fetches cannot bypass the offline simulation. It also delays an
+old account's catalog response across an account switch and rejects unsupported
+EPUB downloads before queuing them.
 
-- Blank white page on offline cold boot → the open page's chunks 404 in the
-  shell cache; check that the manifest was fetched (Network tab, online run)
-  and that `webui-shell.json` / `nextui-shell.json` are deployed under
-  `resources/public/` (Gradle `webuiCopyDist` / `nextuiCopyDist` must not
-  exclude them; only `index.html` is excluded from the next-ui copy because
-  it is renamed to `index-next.html`).
-- One UI works offline but the other does not → that UI's manifest is missing
-  or its `prepareOfflineShell` never ran online (check `KOMGA_PREPARE_OFFLINE_SHELL`
-  handling with the worker's offline-status message channel).
+The server fixture models Gradle/Thymeleaf's absolute HTML asset URLs. These tests
+are browser integration tests, not a replacement for the real-device checks below.
+
+## Readiness and updates
+
+Downloads reports **Offline app shell is ready** only after both manifests, both
+HTML entries and all required assets are cached successfully. Failed or incomplete
+preparation displays a retry action. Readiness is persisted and rechecked after a
+worker restart or asset eviction. A navigation does not overwrite the last complete
+HTML with a partially prepared update. Hashed assets from older builds stay cached
+so already-open pages remain usable during updates.
+
+## Real phone acceptance checks
+
+Run against the deployed build in Android Chrome and iOS Safari, including an
+installed home-screen PWA:
+
+1. Sign in online, open Downloads, and wait for setup to report ready. Download
+   one image-based comic. Avoid visiting another book detail or the reader.
+2. Enable airplane mode. Force-close the app/browser and reopen it from the
+   home-screen icon. Downloads and the saved comic must load without signing in.
+3. Open the comic; turn pages, close/reopen it, and reload the reader. Check that
+   the URL retains `/classic/`. Progress must be retained while offline.
+4. Open an uncached book and History/settings. Check the unavailable message and
+   the Downloads action. Check that server mutation actions are disabled.
+5. Disable airplane mode and choose Reconnect. Confirm progress synchronizes with
+   the same account. Repeat while Wi-Fi remains connected but the server is stopped.
+6. Redeploy, visit online until setup is ready, then repeat the cold launch.
+7. Simulate a failed asset request during preparation: setup must remain incomplete
+   until Retry succeeds. Delete one downloaded page from Cache Storage: the reader
+   must show a missing-page warning instead of a blank image.
+8. Log out and launch offline. The previous identity must not be restored. Sign in
+   as another account online: the first account's catalog, downloads and progress
+   must remain isolated. Signing back into the original account restores its copies.
+
+Databases and media cache names are scoped by deployment and account. Existing
+root-deployment data is retained for its original account; changing accounts
+selects another database. Logging out removes the local session and retains the
+account's downloaded copies for its next sign-in.

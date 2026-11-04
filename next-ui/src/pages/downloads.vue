@@ -125,6 +125,19 @@
           class="text-caption text-medium-emphasis mt-1"
         >
           {{ shellStatusText }}
+          <v-btn
+            v-if="offline.online && offline.shellReady !== 'ready'"
+            variant="text"
+            size="small"
+            :text="
+              $formatMessage({
+                defaultMessage: 'Retry setup',
+                id: '72ma37',
+                description: 'Retry offline setup',
+              })
+            "
+            @click="prepareOfflineShell(true)"
+          />
         </div>
         <v-alert
           v-if="storage.quota > 0"
@@ -279,6 +292,7 @@
             <v-spacer />
             <v-btn
               v-if="group.failed"
+              :disabled="!offline.online || offline.offlineMode"
               size="small"
               variant="text"
               color="warning"
@@ -494,6 +508,7 @@
                 <v-card-actions>
                   <v-btn
                     v-if="download.cacheName"
+                    :disabled="(offline.offlineMode || !offline.online) && isEpub(download.book)"
                     variant="text"
                     color="primary"
                     prepend-icon="i-mdi:book-open-page-variant"
@@ -662,6 +677,7 @@
 </template>
 
 <script setup lang="ts">
+import { prepareOfflineShell } from '@/services/offline-shell'
 import { useIntl } from 'vue-intl'
 import { bookPosterUrl } from '@/api/images'
 import { bookReaderUrl } from '@/api/links'
@@ -753,6 +769,13 @@ const shellStatusText = computed(() => {
       description: 'Downloads page: offline shell ready',
       defaultMessage: 'Offline app shell is ready',
       id: '7cqTpL',
+    })
+  if (offline.shellReady === 'incomplete')
+    return intl.formatMessage({
+      defaultMessage:
+        'Offline setup is incomplete. Stay connected and retry before closing the app.',
+      id: 'A54yH6',
+      description: 'Downloads incomplete offline setup',
     })
   const precache = offline.shellPrecache
   return intl.formatMessage(

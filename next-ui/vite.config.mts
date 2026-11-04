@@ -27,8 +27,9 @@ export default defineConfig(({ mode }) => ({
   plugins: [
     VueRouter({
       dts: 'src/route-map.d.ts',
+      importMode: (file) => file.endsWith('/error.vue') ? 'sync' : 'async',
     }),
-    Layouts(),
+    Layouts({ importMode: (name) => name === 'single' ? 'sync' : 'async' }),
     AutoImport({
       imports: ['vue', VueRouterAutoImports, unheadVueComposablesImports],
       dts: 'src/auto-imports.d.ts',

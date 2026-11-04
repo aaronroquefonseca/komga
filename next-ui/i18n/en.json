@@ -459,6 +459,10 @@
     "defaultMessage": "Downloading {downloaded}/{total}",
     "description": "Series menu: downloading with progress"
   },
+  "72ma37": {
+    "defaultMessage": "Retry setup",
+    "description": "Retry offline setup"
+  },
   "7M1pUf": {
     "defaultMessage": "Empty trash",
     "description": "Library empty trash dialog: confirm button"
@@ -486,6 +490,14 @@
   "7hwFJo": {
     "defaultMessage": "Writer",
     "description": "Author role: writer"
+  },
+  "7lb85t": {
+    "defaultMessage": "Sign in online once on this device, then download books to read them offline.",
+    "description": "Offline missing session explanation"
+  },
+  "7uSsRk": {
+    "defaultMessage": "Open Downloads",
+    "description": "Offline downloads action"
   },
   "7z91nm": {
     "defaultMessage": "History",
@@ -606,6 +618,10 @@
   "9oA9gw": {
     "defaultMessage": "Unpinned",
     "description": "Library tab navigation: library selection: unpinned"
+  },
+  "A54yH6": {
+    "defaultMessage": "Offline setup is incomplete. Stay connected and retry before closing the app.",
+    "description": "Downloads incomplete offline setup"
   },
   "AEaKHC": {
     "defaultMessage": "Find book thumbnails to regenerate",
@@ -955,6 +971,10 @@
     "defaultMessage": "No longer on server",
     "description": "Downloads page: source missing"
   },
+  "GkDyZf": {
+    "defaultMessage": "Unavailable offline",
+    "description": "Offline unavailable title"
+  },
   "GnHrCd": {
     "defaultMessage": "Use local artwork",
     "description": "Form add/edit library: Metadata - local artwork"
@@ -1131,6 +1151,10 @@
     "defaultMessage": "Number of pages",
     "description": "Book info: number of pages"
   },
+  "Jq9Fjf": {
+    "defaultMessage": "Opening Komga…",
+    "description": "App loading title"
+  },
   "JwBlXP": {
     "defaultMessage": "Open",
     "description": "Book imported notification: button text to navigate to book"
@@ -1198,6 +1222,10 @@
   "Lto2Lg": {
     "defaultMessage": "Must start with '/', not end with '/-_', and contain only '/-_a-z0-9'",
     "description": "Server settings: error message when server context path is invalid"
+  },
+  "M1qH9S": {
+    "defaultMessage": "Sign in",
+    "description": "Offline missing session action"
   },
   "MC2JtF": {
     "defaultMessage": "All",
@@ -1514,6 +1542,10 @@
   "TG7prC": {
     "defaultMessage": "Date added",
     "description": "Sort label: createdDate"
+  },
+  "TH27e8": {
+    "defaultMessage": "This content is not saved on this device. Connect to your server to load it, or choose a downloaded book.",
+    "description": "Offline unavailable explanation"
   },
   "TPX4qo": {
     "defaultMessage": "Tags",
@@ -2183,6 +2215,10 @@
     "defaultMessage": "Users",
     "description": "Users table global header"
   },
+  "c98pqU": {
+    "defaultMessage": "You are offline. Showing saved content; only downloaded books can be read. Reading progress will sync when you reconnect.",
+    "description": "Offline notice"
+  },
   "cAu/I6": {
     "defaultMessage": "Duplicate Pages",
     "description": "Drawer menu for Media > Duplicate Pages"
@@ -2615,9 +2651,17 @@
     "defaultMessage": "Comment",
     "description": "API Key table header: key comment"
   },
+  "gZyEAs": {
+    "defaultMessage": "Connect to get started",
+    "description": "Offline missing session title"
+  },
   "ggaOkE": {
     "defaultMessage": "No data found",
     "description": "Duplicate Page Hash Matches Table: shown when table has no data"
+  },
+  "glX7JE": {
+    "defaultMessage": "Downloads",
+    "description": "Offline notice downloads action"
   },
   "gojrIJ": {
     "defaultMessage": "Select series",
@@ -3378,6 +3422,10 @@
   "uwFE74": {
     "defaultMessage": "Scan",
     "description": "Import books: scan button label"
+  },
+  "uyLmvE": {
+    "defaultMessage": "Reconnect",
+    "description": "Offline reconnect action"
   },
   "v3beFf": {
     "defaultMessage": "Must be a valid BCP 47 language code",

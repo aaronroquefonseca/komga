@@ -1,3 +1,4 @@
+import { useOfflineLibraryStore } from '@/offline'
 import type { Router } from 'vue-router'
 import { currentUserQuery, QUERY_KEYS_USERS } from '@/colada/users'
 import { useQueryCache } from '@pinia/colada'
@@ -13,7 +14,7 @@ export function useRoleGuard(router: Router) {
   router.beforeEach(async (to) => {
     if (to.meta.requiresRole) {
       const queryCache = useQueryCache()
-      if (typeof navigator !== 'undefined' && navigator.onLine === false) {
+      if (useOfflineLibraryStore().offlineMode || !useOfflineLibraryStore().online) {
         // Offline: judge from the restored cached session instead of
         // forcing a network refresh that can only fail.
         const cached = queryCache.getQueryData<UserDto>(QUERY_KEYS_USERS.currentUser())

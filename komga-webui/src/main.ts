@@ -51,7 +51,6 @@ import router from './router'
 import store from './store'
 import i18n from './i18n'
 import urls from './functions/urls'
-import { isStandalonePwa } from './functions/pwa'
 import { mergeShellAssets, parseShellManifest, resolveShellAssetUrls, WEBUI_SHELL_MANIFEST_FILENAME } from './functions/offline-shell-manifest'
 import OfflineDownloads from './views/OfflineDownloads.vue'
 
@@ -110,23 +109,31 @@ installSinglePageWideStateMachine()
 installPaperBoundsStability()
 sync(store, router)
 
-const installedPwa = isStandalonePwa()
+router.addRoute('home', {
+  path: '/downloads',
+  name: 'offline-downloads',
+  component: OfflineDownloads,
+})
 
-if (installedPwa) {
-  router.addRoute('home', {
-    path: '/downloads',
-    name: 'offline-downloads',
-    component: OfflineDownloads,
-  })
-}
+router.addRoute({
+  path: '/offline-unavailable', name: 'offline-unavailable',
+  component: Vue.extend({
+    render(h) {
+      return h('div', {style: {font: '16px system-ui', padding: '48px', maxWidth: '36rem', margin: 'auto'}}, [
+        h('h1', 'Unavailable offline'),
+        h('p', 'This book is not saved for offline reading. EPUB reading requires a connection.'),
+        h('a', {attrs: {href: urls.base + 'downloads'}}, 'Open Downloads'),
+      ])
+    },
+  }),
+})
 
 router.beforeEach(async (to, from, next) => {
   await Vue.prototype.$offline.whenReady()
-  if (installedPwa &&
-    to.name === 'read-book' &&
+  if (['read-book', 'read-epub'].includes(to.name || '') &&
     (Vue.prototype.$offline.state.offlineMode || !Vue.prototype.$offline.state.online) &&
-    !Vue.prototype.$offline.isDownloaded(to.params.bookId)) {
-    next({name: 'offline-downloads'})
+    (to.name === 'read-epub' || !Vue.prototype.$offline.isDownloaded(to.params.bookId))) {
+    next({name: 'offline-unavailable'})
     return
   }
   next()
@@ -229,6 +236,7 @@ if ('serviceWorker' in navigator) {
 const syncOfflineState = (forceCatalog: boolean = false) => {
   if (!store.getters.authenticated || catalogSyncScheduled || !Vue.prototype.$offline.state.online) return
   catalogSyncScheduled = true
+  Vue.prototype.$offline.resumeDownloads()
 
   const shouldSyncCatalog = forceCatalog || Date.now() - lastCatalogSync >= CATALOG_SYNC_INTERVAL
   const reconcile = shouldSyncCatalog

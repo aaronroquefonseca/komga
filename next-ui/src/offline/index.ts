@@ -50,6 +50,7 @@ export {
   getSeriesAndBookTagsOfflineFirst,
   getSeriesListOfflineFirst,
   getSeriesOfflineFirst,
+  getSeriesUpdatedOfflineFirst,
   getSessionUserOfflineFirst,
   cacheOfflineLibraries,
   cacheSessionUser,

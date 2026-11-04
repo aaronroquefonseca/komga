@@ -1,10 +1,18 @@
 import {
+  getBookOfflineFirst,
+  getBookPagesOfflineFirst,
+  getBookSiblingOfflineFirst,
+  getBooksListOfflineFirst,
+  getBooksOnDeckOfflineFirst,
+  useOfflineLibraryStore,
+} from '@/offline'
+import {
   defineInfiniteQueryOptions,
   defineMutation,
   defineQueryOptions,
   useMutation,
 } from '@pinia/colada'
-import { PageRequest, type Sort, sortToString } from '@/types/PageRequest'
+import { PageRequest, type Sort } from '@/types/PageRequest'
 import { clearBook, clearThumbnailBook } from '@/colada/cache'
 import { useAppStore } from '@/stores/app'
 import {
@@ -15,17 +23,10 @@ import {
   komgaBookRefreshMetadata,
   komgaDeleteBookFile,
   komgaDeleteBookReadProgress,
-  komgaGetBookById,
-  komgaGetBooks,
-  komgaGetBooksOnDeck,
   komgaGetBookThumbnails,
-  komgaMarkBookReadProgress,
   komgaUpdateBookMetadata,
   komgaDeleteUserUploadedBookThumbnail,
   type BookMetadataUpdateDto,
-  komgaGetBookPages,
-  komgaGetBookSiblingPrevious,
-  komgaGetBookSiblingNext,
 } from '@/generated/openapi'
 import { useImageCacheStore } from '@/stores/image-cache'
 import { STALE_TIME } from '@/types/time'
@@ -41,13 +42,7 @@ export const QUERY_KEYS_BOOKS = {
 export const bookListQuery = defineQueryOptions(
   ({ search, pageRequest }: { search: BookSearch; pageRequest?: PageRequest }) => ({
     key: QUERY_KEYS_BOOKS.bySearch({ search: search, pageRequest: pageRequest }),
-    query: () =>
-      komgaGetBooks({
-        body: search,
-        query: {
-          ...pageRequest,
-        },
-      }),
+    query: () => getBooksListOfflineFirst(search, pageRequest),
     placeholderData: (previousData) => previousData,
   }),
 )
@@ -56,15 +51,7 @@ export const bookListQueryInfinite = defineInfiniteQueryOptions(
   ({ search, sort }: { search: BookSearch; sort?: Sort[] }) => ({
     key: QUERY_KEYS_BOOKS.bySearch({ search: search, sort: sort, infinite: true }),
     initialPageParam: new PageRequest(0, 50, sort),
-    query: ({ pageParam }) =>
-      komgaGetBooks({
-        body: search,
-        query: {
-          page: pageParam.page,
-          size: pageParam.size,
-          sort: sort?.map((it) => sortToString(it)),
-        },
-      }),
+    query: ({ pageParam }) => getBooksListOfflineFirst(search, pageParam),
     getNextPageParam: (lastPage, _, lastPageParam) =>
       !lastPage?.last ? lastPageParam.next() : null,
   }),
@@ -74,14 +61,7 @@ export const booksOnDeckQueryInfinite = defineInfiniteQueryOptions(
   ({ libraryIds }: { libraryIds?: string[] }) => ({
     key: QUERY_KEYS_BOOKS.onDeck({ libraryIds: libraryIds, infinite: true }),
     initialPageParam: new PageRequest(0, 50),
-    query: ({ pageParam }) =>
-      komgaGetBooksOnDeck({
-        query: {
-          library_id: libraryIds,
-          page: pageParam.page,
-          size: pageParam.size,
-        },
-      }),
+    query: ({ pageParam }) => getBooksOnDeckOfflineFirst(libraryIds, pageParam),
     getNextPageParam: (lastPage, _, lastPageParam) =>
       !lastPage?.last ? lastPageParam.next() : null,
   }),
@@ -89,33 +69,18 @@ export const booksOnDeckQueryInfinite = defineInfiniteQueryOptions(
 
 export const bookDetailQuery = defineQueryOptions(({ bookId }: { bookId: string }) => ({
   key: QUERY_KEYS_BOOKS.byId(bookId),
-  query: () =>
-    komgaGetBookById({
-      path: {
-        bookId: bookId,
-      },
-    }),
+  query: () => getBookOfflineFirst(bookId),
   staleTime: STALE_TIME.LONG,
 }))
 
 export const bookPreviousInSeries = defineQueryOptions(({ bookId }: { bookId: string }) => ({
   key: [...QUERY_KEYS_BOOKS.byId(bookId), 'series', 'previous'],
-  query: () =>
-    komgaGetBookSiblingPrevious({
-      path: {
-        bookId: bookId,
-      },
-    }),
+  query: () => getBookSiblingOfflineFirst(bookId, -1),
 }))
 
 export const bookNextInSeries = defineQueryOptions(({ bookId }: { bookId: string }) => ({
   key: [...QUERY_KEYS_BOOKS.byId(bookId), 'series', 'next'],
-  query: () =>
-    komgaGetBookSiblingNext({
-      path: {
-        bookId: bookId,
-      },
-    }),
+  query: () => getBookSiblingOfflineFirst(bookId, 1),
 }))
 
 export const useRefreshMetadataBook = defineMutation(() =>
@@ -144,12 +109,7 @@ export const useMarkBookRead = defineMutation(() => {
   const appStore = useAppStore()
   return useMutation({
     mutation: (bookId: string) =>
-      komgaMarkBookReadProgress({
-        path: {
-          bookId: bookId,
-        },
-        body: { completed: true },
-      }),
+      useOfflineLibraryStore().updateReadProgress(bookId, { completed: true }),
     onSuccess: (data, bookId) => {
       if (appStore.sseUnavailable) clearBook(bookId)
     },
@@ -280,10 +240,5 @@ export const useMarkBookPosterSelected = defineMutation(() => {
 
 export const bookPagesQuery = defineQueryOptions(({ bookId }: { bookId: string }) => ({
   key: [...QUERY_KEYS_BOOKS.byId(bookId), 'pages'],
-  query: () =>
-    komgaGetBookPages({
-      path: {
-        bookId: bookId,
-      },
-    }),
+  query: () => getBookPagesOfflineFirst(bookId),
 }))

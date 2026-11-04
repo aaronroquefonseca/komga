@@ -67,7 +67,29 @@
         </script>
     </head>
     <body>
-        <div id="app"></div>
+        <div id="app">
+            <div
+                style="
+                    font: 16px system-ui;
+                    max-width: 32rem;
+                    margin: 20vh auto;
+                    padding: 24px;
+                    line-height: 1.6;
+                "
+            >
+                <h1>Opening Komga…</h1>
+                <p>
+                    If the app cannot open, reconnect to finish offline setup, then try again. Your
+                    downloaded books remain on this device.
+                </p>
+                <button
+                    onclick="location.reload()"
+                    style="padding: 12px 24px"
+                >
+                    Retry
+                </button>
+            </div>
+        </div>
         <script
             type="module"
             src="/src/main.ts"

@@ -14,7 +14,12 @@ import { decideDynamicImportRecovery } from '@/router/dynamic-import-failure'
 
 const router = createRouter({
   history: createWebHistory(
-    import.meta.env.PROD ? window.resourceBaseUrl : import.meta.env.BASE_URL,
+    import.meta.env.PROD
+      ? window.location.pathname.startsWith(`${window.resourceBaseUrl || '/'}next/`) ||
+        window.location.pathname === `${window.resourceBaseUrl || '/'}next`
+        ? `${window.resourceBaseUrl || '/'}next/`
+        : window.resourceBaseUrl
+      : import.meta.env.BASE_URL,
   ),
   routes: setupLayouts(routes),
   scrollBehavior(to, from, savedPosition) {
@@ -49,7 +54,7 @@ router.onError((err, to) => {
   if (recovery === 'reload') {
     console.log('Reloading page to fix dynamic import error')
     localStorage.setItem('vuetify:dynamic-reload', 'true')
-    location.assign(to.fullPath)
+    location.assign(router.resolve(to).href)
   } else if (recovery === 'error-page') {
     // A reload can never succeed while offline; fall back to the precached
     // /error route instead of sitting on a blank view.

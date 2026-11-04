@@ -3,6 +3,8 @@ import { ApiBaseUrl } from '@/api/base'
 import { bookPosterUrl } from '@/api/images'
 import {
   komgaGetBookById,
+  komgaGetCurrentUser,
+  type UserDto,
   komgaGetBookPages,
   komgaGetBooks,
   komgaGetSeries,
@@ -23,8 +25,12 @@ import {
   offlinePut,
   offlinePutMany,
   openOfflineDatabase,
+  offlineAccountToken,
+  selectOfflineUser,
+  assertOfflineAccount,
+  isOfflineAccount,
+  offlineMediaCachePrefix,
 } from './offline-db'
-import { OFFLINE_BOOK_CACHE_PREFIX } from './offline-types'
 import type {
   CachedPages,
   OfflineDownloadPreferences,
@@ -104,6 +110,7 @@ export const useOfflineLibraryStore = defineStore('offline-library', () => {
   const deferredCompletions = new Set<string>()
   let lastQueuedAt = 0
   let processingQueue = false
+  let switchingAccount = false
 
   function handleOnline(): void {
     online.value = true
@@ -142,7 +149,7 @@ export const useOfflineLibraryStore = defineStore('offline-library', () => {
 
   function isDownloaded(bookId: string): boolean {
     const download = getDownload(bookId)
-    return !!download?.cacheName && ['downloaded', 'updating'].includes(download.status)
+    return !!download?.cacheName
   }
 
   async function updateDownload(record: OfflineDownloadRecord): Promise<void> {
@@ -172,7 +179,7 @@ export const useOfflineLibraryStore = defineStore('offline-library', () => {
     const names = await caches.keys()
     await Promise.all(
       names
-        .filter((name) => name.startsWith(OFFLINE_BOOK_CACHE_PREFIX) && !active.has(name))
+        .filter((name) => name.startsWith(offlineMediaCachePrefix()) && !active.has(name))
         .map((name) => caches.delete(name)),
     )
   }
@@ -222,17 +229,19 @@ export const useOfflineLibraryStore = defineStore('offline-library', () => {
     await cleanupOrphanedBookCaches()
     initialized.value = true
     notifyServiceWorker()
-    processQueue()
-    await closeLegacyDownloadNotifications()
+    void closeLegacyDownloadNotifications().catch(() => undefined)
 
     try {
-      if (isBrowser() && navigator.storage?.persist) await navigator.storage.persist()
+      if (isBrowser() && navigator.storage?.persist)
+        void navigator.storage.persist().catch(() => undefined)
     } catch {
       // Persistence is best-effort; browser storage still works without it.
     }
   }
 
-  const ready = initialize()
+  const ready = initialize().catch(() => {
+    initialized.value = true
+  })
 
   async function whenReady(): Promise<void> {
     await ready
@@ -311,14 +320,17 @@ export const useOfflineLibraryStore = defineStore('offline-library', () => {
     if (!book) return undefined
 
     const queued = await offlineGet<QueuedProgress>(OFFLINE_STORES.progress, bookId)
-    if (queued?.progress.page) {
+    if (queued) {
       const pagesCount = book.media?.pagesCount ?? 0
       book.readProgress = {
         ...(book.readProgress ?? {}),
-        page: queued.progress.page,
+        page:
+          queued.progress.page ??
+          book.readProgress?.page ??
+          (queued.progress.completed ? book.media?.pagesCount : 1),
         completed:
           queued.progress.completed === true ||
-          (pagesCount > 0 && queued.progress.page >= pagesCount),
+          (pagesCount > 0 && (queued.progress.page ?? 0) >= pagesCount),
         readDate: queued.updatedAt,
       } as unknown as BookDto['readProgress']
     }
@@ -331,6 +343,8 @@ export const useOfflineLibraryStore = defineStore('offline-library', () => {
   }
 
   async function getCachedPages(bookId: string): Promise<PageDto[] | undefined> {
+    const snapshot = getDownload(bookId)
+    if (snapshot?.cacheName && snapshot.pages) return rehydrateDates(clone(snapshot.pages))
     const record = await offlineGet<CachedPages>(OFFLINE_STORES.pages, bookId)
     return record?.pages ? rehydrateDates(record.pages) : undefined
   }
@@ -377,7 +391,10 @@ export const useOfflineLibraryStore = defineStore('offline-library', () => {
   }
 
   async function syncCatalogMetadata(): Promise<void> {
+    const accountToken = offlineAccountToken()
+
     await ready
+    assertOfflineAccount(accountToken)
     if (!online.value || offlineMode.value || syncingMetadata.value) return
     syncingMetadata.value = true
     try {
@@ -385,16 +402,23 @@ export const useOfflineLibraryStore = defineStore('offline-library', () => {
         komgaGetBooks({ body: {}, query: { unpaged: true } }),
         komgaGetSeries({ body: {}, query: { unpaged: true } }),
       ])
+      assertOfflineAccount(accountToken)
+
       const books = booksPage.content ?? []
       const series = seriesPage.content ?? []
       await Promise.all([cacheBooks(books), cacheSeries(series)])
+      assertOfflineAccount(accountToken)
+
       await checkDownloadUpdates(books)
+      assertOfflineAccount(accountToken)
     } finally {
       syncingMetadata.value = false
     }
   }
 
   async function checkDownloadUpdates(serverBooks: BookDto[]): Promise<void> {
+    const accountToken = offlineAccountToken()
+
     const byId = new Map(serverBooks.map((book) => [book.id, book]))
     for (const record of downloads.value.filter((x) => !!x.cacheName)) {
       const serverBook = byId.get(record.bookId)
@@ -402,6 +426,7 @@ export const useOfflineLibraryStore = defineStore('offline-library', () => {
         if (!record.sourceMissing) {
           record.sourceMissing = true
           await updateDownload(record)
+          assertOfflineAccount(accountToken)
         }
         continue
       }
@@ -415,6 +440,8 @@ export const useOfflineLibraryStore = defineStore('offline-library', () => {
 
       try {
         const pages = (await komgaGetBookPages({ path: { bookId: record.bookId } })) ?? []
+        assertOfflineAccount(accountToken)
+
         const revision = manifestRevision(pages)
         if (revision === record.manifestRevision) {
           // Archive conversion or metadata/file timestamp changed, but the
@@ -425,11 +452,13 @@ export const useOfflineLibraryStore = defineStore('offline-library', () => {
           delete record.remoteManifestRevision
           delete record.remotePages
           await updateDownload(record)
+          assertOfflineAccount(accountToken)
         } else {
           record.updateAvailable = true
           record.remoteManifestRevision = revision
           record.remotePages = clone(pages)
           await updateDownload(record)
+          assertOfflineAccount(accountToken)
         }
       } catch {
         // Keep the current snapshot. A later catalog sync will retry the check.
@@ -443,7 +472,7 @@ export const useOfflineLibraryStore = defineStore('offline-library', () => {
   }
 
   function cacheNameFor(bookId: string, revision: string): string {
-    return `${OFFLINE_BOOK_CACHE_PREFIX}${stableHash(bookId)}-${revision}`
+    return `${offlineMediaCachePrefix()}${stableHash(bookId)}-${revision}`
   }
 
   async function deliverNotification(
@@ -570,13 +599,25 @@ export const useOfflineLibraryStore = defineStore('offline-library', () => {
   }
 
   async function performDownload(bookId: string, controller: AbortController): Promise<void> {
+    const accountToken = offlineAccountToken()
+
     const existing = getDownload(bookId)
     if (!existing) return
     const [book, pages] = await Promise.all([
       komgaGetBookById({ path: { bookId }, signal: controller.signal }),
       komgaGetBookPages({ path: { bookId }, signal: controller.signal }),
     ])
-    const revision = manifestRevision(pages ?? [])
+    assertOfflineAccount(accountToken)
+
+    if (
+      (book.media?.mediaProfile?.toLowerCase() === 'epub' && !book.media.epubDivinaCompatible) ||
+      !pages?.length
+    ) {
+      throw new Error(
+        'Offline reading supports image-based comics only. EPUB books require a connection.',
+      )
+    }
+    const revision = manifestRevision(pages)
 
     // If only the container/archive changed (for example CBR -> CBZ) while the
     // extracted page manifest is identical, update metadata without redownloading.
@@ -590,7 +631,11 @@ export const useOfflineLibraryStore = defineStore('offline-library', () => {
       delete existing.remotePages
       delete existing.error
       await cacheBook(book)
+      assertOfflineAccount(accountToken)
+
       await updateDownload(existing)
+      assertOfflineAccount(accountToken)
+
       return
     }
 
@@ -598,9 +643,14 @@ export const useOfflineLibraryStore = defineStore('offline-library', () => {
       path: { seriesId: book.seriesId },
       signal: controller.signal,
     })
+    assertOfflineAccount(accountToken)
+
     const stagingCacheName = cacheNameFor(bookId, revision)
     await caches.delete(stagingCacheName)
+    assertOfflineAccount(accountToken)
+
     const stagingCache = await caches.open(stagingCacheName)
+    assertOfflineAccount(accountToken)
 
     const hadActiveSnapshot = !!existing.cacheName
     const oldCacheName = existing.cacheName
@@ -626,7 +676,10 @@ export const useOfflineLibraryStore = defineStore('offline-library', () => {
         }
     delete record.error
     await updateDownload(record)
+    assertOfflineAccount(accountToken)
+
     await showDownloadProgressNotification(record, true)
+    assertOfflineAccount(accountToken)
 
     let cursor = 0
     try {
@@ -643,8 +696,10 @@ export const useOfflineLibraryStore = defineStore('offline-library', () => {
             const request = new Request(downloadPageUrl(bookId, page), {
               credentials: 'include',
               signal: controller.signal,
+              headers: { 'X-Komga-Download': 'network' },
             })
             const response = await fetch(request)
+            assertOfflineAccount(accountToken)
             if (!response.ok)
               throw new Error(`Could not download page ${page.number} (${response.status})`)
 
@@ -657,23 +712,33 @@ export const useOfflineLibraryStore = defineStore('offline-library', () => {
                     .blob()
                     .then((blob) => blob.size)
             await stagingCache.put(request, response)
+            assertOfflineAccount(accountToken)
+
             record.bytes += await sizePromise
+            assertOfflineAccount(accountToken)
+
             record.completedPages += 1
             // Notification check rides on the reactive sync points only: the
             // per-page filter+summarize would otherwise run hundreds of times
             // per second during bulk downloads.
-            if (await persistDownloadProgress(record)) await showDownloadProgressNotification(record)
+            if (await persistDownloadProgress(record))
+              await showDownloadProgressNotification(record)
+            assertOfflineAccount(accountToken)
           }
         },
       )
       await Promise.all(workers)
+      assertOfflineAccount(accountToken)
 
       try {
         const posterUrl = bookPosterUrl(bookId)
         if (posterUrl) {
           const thumbnailRequest = new Request(posterUrl, { credentials: 'include' })
           const thumbnail = await fetch(thumbnailRequest)
+          assertOfflineAccount(accountToken)
+
           if (thumbnail.ok) await stagingCache.put(thumbnailRequest, thumbnail)
+          assertOfflineAccount(accountToken)
         }
       } catch {
         // Poster failure does not invalidate a complete set of readable pages.
@@ -681,6 +746,7 @@ export const useOfflineLibraryStore = defineStore('offline-library', () => {
 
       // Atomic commit: only now does this revision become the one the service
       // worker serves. Until this point the old cacheName remained active.
+      record.pages = clone(pages)
       record.book = clone(book)
       record.status = 'downloaded'
       record.cacheName = stagingCacheName
@@ -694,12 +760,24 @@ export const useOfflineLibraryStore = defineStore('offline-library', () => {
       delete record.error
 
       await Promise.all([cacheBook(book), cacheSeriesItem(series), cachePages(bookId, pages)])
+      assertOfflineAccount(accountToken)
+
       await updateDownload(record)
+      assertOfflineAccount(accountToken)
 
       if (oldCacheName && oldCacheName !== stagingCacheName) await caches.delete(oldCacheName)
+      assertOfflineAccount(accountToken)
+
       await showDownloadNotification(record)
+      assertOfflineAccount(accountToken)
     } catch (e) {
+      if (!isOfflineAccount(accountToken)) {
+        await caches.delete(stagingCacheName)
+        return
+      }
       await caches.delete(stagingCacheName)
+      assertOfflineAccount(accountToken)
+
       if (cancelledJobs.has(bookId) || !getDownload(bookId)) {
         cancelledJobs.delete(bookId)
       } else if (hadActiveSnapshot && existing) {
@@ -708,25 +786,30 @@ export const useOfflineLibraryStore = defineStore('offline-library', () => {
         restored.updateAvailable = true
         restored.error = errorMessage(e)
         await updateDownload(restored)
+        assertOfflineAccount(accountToken)
       } else if (controller.signal.aborted) {
         record.status = 'paused'
         delete record.cacheName
         delete record.error
         await updateDownload(record)
+        assertOfflineAccount(accountToken)
       } else {
         record.status = 'error'
         delete record.cacheName
         record.error = errorMessage(e)
         await updateDownload(record)
+        assertOfflineAccount(accountToken)
       }
       const failed = getDownload(bookId)
       if (failed?.error) await showDownloadNotification(failed)
+      assertOfflineAccount(accountToken)
+
       throw e
     }
   }
 
   function processQueue(): void {
-    if (processingQueue || !online.value || offlineMode.value) return
+    if (switchingAccount || processingQueue || !online.value || offlineMode.value) return
     processingQueue = true
     void Promise.resolve().then(() => {
       try {
@@ -734,10 +817,12 @@ export const useOfflineLibraryStore = defineStore('offline-library', () => {
           const next = selectNextQueuedDownload(downloads.value, activeJobs)
           if (!next) break
           next.status = 'queued'
+          const jobAccount = offlineAccountToken()
           const controller = new AbortController()
           activeJobs.set(next.bookId, controller)
           void performDownload(next.bookId, controller)
             .catch(async (e: unknown) => {
+              if (!isOfflineAccount(jobAccount)) return
               const record = getDownload(next.bookId)
               if (record?.status === 'queued' && !cancelledJobs.has(next.bookId)) {
                 record.status = record.cacheName ? 'downloaded' : online.value ? 'error' : 'queued'
@@ -747,7 +832,7 @@ export const useOfflineLibraryStore = defineStore('offline-library', () => {
               }
             })
             .finally(() => {
-              activeJobs.delete(next.bookId)
+              if (activeJobs.get(next.bookId) === controller) activeJobs.delete(next.bookId)
               processQueue()
             })
         }
@@ -763,6 +848,9 @@ export const useOfflineLibraryStore = defineStore('offline-library', () => {
     notificationGroupId?: string,
     startQueue = true,
   ): Promise<void> {
+    if (book.media?.mediaProfile?.toLowerCase() === 'epub' && !book.media.epubDivinaCompatible) {
+      throw new Error('EPUB books require a connection and cannot be saved for offline reading.')
+    }
     const bookId = book.id
     const current = getDownload(bookId)
     const queued: OfflineDownloadRecord = current?.cacheName
@@ -794,7 +882,10 @@ export const useOfflineLibraryStore = defineStore('offline-library', () => {
     autoManaged = false,
     notificationGroupId?: string,
   ): Promise<void> {
+    const accountToken = offlineAccountToken()
+
     await ready
+    assertOfflineAccount(accountToken)
     if (!online.value || offlineMode.value)
       throw new Error('Connect to the server before downloading a book')
     if (!isBrowser() || !('caches' in window))
@@ -803,11 +894,16 @@ export const useOfflineLibraryStore = defineStore('offline-library', () => {
     const current = getDownload(bookId)
     if (current && ['queued', 'downloading', 'updating'].includes(current.status)) return
     const book = await komgaGetBookById({ path: { bookId } })
+    assertOfflineAccount(accountToken)
+
     await queueBook(book, autoManaged, notificationGroupId)
+    assertOfflineAccount(accountToken)
   }
 
   async function downloadBooks(books: BookDto[], notificationGroupId: string): Promise<void> {
+    const accountToken = offlineAccountToken()
     await ready
+    assertOfflineAccount(accountToken)
     if (!online.value || offlineMode.value)
       throw new Error('Connect to the server before downloading books')
     if (!isBrowser() || !('caches' in window))
@@ -883,7 +979,10 @@ export const useOfflineLibraryStore = defineStore('offline-library', () => {
     bookId: string,
     progress: ReadProgressUpdateDto,
   ): Promise<void> {
+    const accountToken = offlineAccountToken()
+
     await ready
+    assertOfflineAccount(accountToken)
     const activeDownload = getDownload(bookId)
     const normalizedProgress = clone(progress)
     const pagesCount = activeDownload?.book.media?.pagesCount || activeDownload?.totalPages || 0
@@ -898,17 +997,22 @@ export const useOfflineLibraryStore = defineStore('offline-library', () => {
       revision: fromOfflineSnapshot ? activeDownload?.manifestRevision : undefined,
     }
     await offlinePut(OFFLINE_STORES.progress, queued)
+    assertOfflineAccount(accountToken)
 
     if (normalizedProgress.completed === true) {
       if (openReaderBooks.has(bookId)) deferredCompletions.add(bookId)
       else await handleCompletedDownload(bookId)
+      assertOfflineAccount(accountToken)
     }
 
     if (!online.value || offlineMode.value) return
     try {
       await komgaMarkBookReadProgress({ path: { bookId }, body: normalizedProgress })
+      assertOfflineAccount(accountToken)
+
       queued.pending = false
       await offlinePut(OFFLINE_STORES.progress, queued)
+      assertOfflineAccount(accountToken)
     } catch {
       // Remains queued and is retried after catalog/revision reconciliation.
     }
@@ -925,11 +1029,26 @@ export const useOfflineLibraryStore = defineStore('offline-library', () => {
   }
 
   async function flushProgressQueue(): Promise<void> {
+    const accountToken = offlineAccountToken()
+
     await ready
+    assertOfflineAccount(accountToken)
     if (!online.value || offlineMode.value || syncingProgress.value) return
     syncingProgress.value = true
     try {
+      const session = await offlineGet<OfflineSetting<UserDto>>(
+        OFFLINE_STORES.settings,
+        'sessionUser',
+      )
+      assertOfflineAccount(accountToken)
+
+      const current = await komgaGetCurrentUser()
+      assertOfflineAccount(accountToken)
+
+      if (!session?.value || current.id !== session.value.id) return
       const entries = await offlineGetAll<QueuedProgress>(OFFLINE_STORES.progress)
+      assertOfflineAccount(accountToken)
+
       for (const entry of entries.filter((x) => x.pending)) {
         try {
           const outgoing = clone(entry.progress)
@@ -942,12 +1061,17 @@ export const useOfflineLibraryStore = defineStore('offline-library', () => {
             download.remotePages?.length
           ) {
             const oldPages = (await getCachedPages(entry.bookId)) ?? []
+            assertOfflineAccount(accountToken)
+
             outgoing.page = remapPage(oldPages, download.remotePages, outgoing.page)
           }
 
           await komgaMarkBookReadProgress({ path: { bookId: entry.bookId }, body: outgoing })
+          assertOfflineAccount(accountToken)
+
           entry.pending = false
           await offlinePut(OFFLINE_STORES.progress, entry)
+          assertOfflineAccount(accountToken)
         } catch {
           break
         }
@@ -963,8 +1087,40 @@ export const useOfflineLibraryStore = defineStore('offline-library', () => {
     return { usage: estimate.usage ?? 0, quota: estimate.quota ?? 0 }
   }
 
+  async function reloadAccountData(): Promise<void> {
+    switchingAccount = true
+    try {
+      activeJobs.forEach((controller) => controller.abort())
+      activeJobs.clear()
+      downloads.value = []
+      await refreshState()
+      const [mode, prefs] = await Promise.all([
+        offlineGet<OfflineSetting<boolean>>(OFFLINE_STORES.settings, 'offlineMode'),
+        offlineGet<OfflineSetting<OfflineDownloadPreferences>>(
+          OFFLINE_STORES.settings,
+          'downloadPreferences',
+        ),
+      ])
+      offlineMode.value = mode?.value === true
+      preferences.value = clampPreferences({ ...DEFAULT_DOWNLOAD_PREFERENCES, ...prefs?.value })
+      await recoverInterruptedDownloads()
+      notifyServiceWorker()
+    } finally {
+      switchingAccount = false
+    }
+  }
+
+  async function activateAccount(user: UserDto): Promise<void> {
+    const changed = await selectOfflineUser(user.id)
+    await offlinePut(OFFLINE_STORES.settings, { key: 'sessionUser', value: user })
+    if (changed) await reloadAccountData()
+  }
+
   return {
     initialized,
+    markServerUnavailable: () => {
+      online.value = false
+    },
     offlineMode,
     online,
     syncingMetadata,
@@ -976,6 +1132,10 @@ export const useOfflineLibraryStore = defineStore('offline-library', () => {
     shellPrecache,
     preferences,
     whenReady,
+    resumeDownloads: processQueue,
+    reloadAccountData,
+    activateAccount,
+
     setOfflineMode,
     setShellReadiness,
     setDownloadPreferences,

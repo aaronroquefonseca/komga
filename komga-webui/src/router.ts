@@ -47,7 +47,8 @@ const getLibraryRoute = (libraryId: string) => {
 
 const router = new Router({
   mode: 'history',
-  base: urls.base,
+  // Keep the application prefix through query changes and reader reloads.
+  base: `${urls.base}classic/`,
   parseQuery(query: string) {
     return qs.parse(query)
   },

@@ -23,7 +23,6 @@ import type { BookDto } from '@/generated/openapi'
 import { useAddToReadListDialog } from '@/composables/book/useAddToReadListDialog'
 import { useAddToCollectionDialog } from '@/composables/series/useAddToCollectionDialog'
 import { useOfflineLibraryStore } from '@/offline'
-import { isStandalonePwa } from '@/functions/pwa'
 import { MediaStatus } from '@/types/MediaStatus'
 
 export function useBookActions(
@@ -43,10 +42,7 @@ export function useBookActions(
   void offline.whenReady()
 
   const canSaveOffline = computed(
-    () =>
-      isStandalonePwa() &&
-      hasRole('FILE_DOWNLOAD') &&
-      toValue(book).media?.status === MediaStatus.Ready,
+    () => hasRole('FILE_DOWNLOAD') && toValue(book).media?.status === MediaStatus.Ready,
   )
   const download = computed(() => offline.getDownload(toValue(book).id))
   const offlineBusy = computed(() => !offline.online || offline.offlineMode)
@@ -252,156 +248,176 @@ export function useBookActions(
       : [],
   )
 
-  const actions = computed<Action<ActionName>[]>(() => [
-    ...offlineActions.value,
-    ...manageDownloadsAction.value,
-    ...(isAdmin.value && toValue(book).oneshot
-      ? [
-          {
-            title: intl.formatMessage(actionDetails[ActionName.AddToCollection].message),
-            action: ActionName.AddToCollection,
-            onMouseenter: (event: Event) =>
-              (addToCollectionActivator.value = event.currentTarget as Element),
-            onClick: () => {
-              addToCollection(() => callback(ActionName.AddToCollection))
+  const actions = computed<Action<ActionName>[]>(() => {
+    const items: Action<ActionName>[] = [
+      ...offlineActions.value,
+      ...manageDownloadsAction.value,
+      ...(isAdmin.value && toValue(book).oneshot
+        ? [
+            {
+              title: intl.formatMessage(actionDetails[ActionName.AddToCollection].message),
+              action: ActionName.AddToCollection,
+              onMouseenter: (event: Event) =>
+                (addToCollectionActivator.value = event.currentTarget as Element),
+              onClick: () => {
+                addToCollection(() => callback(ActionName.AddToCollection))
+              },
             },
-          },
-        ]
-      : []),
-    ...(isAdmin.value
-      ? [
-          {
-            title: intl.formatMessage(actionDetails[ActionName.AddToReadList].message),
-            action: ActionName.AddToReadList,
-            onMouseenter: (event: Event) =>
-              (addToReadListActivator.value = event.currentTarget as Element),
-            onClick: () => {
-              addToReadList(() => callback(ActionName.AddToReadList))
+          ]
+        : []),
+      ...(isAdmin.value
+        ? [
+            {
+              title: intl.formatMessage(actionDetails[ActionName.AddToReadList].message),
+              action: ActionName.AddToReadList,
+              onMouseenter: (event: Event) =>
+                (addToReadListActivator.value = event.currentTarget as Element),
+              onClick: () => {
+                addToReadList(() => callback(ActionName.AddToReadList))
+              },
             },
-          },
-        ]
-      : []),
-    ...(!toValue(book).readProgress?.completed
-      ? [
-          {
-            title: intl.formatMessage(actionDetails[ActionName.MarkRead].message),
-            icon: actionDetails[ActionName.MarkRead].icon,
-            action: ActionName.MarkRead,
-            onClick: () => {
-              markRead()
+          ]
+        : []),
+      ...(!toValue(book).readProgress?.completed
+        ? [
+            {
+              title: intl.formatMessage(actionDetails[ActionName.MarkRead].message),
+              icon: actionDetails[ActionName.MarkRead].icon,
+              action: ActionName.MarkRead,
+              onClick: () => {
+                markRead()
+              },
             },
-          },
-        ]
-      : []),
-    ...(!!toValue(book).readProgress
-      ? [
-          {
-            title: intl.formatMessage(actionDetails[ActionName.MarkUnread].message),
-            icon: actionDetails[ActionName.MarkUnread].icon,
-            action: ActionName.MarkUnread,
-            onClick: () => {
-              markUnread()
+          ]
+        : []),
+      ...(!!toValue(book).readProgress
+        ? [
+            {
+              title: intl.formatMessage(actionDetails[ActionName.MarkUnread].message),
+              icon: actionDetails[ActionName.MarkUnread].icon,
+              action: ActionName.MarkUnread,
+              onClick: () => {
+                markUnread()
+              },
             },
-          },
-        ]
-      : []),
-    ...(hasRole('FILE_DOWNLOAD')
-      ? [
-          {
-            title: intl.formatMessage(actionDetails[ActionName.Download].message),
-            action: ActionName.Download,
-            href: bookFileUrl(toValue(book).id),
-            onClick: () => {
-              callback(ActionName.Download)
+          ]
+        : []),
+      ...(hasRole('FILE_DOWNLOAD')
+        ? [
+            {
+              title: intl.formatMessage(actionDetails[ActionName.Download].message),
+              action: ActionName.Download,
+              href: bookFileUrl(toValue(book).id),
+              onClick: () => {
+                callback(ActionName.Download)
+              },
             },
-          },
-        ]
-      : []),
-    ...(isAdmin.value
-      ? [
-          {
-            title: intl.formatMessage(actionDetails[ActionName.EditBook].message),
-            icon: actionDetails[ActionName.EditBook].icon,
-            action: ActionName.EditBook,
-            onMouseenter: (event: Event) =>
-              (editMetadataActivator.value = event.currentTarget as Element),
-            onClick: () => {
-              updateBookMetadata(() => callback(ActionName.EditBook))
+          ]
+        : []),
+      ...(isAdmin.value
+        ? [
+            {
+              title: intl.formatMessage(actionDetails[ActionName.EditBook].message),
+              icon: actionDetails[ActionName.EditBook].icon,
+              action: ActionName.EditBook,
+              onMouseenter: (event: Event) =>
+                (editMetadataActivator.value = event.currentTarget as Element),
+              onClick: () => {
+                updateBookMetadata(() => callback(ActionName.EditBook))
+              },
             },
-          },
-        ]
-      : []),
-    ...(isAdmin.value
-      ? [
-          {
-            title: intl.formatMessage(actionDetails[ActionName.RefreshMetadata].message),
-            action: ActionName.RefreshMetadata,
-            onClick: () => {
-              refreshMetadata()
+          ]
+        : []),
+      ...(isAdmin.value
+        ? [
+            {
+              title: intl.formatMessage(actionDetails[ActionName.RefreshMetadata].message),
+              action: ActionName.RefreshMetadata,
+              onClick: () => {
+                refreshMetadata()
+              },
             },
-          },
-        ]
-      : []),
-    ...(isAdmin.value
-      ? [
-          {
-            title: intl.formatMessage(actionDetails[ActionName.Analyze].message),
+          ]
+        : []),
+      ...(isAdmin.value
+        ? [
+            {
+              title: intl.formatMessage(actionDetails[ActionName.Analyze].message),
 
-            action: ActionName.Analyze,
-            onClick: () => {
-              analyzeBook()
+              action: ActionName.Analyze,
+              onClick: () => {
+                analyzeBook()
+              },
             },
-          },
-        ]
-      : []),
-    ...(isAdmin.value
-      ? [
-          {
-            title: intl.formatMessage({
-              description: 'Book menu: manage > delete file',
-              defaultMessage: 'Delete file',
-              id: 'vXhkpo',
+          ]
+        : []),
+      ...(isAdmin.value
+        ? [
+            {
+              title: intl.formatMessage({
+                description: 'Book menu: manage > delete file',
+                defaultMessage: 'Delete file',
+                id: 'vXhkpo',
+              }),
+              action: ActionName.Delete,
+              onMouseenter: (event: Event) =>
+                (dialogConfirm.value.activator = event.currentTarget as Element),
+              onClick: () => {
+                deleteBook()
+              },
+            },
+          ]
+        : []),
+      {
+        title: inProgress.value
+          ? intl.formatMessage({
+              description: 'Book menu: resume reading button',
+              defaultMessage: 'Resume',
+              id: 'cIM3eJ',
+            })
+          : intl.formatMessage({
+              description: 'Book menu: read button',
+              defaultMessage: 'Read',
+              id: 'Y8SsFO',
             }),
-            action: ActionName.Delete,
-            onMouseenter: (event: Event) =>
-              (dialogConfirm.value.activator = event.currentTarget as Element),
-            onClick: () => {
-              deleteBook()
-            },
-          },
-        ]
-      : []),
-    {
-      title: inProgress.value
-        ? intl.formatMessage({
-            description: 'Book menu: resume reading button',
-            defaultMessage: 'Resume',
-            id: 'cIM3eJ',
-          })
-        : intl.formatMessage({
-            description: 'Book menu: read button',
-            defaultMessage: 'Read',
-            id: 'Y8SsFO',
-          }),
-      icon: actionDetails[ActionName.OpenReader].icon,
-      action: ActionName.OpenReader,
-      disabled: !canRead.value,
-      onClick: () => {
-        openReader(false)
-        callback(ActionName.OpenReader)
+        icon: actionDetails[ActionName.OpenReader].icon,
+        action: ActionName.OpenReader,
+        disabled:
+          !canRead.value ||
+          (offlineBusy.value && (!offline.isDownloaded(toValue(book).id) || isEpubReader.value)),
+        onClick: () => {
+          openReader(false)
+          callback(ActionName.OpenReader)
+        },
       },
-    },
-    {
-      title: intl.formatMessage(actionDetails[ActionName.OpenReaderIncognito].message),
-      icon: actionDetails[ActionName.OpenReaderIncognito].icon,
-      action: ActionName.OpenReaderIncognito,
-      disabled: !canRead.value,
-      onClick: () => {
-        openReader(true)
-        callback(ActionName.OpenReaderIncognito)
+      {
+        title: intl.formatMessage(actionDetails[ActionName.OpenReaderIncognito].message),
+        icon: actionDetails[ActionName.OpenReaderIncognito].icon,
+        action: ActionName.OpenReaderIncognito,
+        disabled:
+          !canRead.value ||
+          (offlineBusy.value && (!offline.isDownloaded(toValue(book).id) || isEpubReader.value)),
+        onClick: () => {
+          openReader(true)
+          callback(ActionName.OpenReaderIncognito)
+        },
       },
-    },
-  ])
+    ]
+    const serverActions: ActionName[] = [
+      ActionName.EditBook,
+      ActionName.RefreshMetadata,
+      ActionName.Analyze,
+      ActionName.Delete,
+      ActionName.Download,
+      ActionName.AddToCollection,
+      ActionName.AddToReadList,
+      ActionName.MarkUnread,
+    ]
+    return items.map((action) => ({
+      ...action,
+      disabled: action.disabled || (offlineBusy.value && serverActions.includes(action.action)),
+    }))
+  })
 
   //region Add to collection
   const { prepareDialog: showAddToCollectionDialog, activator: addToCollectionActivator } =

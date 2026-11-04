@@ -232,6 +232,13 @@ declare module 'vue-router/auto-routes' {
       Record<never, never>,
       | never
     >,
+    '/offline': RouteRecordInfo<
+      '/offline',
+      '/offline',
+      Record<never, never>,
+      Record<never, never>,
+      | never
+    >,
     '/readlist/[id]': RouteRecordInfo<
       '/readlist/[id]',
       '/readlist/:id',
@@ -534,6 +541,14 @@ declare module 'vue-router/auto-routes' {
     'src/pages/media/missing-posters.vue': {
       routes:
         | '/media/missing-posters'
+      views:
+        | never
+      pathParamNames:
+        | never
+    }
+    'src/pages/offline.vue': {
+      routes:
+        | '/offline'
       views:
         | never
       pathParamNames:

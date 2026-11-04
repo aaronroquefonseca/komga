@@ -32,7 +32,6 @@ export function registerPlugins(app: App) {
     .use(vuetifyRulesPlugin)
     .use(vueIntl)
     // .use(DataLoaderPlugin, {router})
-    .use(router)
     .use(pinia)
     .use(PiniaColada, {
       plugins: [
@@ -46,6 +45,7 @@ export function registerPlugins(app: App) {
       ],
     })
 
+  // Install the router last: guards need Pinia and Colada from the first navigation.
   // register navigation guards
   useClaimGuard(router)
   useLoginGuard(router)
@@ -53,4 +53,6 @@ export function registerPlugins(app: App) {
   useLibraryViewRedirectGuard(router)
   useOneshotGuard(router)
   useScroll(router)
+
+  app.use(router)
 }

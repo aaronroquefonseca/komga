@@ -30,7 +30,8 @@
     "storybook:dev": "storybook dev -p 6006",
     "storybook:build": "storybook build",
     "chromatic": "chromatic",
-    "chromatic:force-rebuild": "chromatic --force-rebuild"
+    "chromatic:force-rebuild": "chromatic --force-rebuild",
+    "test:offline": "node --test tests/offline-production.mjs"
   },
   "dependencies": {
     "@formatjs/intl-localematcher": "^0.9.0",

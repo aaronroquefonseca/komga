@@ -1,3 +1,4 @@
+import { offlineAccountToken, assertOfflineAccount } from './offline-db'
 import {
   komgaGetAgeRatings,
   komgaGetBookById,
@@ -14,6 +15,7 @@ import {
   komgaGetLibraryById,
   komgaGetPublishers,
   komgaGetSeries,
+  komgaGetSeriesUpdated,
   komgaGetSeriesAlphabeticalGroups,
   komgaGetSeriesById,
   komgaGetSeriesReleaseYears,
@@ -33,8 +35,9 @@ import {
   type SeriesSearch,
   type UserDto,
 } from '@/generated/openapi'
+import { isApiErrorWithCause } from '@/api/komga-client'
 import { OFFLINE_STORES } from './offline-db'
-import { offlineDelete, offlineGet, offlinePut } from './offline-db'
+import { offlineDelete, offlineGet, offlinePut, notifyOfflineAccountChanged } from './offline-db'
 import { OFFLINE_LIBRARIES_KEY, OFFLINE_SESSION_KEY } from './offline-types'
 import type { OfflinePageRequest, OfflineSetting } from './offline-types'
 import { useOfflineLibraryStore } from './offline-store'
@@ -88,12 +91,14 @@ export async function getOfflineSessionUser(): Promise<UserDto | undefined> {
 
 /** Cache the authenticated user after login so offline mode can identify the session. */
 export async function cacheSessionUser(user: UserDto): Promise<void> {
-  await offlinePut(OFFLINE_STORES.settings, { key: OFFLINE_SESSION_KEY, value: user })
+  await useOfflineLibraryStore().activateAccount(user)
 }
 
 /** Drop the cached session, e.g. on logout. */
 export async function clearCachedSessionUser(): Promise<void> {
+  const existing = await offlineGet(OFFLINE_STORES.settings, OFFLINE_SESSION_KEY)
   await offlineDelete(OFFLINE_STORES.settings, OFFLINE_SESSION_KEY)
+  if (existing) notifyOfflineAccountChanged()
 }
 
 export async function getOfflineLibraries(): Promise<LibraryDto[]> {
@@ -157,7 +162,14 @@ async function localSeriesPage(
 }
 
 export async function getBookOfflineFirst(bookId: string): Promise<BookDto> {
+  const accountToken = offlineAccountToken()
+
   const store = useOfflineLibraryStore()
+  await store.whenReady()
+  if (store.getDownload(bookId)?.cacheName) {
+    const snapshot = await store.getCachedBook(bookId)
+    if (snapshot) return snapshot
+  }
   if (isLocalOnly()) {
     const cached = await store.getCachedBook(bookId)
     if (cached) return cached
@@ -165,7 +177,9 @@ export async function getBookOfflineFirst(bookId: string): Promise<BookDto> {
   }
   try {
     const book = await komgaGetBookById({ path: { bookId } })
-    await store.cacheBook(book)
+    assertOfflineAccount(accountToken)
+
+    await store.cacheBook(book).catch(() => undefined)
     return book
   } catch (e) {
     const cached = await store.getCachedBook(bookId)
@@ -175,7 +189,14 @@ export async function getBookOfflineFirst(bookId: string): Promise<BookDto> {
 }
 
 export async function getBookPagesOfflineFirst(bookId: string): Promise<PageDto[]> {
+  const accountToken = offlineAccountToken()
+
   const store = useOfflineLibraryStore()
+  await store.whenReady()
+  if (store.getDownload(bookId)?.cacheName) {
+    const snapshot = await store.getCachedPages(bookId)
+    if (snapshot) return snapshot
+  }
   if (isLocalOnly()) {
     const cached = await store.getCachedPages(bookId)
     if (cached) return cached
@@ -183,7 +204,9 @@ export async function getBookPagesOfflineFirst(bookId: string): Promise<PageDto[
   }
   try {
     const pages = (await komgaGetBookPages({ path: { bookId } })) ?? []
-    await store.cachePages(bookId, pages)
+    assertOfflineAccount(accountToken)
+
+    await store.cachePages(bookId, pages).catch(() => undefined)
     return pages
   } catch (e) {
     const cached = await store.getCachedPages(bookId)
@@ -196,11 +219,15 @@ export async function getBooksListOfflineFirst(
   search: BookSearch,
   pageRequest?: OfflinePageRequest,
 ): Promise<PageBookDto> {
+  const accountToken = offlineAccountToken()
+
   const store = useOfflineLibraryStore()
   if (isLocalOnly()) return store.getCachedBooksPage(search, pageRequest)
   try {
     const page = await komgaGetBooks({ body: search, query: toQueryPaging(pageRequest) })
-    await store.cacheBooks(page.content ?? [])
+    assertOfflineAccount(accountToken)
+
+    await store.cacheBooks(page.content ?? []).catch(() => undefined)
     return rehydrateDates(page)
   } catch (e) {
     const cached = await store.getCachedBooksPage(search, pageRequest)
@@ -213,13 +240,17 @@ export async function getBooksOnDeckOfflineFirst(
   libraryIds?: string[],
   pageRequest?: OfflinePageRequest,
 ): Promise<PageBookDto> {
+  const accountToken = offlineAccountToken()
+
   const store = useOfflineLibraryStore()
   if (isLocalOnly()) return store.getCachedOnDeck(libraryIds, pageRequest)
   try {
     const page = await komgaGetBooksOnDeck({
       query: { library_id: libraryIds, page: pageRequest?.page, size: pageRequest?.size },
     })
-    await store.cacheBooks(page.content ?? [])
+    assertOfflineAccount(accountToken)
+
+    await store.cacheBooks(page.content ?? []).catch(() => undefined)
     return rehydrateDates(page)
   } catch (e) {
     const cached = await store.getCachedOnDeck(libraryIds, pageRequest)
@@ -253,7 +284,7 @@ export async function getBookSiblingOfflineFirst(bookId: string, delta: 1 | -1):
   if (isLocalOnly()) return cachedSibling(bookId, delta)
   try {
     const book = await fetcher()
-    await store.cacheBook(book)
+    await store.cacheBook(book).catch(() => undefined)
     return book
   } catch (e) {
     try {
@@ -265,6 +296,8 @@ export async function getBookSiblingOfflineFirst(bookId: string, delta: 1 | -1):
 }
 
 export async function getSeriesOfflineFirst(seriesId: string): Promise<SeriesDto> {
+  const accountToken = offlineAccountToken()
+
   const store = useOfflineLibraryStore()
   if (isLocalOnly()) {
     const cached = await store.getCachedSeries(seriesId)
@@ -273,7 +306,9 @@ export async function getSeriesOfflineFirst(seriesId: string): Promise<SeriesDto
   }
   try {
     const series = await komgaGetSeriesById({ path: { seriesId } })
-    await store.cacheSeriesItem(series)
+    assertOfflineAccount(accountToken)
+
+    await store.cacheSeriesItem(series).catch(() => undefined)
     return series
   } catch (e) {
     const cached = await store.getCachedSeries(seriesId)
@@ -286,11 +321,15 @@ export async function getSeriesListOfflineFirst(
   search: SeriesSearch,
   pageRequest?: OfflinePageRequest,
 ): Promise<PageSeriesDto> {
+  const accountToken = offlineAccountToken()
+
   const store = useOfflineLibraryStore()
   if (isLocalOnly()) return localSeriesPage(search, pageRequest)
   try {
     const page = await komgaGetSeries({ body: search, query: toQueryPaging(pageRequest) })
-    await store.cacheSeries(page.content ?? [])
+    assertOfflineAccount(accountToken)
+
+    await store.cacheSeries(page.content ?? []).catch(() => undefined)
     return rehydrateDates(page)
   } catch (e) {
     const cached = await localSeriesPage(search, pageRequest)
@@ -339,10 +378,14 @@ export async function getCollectionsBySeriesOfflineFirst(
 }
 
 export async function getLibrariesOfflineFirst(): Promise<LibraryDto[]> {
+  const accountToken = offlineAccountToken()
+
   if (isLocalOnly()) return getOfflineLibraries()
   try {
     const libraries = (await komgaGetLibraries()) ?? []
-    await cacheOfflineLibraries(libraries)
+    assertOfflineAccount(accountToken)
+
+    await cacheOfflineLibraries(libraries).catch(() => undefined)
     return libraries
   } catch (e) {
     const cached = await getOfflineLibraries()
@@ -367,12 +410,24 @@ export async function getLibraryOfflineFirst(libraryId: string): Promise<Library
 }
 
 export async function getSessionUserOfflineFirst(): Promise<UserDto | undefined> {
+  const accountToken = offlineAccountToken()
+
+  await useOfflineLibraryStore()
+    .whenReady()
+    .catch(() => undefined)
   if (isLocalOnly()) return getOfflineSessionUser()
   try {
     const user = await komgaGetCurrentUser()
-    await cacheSessionUser(user)
+    assertOfflineAccount(accountToken)
+
+    await cacheSessionUser(user).catch(() => undefined)
     return user
-  } catch {
+  } catch (error) {
+    assertOfflineAccount(accountToken)
+    if (isApiErrorWithCause(error) && [401, 403].includes(error.cause.status)) {
+      await clearCachedSessionUser()
+      throw error
+    }
     return getOfflineSessionUser()
   }
 }
@@ -437,6 +492,8 @@ export function getPublishersOfflineFirst(libraryIds?: string[]): Promise<PageSt
 }
 
 export function getAgeRatingsOfflineFirst(libraryIds?: string[]): Promise<PageInteger> {
+  const accountToken = offlineAccountToken()
+
   const local = async (): Promise<number[]> => {
     const ratings = (await cachedSeriesForLibraries(libraryIds))
       .map((item) => item.metadata?.ageRating)
@@ -446,6 +503,8 @@ export function getAgeRatingsOfflineFirst(libraryIds?: string[]): Promise<PageIn
   const network = async (): Promise<PageInteger> =>
     (await komgaGetAgeRatings({ query: { library_id: libraryIds } })) ??
     pageFromItems([], { unpaged: true })
+  assertOfflineAccount(accountToken)
+
   if (isLocalOnly()) return local().then((items) => pageFromItems(items, { unpaged: true }))
   return network().catch(async (e: unknown) => {
     const items = await local()
@@ -510,4 +569,29 @@ export function getLanguagesOfflineFirst(libraryIds?: string[]): Promise<PageStr
         (await cachedSeriesForLibraries(libraryIds)).map((item) => item.metadata?.language),
       ),
   )
+}
+
+export async function getSeriesUpdatedOfflineFirst(
+  libraryIds: string[] | undefined,
+  pageRequest: OfflinePageRequest,
+): Promise<PageSeriesDto> {
+  const accountToken = offlineAccountToken()
+
+  if (!isLocalOnly()) {
+    try {
+      const page = await komgaGetSeriesUpdated({
+        query: { library_id: libraryIds, oneshot: false, ...toQueryPaging(pageRequest) },
+      })
+      assertOfflineAccount(accountToken)
+
+      await useOfflineLibraryStore()
+        .cacheSeries(page.content ?? [])
+        .catch(() => undefined)
+      return page
+    } catch {
+      /* Show the saved subset if the server is unavailable. */
+    }
+  }
+  const items = (await cachedSeriesForLibraries(libraryIds)).filter((item) => !item.oneshot)
+  return pageFromItems(items, { ...pageRequest, sort: ['lastModified,desc'] })
 }

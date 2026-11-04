@@ -1,7 +1,13 @@
 <template>
   <v-container class="ma-0 pa-0 full-height" fluid v-if="pages.length > 0"
                :style="`width: 100%; background-color: ${backgroundColor}`"
+               @error.capture="handlePageError"
   >
+    <v-alert v-if="unavailablePage" type="warning" style="position:fixed;top:16px;left:16px;right:16px;z-index:100">
+      Page {{ unavailablePage }} is unavailable. Reconnect or download this book again to restore missing pages.
+      <v-btn text @click="retryUnavailablePage">Retry page</v-btn>
+      <v-btn text :href="source === 'nextui' ? `${resourceBase}downloads` : `${resourceBase}classic/downloads`">Open Downloads</v-btn>
+    </v-alert>
     <div>
       <v-slide-y-transition>
         <!-- Top Toolbar-->
@@ -405,6 +411,8 @@ export default Vue.extend({
       series: {} as SeriesDto,
       context: {} as Context,
       contextName: '',
+      unavailablePage: null as number | null,
+      resourceBase: window.resourceBaseUrl || '/',
       incognito: false,
       // set when the reader was opened from the new UI: closing goes back there
       source: '',
@@ -501,6 +509,7 @@ export default Vue.extend({
     if (screenfull.isEnabled) screenfull.on('change', this.fullscreenChanged)
   },
   async mounted() {
+    document.addEventListener('error', this.handlePageError, true)
     this.$offline.readerOpened(this.bookId)
     document.documentElement.classList.add('html-reader')
 
@@ -531,6 +540,7 @@ export default Vue.extend({
     this.setup(this.bookId, Number(this.$route.query.page), this.$route.query.position as string | undefined)
   },
   destroyed() {
+    document.removeEventListener('error', this.handlePageError, true)
     this.$offline.readerClosed(this.bookId)
     document.documentElement.classList.remove('html-reader')
 
@@ -757,6 +767,22 @@ export default Vue.extend({
     },
   },
   methods: {
+    handlePageError(event: Event) {
+      const image = event.target as HTMLImageElement
+      const match = image?.src?.match(/\/api\/v1\/books\/[^/]+\/pages\/(\d+)/)
+      if (match) this.unavailablePage = Number(match[1])
+    },
+    retryUnavailablePage() {
+      const page = this.unavailablePage
+      this.unavailablePage = null
+      this.$el.querySelectorAll('img').forEach(image => {
+        if (image.src.includes(`/pages/${page}`) && !image.naturalWidth) {
+          const url = image.src
+          image.removeAttribute('src')
+          image.src = url
+        }
+      })
+    },
     enterFullscreen() {
       if (screenfull.isEnabled) screenfull.request(document.documentElement, {navigationUI: 'hide'})
     },
@@ -772,6 +798,14 @@ export default Vue.extend({
       this.shortcuts[e.key]?.execute(this)
     },
     async setup(bookId: string, page?: number, position?: string) {
+      try {
+        await this.setupBook(bookId, page, position)
+      } catch (error) {
+        this.$warn('Reader setup failed', error)
+        this.$router.replace({name: 'offline-unavailable'})
+      }
+    },
+    async setupBook(bookId: string, page?: number, position?: string) {
       const revision = ++this.setupRevision
       this.$debug('[setup]', `bookId:${bookId}`, `page:${page}`)
       const book = await this.$komgaBooks.getBook(bookId)
@@ -792,7 +826,7 @@ export default Vue.extend({
       }
 
       if (this?.context.origin === ContextOrigin.READLIST) {
-        this.contextName = (await (this.$komgaReadLists.getOneReadList(this.context.id))).name
+        this.contextName = await this.$komgaReadLists.getOneReadList(this.context.id).then(x => x.name).catch(() => '')
         if (revision !== this.setupRevision) return
         document.title = `Komga - ${this.contextName} - ${this.book.metadata.title}`
       } else {

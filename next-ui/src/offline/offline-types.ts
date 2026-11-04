@@ -12,7 +12,7 @@ export const OFFLINE_SESSION_KEY = 'sessionUser'
 export const OFFLINE_LIBRARIES_KEY = 'libraries'
 
 /** Precached app-shell state for offline cold boots. Unknown until the first preparation runs. */
-export type OfflineShellReadiness = 'unknown' | 'preparing' | 'ready'
+export type OfflineShellReadiness = 'unknown' | 'preparing' | 'ready' | 'incomplete'
 
 export interface OfflineShellPrecacheProgress {
   expected: number
@@ -47,6 +47,7 @@ export interface OfflineDownloadRecord {
   bytes: number
   downloadedAt?: string
   error?: string
+  pages?: PageDto[]
   cacheName?: string
   manifestRevision?: string
   sourceLastModified?: string
