@@ -27,6 +27,7 @@ import { useThemeWatcher } from '@/composables/themeWatcher'
 import { useSSE } from '@/composables/sse'
 import { useAuthWatcher } from '@/composables/auth'
 import { useOfflineBootstrap } from '@/composables/offline/useOfflineBootstrap'
+import { useOfflineCoverCaching } from '@/composables/offline/useOfflineCoverCaching'
 
 const route = useRoute()
 
@@ -35,6 +36,7 @@ useThemeWatcher()
 useSSE()
 useAuthWatcher()
 useOfflineBootstrap()
+useOfflineCoverCaching()
 </script>
 
 <style>

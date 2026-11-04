@@ -35,16 +35,36 @@
           <!--  This will just show lazy-src without the v-progress  -->
           <template #error></template>
 
-          <!--  Top-right icon  -->
+          <!-- Download availability and reading status are independent. -->
           <div
-            v-if="topRightIcon || topRight"
-            class="top-0 right-0 position-absolute translucent text-white px-2 py-1 font-weight-bold text-body-small"
+            v-if="downloadStatus || topRightIcon || topRight"
+            class="top-0 right-0 position-absolute d-flex align-center ga-2 translucent text-white px-2 py-1 font-weight-bold text-body-small"
             style="border-bottom-left-radius: 4px"
           >
-            <v-icon
+            <span
+              v-if="downloadStatus"
+              role="img"
+              :aria-label="downloadLabel"
+              :title="downloadLabel"
+              class="d-inline-flex"
+            >
+              <v-icon
+                :icon="
+                  downloadStatus === 'update-available'
+                    ? 'i-mdi:cloud-alert'
+                    : 'i-mdi:cloud-download'
+                "
+              />
+            </span>
+            <span
               v-if="topRightIcon"
-              :icon="topRightIcon"
-            />
+              :role="topRightIcon === 'i-mdi:check' ? 'img' : undefined"
+              :aria-label="topRightIcon === 'i-mdi:check' ? readLabel : undefined"
+              :title="topRightIcon === 'i-mdi:check' ? readLabel : undefined"
+              class="d-inline-flex"
+            >
+              <v-icon :icon="topRightIcon" />
+            </span>
             <template v-else>{{ topRight }}</template>
           </div>
 
@@ -199,9 +219,11 @@ import { vOnLongPress } from '@vueuse/components'
 import { usePrimaryInput } from '@/composables/device'
 import { reactiveOmit, reactivePick } from '@vueuse/core'
 import type { RouteLocationObject } from '@/types/route'
+import { useIntl } from 'vue-intl'
 
 const { isTouchPrimary } = usePrimaryInput()
 const router = useRouter()
+const intl = useIntl()
 
 const {
   stretchPoster,
@@ -214,6 +236,7 @@ const {
   quickActionProps = {},
   menuIcon,
   cardTo,
+  downloadStatus,
 } = defineProps<
   ItemCardProps & {
     /**
@@ -236,6 +259,10 @@ const {
      * Icon displayed in the top-right corner. Takes precedence over `topRight`.
      */
     topRightIcon?: string
+    /**
+     * Download badge displayed alongside the reading status.
+     */
+    downloadStatus?: 'downloaded' | 'update-available'
     /**
      * Icon displayed in the middle.
      */
@@ -269,6 +296,27 @@ const emit = defineEmits<
     cardLongPress: []
   }
 >()
+
+const downloadLabel = computed(() =>
+  downloadStatus === 'update-available'
+    ? intl.formatMessage({
+        description: 'Card badge: a saved download has a newer version on the server',
+        defaultMessage: 'Downloaded; update available',
+        id: '+ir2Ig',
+      })
+    : intl.formatMessage({
+        description: 'Card badge: content is saved for offline reading',
+        defaultMessage: 'Available offline',
+        id: 'vRnsnq',
+      }),
+)
+const readLabel = computed(() =>
+  intl.formatMessage({
+    description: 'Card badge: book or series has been read',
+    defaultMessage: 'Read',
+    id: 'ZPpUnl',
+  }),
+)
 
 const isHovering = ref(false)
 

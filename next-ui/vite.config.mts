@@ -43,7 +43,7 @@ export default defineConfig(({ mode }) => ({
       dirs: ['src/components', 'src/directives'],
       extensions: ['vue', 'ts'],
       include: [/\.vue$/, /\.[tj]s$/],
-      excludeNames: [/\.stories/],
+      excludeNames: [/\.(stories|test)/],
       directoryAsNamespace: true,
       collapseSamePrefixes: true,
       resolvers: [
@@ -136,6 +136,7 @@ export default defineConfig(({ mode }) => ({
         test: {
           name: 'unit',
           environment: 'happy-dom',
+          server: { deps: { inline: ['vuetify'] } },
           restoreMocks: true,
           setupFiles: ['./vitest.setup.ts'],
         },

@@ -5,7 +5,8 @@
     :lines="lines"
     :poster-url="seriesPosterUrl(series.id, cacheStore.getVersion(series.id))"
     :top-right="unreadCount"
-    :top-right-icon="cornerIcon ?? (isRead ? 'i-mdi:check' : undefined)"
+    :top-right-icon="isRead ? 'i-mdi:check' : undefined"
+    :download-status="downloadStatus"
     :fab-icon="canRead ? 'i-mdi:play' : undefined"
     :quick-action-icon="quickActionIcon"
     :quick-action-props="quickActionProps"
@@ -50,9 +51,7 @@ void offline.whenReady()
 
 const lines = computed<ItemCardLine[]>(() => [footer.value])
 
-// Fixed corner badge (no layout shift): downloaded state takes the top-right
-// slot, since it is the actionable device state.
-const cornerIcon = computed<string | undefined>(() => {
+const downloadStatus = computed(() => {
   const records = offline.downloads.filter((record) => record.book.seriesId === series.value.id)
   if (records.length === 0) return undefined
   const downloaded = records.filter((record) => offline.isDownloaded(record.bookId)).length
@@ -60,8 +59,7 @@ const cornerIcon = computed<string | undefined>(() => {
   const needsUpdate = records.some(
     (record) => record.updateAvailable === true && !record.sourceMissing,
   )
-  if (needsUpdate) return 'i-mdi:cloud-alert'
-  return 'i-mdi:cloud-download'
+  return needsUpdate ? 'update-available' : 'downloaded'
 })
 
 const id = useId()

@@ -4,7 +4,8 @@
     :title="titleAndLines.title"
     :lines="titleAndLines.lines"
     :poster-url="bookPosterUrl(book.id, cacheStore.getVersion(book.id))"
-    :top-right-icon="cornerIcon ?? (isRead ? 'i-mdi:check' : undefined)"
+    :top-right-icon="isRead ? 'i-mdi:check' : undefined"
+    :download-status="downloadStatus"
     :progress-percent="progressPercent"
     :fab-icon="canRead ? 'i-mdi:play' : undefined"
     :quick-action-icon="quickActionIcon"
@@ -50,15 +51,11 @@ const cacheStore = useImageCacheStore()
 const offline = useOfflineLibraryStore()
 void offline.whenReady()
 
-// Fixed corner badge (no layout shift): downloaded state takes the top-right
-// slot, since it is the actionable device state; read state stays visible
-// via the progress bar.
-const cornerIcon = computed<string | undefined>(() => {
+const downloadStatus = computed(() => {
   const record = offline.getDownload(book.value.id)
   if (!record) return undefined
   if (!offline.isDownloaded(book.value.id)) return undefined
-  if (record.updateAvailable) return 'i-mdi:cloud-alert'
-  return 'i-mdi:cloud-download'
+  return record.updateAvailable ? 'update-available' : 'downloaded'
 })
 
 const id = useId()

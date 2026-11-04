@@ -621,6 +621,172 @@ try {
     await context.setOffline(false)
     await page.close()
   })
+  await test('downloaded book and series cards retain reading status', async () => {
+    const originalProgress = book.readProgress
+    const originalSeries = { ...series }
+    const page = await context.newPage()
+    try {
+      book.readProgress = { page: 2, completed: true }
+      await page.goto(base + '/libraries/all/books')
+      const card = page
+        .locator('.v-card')
+        .filter({
+          has: page.getByRole('link', { name: '1 - ' + book.metadata.title, exact: true }),
+        })
+        .first()
+      await card.getByRole('img', { name: 'Read', exact: true }).waitFor()
+      await card.getByRole('img', { name: 'Available offline', exact: true }).waitFor()
+      await page.evaluate((bookId) => {
+        document
+          .querySelector('#app')
+          .__vue_app__.config.globalProperties.$pinia._s.get('offline-library')
+          .getDownload(bookId).updateAvailable = true
+      }, book.id)
+      await card.getByRole('img', { name: 'Downloaded; update available', exact: true }).waitFor()
+      await card.getByRole('img', { name: 'Read', exact: true }).waitFor()
+      await page.evaluate((bookId) => {
+        document
+          .querySelector('#app')
+          .__vue_app__.config.globalProperties.$pinia._s.get('offline-library')
+          .getDownload(bookId).updateAvailable = false
+      }, book.id)
+
+      await page.goto(base + '/libraries/all/series')
+      const seriesCard = page
+        .locator('.v-card')
+        .filter({
+          has: page.getByRole('link', { name: series.metadata.title, exact: true }),
+        })
+        .first()
+      await seriesCard.getByRole('img', { name: 'Available offline', exact: true }).waitFor()
+      await seriesCard.getByText('4', { exact: true }).waitFor()
+      Object.assign(series, {
+        booksReadCount: series.booksCount,
+        booksUnreadCount: 0,
+        booksInProgressCount: 0,
+      })
+      await page.reload()
+      await seriesCard.getByRole('img', { name: 'Read', exact: true }).waitFor()
+      await seriesCard.getByRole('img', { name: 'Available offline', exact: true }).waitFor()
+    } finally {
+      book.readProgress = originalProgress
+      Object.assign(series, originalSeries)
+      await page.close()
+    }
+  })
+  await test('home covers already shown before enabling caching survive an offline cold start', async () => {
+    await context.close()
+    context = await chromium.launchPersistentContext(profile, { headless: true })
+    contexts.push(context)
+    let page = await context.newPage()
+    await page.goto(base + '/libraries/all/overview')
+    const coverSelector =
+      'img.v-img__img:not(.v-img__img--preload)[src*="/books/catalog-0/thumbnail"]'
+    await page.getByText('Keep Reading', { exact: true }).first().waitFor()
+    await waitFor(
+      () =>
+        page
+          .locator(coverSelector)
+          .first()
+          .evaluate((img) => img.complete && img.naturalWidth > 0),
+      'Home cover did not load online',
+    )
+    await page.evaluate(() =>
+      document.querySelector('#app').__vue_app__.config.globalProperties.$router.push('/downloads'),
+    )
+    await page.getByText('Books saved on this device for offline reading').waitFor()
+    await page.evaluate(async () => {
+      const app = document.querySelector('#app').__vue_app__
+      await app.config.globalProperties.$pinia._s
+        .get('offline-library')
+        .setDownloadPreferences({ cacheCovers: true })
+      await app.config.globalProperties.$router.push('/libraries/all/overview')
+    })
+    await page.getByText('Keep Reading', { exact: true }).first().waitFor()
+    await waitFor(
+      async () =>
+        page.evaluate(async () => {
+          const names = (await caches.keys()).filter((n) => n.startsWith('komga-offline-covers-'))
+          for (const name of names) {
+            if (await (await caches.open(name)).match('/api/v1/books/catalog-0/thumbnail'))
+              return true
+          }
+          return false
+        }),
+      'A cover already loaded on Home was never saved after enabling cover caching',
+      10000,
+    )
+    const seriesCover = 'img.v-img__img:not(.v-img__img--preload)[src*="/series/57/thumbnail"]'
+    await page.getByText('Recently Added Series', { exact: true }).first().scrollIntoViewIfNeeded()
+    await waitFor(
+      () =>
+        page
+          .locator(seriesCover)
+          .first()
+          .evaluate((img) => img.complete && img.naturalWidth > 0),
+      'A series cover did not load on Home',
+    )
+    await waitFor(
+      async () =>
+        page.evaluate(async () => {
+          const names = (await caches.keys()).filter((n) => n.startsWith('komga-offline-covers-'))
+          for (const name of names) {
+            if (await (await caches.open(name)).match('/api/v1/series/57/thumbnail')) return true
+          }
+          return false
+        }),
+      'A series cover shown on Home was never saved',
+      10000,
+    )
+    assert.equal(
+      await page.evaluate(async () => {
+        const names = (await caches.keys()).filter((n) => n.startsWith('komga-offline-covers-'))
+        for (const name of names) {
+          if (await (await caches.open(name)).match('/api/v1/books/catalog-199/thumbnail'))
+            return true
+        }
+        return false
+      }),
+      false,
+      'An unbrowsed catalog cover should not be downloaded',
+    )
+    await context.close()
+    context = await chromium.launchPersistentContext(profile, { headless: true })
+    contexts.push(context)
+    networkDown = true
+    await context.setOffline(true)
+    page = await context.newPage()
+    await page.goto(base + '/libraries/all/overview')
+    await page.getByText('Keep Reading', { exact: true }).first().waitFor()
+    await waitFor(
+      () =>
+        page
+          .locator(coverSelector)
+          .first()
+          .evaluate((img) => img.complete && img.naturalWidth > 0),
+      'Home cover did not survive an offline cold start',
+      10000,
+    )
+    await page.getByText('Recently Added Series', { exact: true }).first().scrollIntoViewIfNeeded()
+    await waitFor(
+      () =>
+        page
+          .locator(seriesCover)
+          .first()
+          .evaluate((img) => img.complete && img.naturalWidth > 0),
+      'Home series cover did not survive an offline cold start',
+      10000,
+    )
+    await page.evaluate(() =>
+      document
+        .querySelector('#app')
+        .__vue_app__.config.globalProperties.$pinia._s.get('offline-library')
+        .setDownloadPreferences({ cacheCovers: false }),
+    )
+    networkDown = false
+    await context.setOffline(false)
+    await page.close()
+  })
   await test('cover caching is optional and account-local', async () => {
     const page = await context.newPage()
     await page.goto(base + '/downloads')
