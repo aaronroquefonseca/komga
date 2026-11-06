@@ -820,11 +820,17 @@ const storagePercent = computed(() => {
 })
 const storageHeadroom = computed(() => Math.max(0, storage.value.quota - storage.value.usage))
 const catalogStatusText = computed(() => {
+  if (offline.syncingMetadata && !offline.catalogProgress)
+    return intl.formatMessage({
+      defaultMessage: 'Checking for catalog changes…',
+      id: '9b6K6x',
+      description: 'Downloads catalog change check',
+    })
   if (offline.syncingMetadata)
     return intl.formatMessage(
       {
-        defaultMessage: 'Saving catalog: {done} of {total} entries in this batch',
-        id: '57AL+B',
+        defaultMessage: 'Saving catalog changes: {done} of {total} entries in this batch',
+        id: 'aMhVEe',
         description: 'Downloads catalog sync progress',
       },
       { done: offline.catalogProgress?.done ?? 0, total: offline.catalogProgress?.total ?? 0 },

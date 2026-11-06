@@ -1,6 +1,6 @@
 # Offline behavior and verification
 
-Next UI automatically saves the full accessible book and series catalog after sign-in, in pages of 200 entries. **Downloads** contains the books whose
+Next UI initially saves the accessible book and series catalog after sign-in, in batches of 200 entries. Later syncs check a compact, account-specific revision index with an HTTP ETag. Unchanged catalogs return 304 with no catalog body; only changed or locally missing entries are fetched. Entries removed from the server or no longer accessible are removed from the local catalog, while downloaded reading snapshots are retained. **Downloads** contains the books whose
 page images are saved on this device. Cached catalog entries can be browsed but
 are not readable until their download finishes. Reading opens the classic
 reader; offline setup therefore prepares both application shells.
@@ -100,3 +100,12 @@ two libraries. It verifies automatic sync after delayed authentication, then
 cold-starts offline and opens an unvisited, undownloaded book and the normal
 library grid. It also checks opt-in cover storage and cleanup while preserving
 downloaded covers.
+
+
+## Incremental update checks
+
+The initial sync after upgrading establishes the revision index once. Later checks do not download the full catalog again. Interrupted syncs retain the last completed checkpoint and retry the pending changes.
+
+Each app manifest has a SHA-256 content identity, including its HTML entry. If both identities match and cached dependencies are present, offline setup remains ready without fetching setup HTML or assets. A new deployment fetches changed or missing files; cache eviction triggers repair even if the build identity is unchanged.
+
+Production regressions verify zero setup-asset requests for an unchanged shell, a changed file at the same URL, one evicted asset, HTTP 304 catalog checks, added/edited/deleted books, missing local rows, interrupted sync retry, and account switching during a revision request.

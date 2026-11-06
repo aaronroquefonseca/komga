@@ -1,6 +1,11 @@
 import { defineStore } from 'pinia'
 import { ApiBaseUrl } from '@/api/base'
-import { syncCatalogPages } from './catalog-sync'
+import {
+  catalogDelta,
+  fetchCatalogManifest,
+  fetchCatalogEntries,
+  type CatalogManifest,
+} from './catalog-sync'
 import { bookPosterUrl } from '@/api/images'
 import {
   komgaGetBookById,
@@ -9,8 +14,6 @@ import {
   komgaGetUserSettings,
   type UserDto,
   komgaGetBookPages,
-  komgaGetBooks,
-  komgaGetSeries,
   komgaGetSeriesById,
   komgaMarkBookReadProgress,
   type BookDto,
@@ -22,6 +25,10 @@ import {
 } from '@/generated/openapi'
 import {
   OFFLINE_STORES,
+  offlineKeys,
+  commitCatalogDelta,
+  pendingCatalogRevisions,
+  saveCatalogEntries,
   OFFLINE_DB_NAME,
   offlineDelete,
   offlineGet,
@@ -437,39 +444,68 @@ export const useOfflineLibraryStore = defineStore('offline-library', () => {
       const userSettings = await komgaGetUserSettings()
       assertOfflineAccount(accountToken)
       await offlinePut(OFFLINE_STORES.settings, { key: 'userSettings', value: clone(userSettings) })
-      const books = await syncCatalogPages<BookDto>(
-        (page, size) => komgaGetBooks({ body: {}, query: { page, size, sort: ['url,asc'] } }),
-        async (items) => {
-          assertOfflineAccount(accountToken)
-          await cacheBooks(items)
-          assertOfflineAccount(accountToken)
-        },
-        (done, total) => {
-          catalogProgress.value = { kind: 'books', done, total }
-        },
+      const saved = await offlineGet<OfflineSetting<CatalogManifest>>(
+        OFFLINE_STORES.settings,
+        'catalogManifest',
       )
+      const manifest = await fetchCatalogManifest(saved?.value)
       assertOfflineAccount(accountToken)
-      await syncCatalogPages<SeriesDto>(
-        (page, size) =>
-          komgaGetSeries({
-            body: {},
-            query: { page, size, sort: ['createdDate,asc', 'name,asc'] },
-          }),
-        async (items) => {
-          assertOfflineAccount(accountToken)
-          await cacheSeries(items)
-          assertOfflineAccount(accountToken)
-        },
-        (done, total) => {
-          catalogProgress.value = { kind: 'series', done, total }
-        },
+      const [bookIds, seriesIds] = await Promise.all([
+        offlineKeys(OFFLINE_STORES.books),
+        offlineKeys(OFFLINE_STORES.series),
+      ])
+      const pending = await pendingCatalogRevisions()
+      const revisions = (kind: 'books' | 'series') =>
+        Object.fromEntries(
+          pending.filter((entry) => entry.kind === kind).map((entry) => [entry.id, entry.revision]),
+        )
+      const books = catalogDelta(
+        { ...saved?.value.books, ...revisions('books') },
+        manifest.books,
+        bookIds,
       )
-      assertOfflineAccount(accountToken)
+      const series = catalogDelta(
+        { ...saved?.value.series, ...revisions('series') },
+        manifest.series,
+        seriesIds,
+      )
+      async function applyChanges<T extends { id: string }>(
+        kind: 'books' | 'series',
+        ids: string[],
+        save: (items: T[]) => Promise<void>,
+      ) {
+        if (!ids.length) return
+        catalogProgress.value = { kind, done: 0, total: ids.length }
+        await fetchCatalogEntries<T>(
+          kind,
+          ids,
+          async (items) => {
+            assertOfflineAccount(accountToken)
+            await save(items)
+            assertOfflineAccount(accountToken)
+          },
+          (done, total) => {
+            catalogProgress.value = { kind, done, total }
+          },
+        )
+      }
+      await applyChanges<BookDto>('books', books.changed, (items) =>
+        saveCatalogEntries('books', items, manifest.books, accountToken),
+      )
+      await applyChanges<SeriesDto>('series', series.changed, (items) =>
+        saveCatalogEntries('series', items, manifest.series, accountToken),
+      )
       const syncedAt = new Date().toISOString()
-      await offlinePut(OFFLINE_STORES.settings, { key: 'catalogSyncedAt', value: syncedAt })
+      await commitCatalogDelta(books.deleted, series.deleted, manifest, syncedAt, accountToken)
       assertOfflineAccount(accountToken)
       catalogSyncedAt.value = syncedAt
-      await checkDownloadUpdates(books)
+      await refreshState()
+      const downloadedBooks = await Promise.all(
+        downloads.value
+          .filter((item) => item.cacheName)
+          .map((item) => offlineGet<BookDto>(OFFLINE_STORES.books, item.bookId)),
+      )
+      await checkDownloadUpdates(downloadedBooks.filter((item): item is BookDto => !!item))
       assertOfflineAccount(accountToken)
     } catch (error) {
       if (isOfflineAccount(accountToken)) catalogError.value = errorMessage(error)

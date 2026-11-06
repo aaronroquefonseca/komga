@@ -31,11 +31,13 @@ export interface OfflineShellPrecacheStatus {
 }
 
 export interface OfflineShellStatus {
+  revision?: string
   shellReady?: boolean
   precache?: OfflineShellPrecacheStatus | null
 }
 
 let serviceWorkerRegistration: Promise<ServiceWorkerRegistration | undefined> | undefined
+let manifestRevision: string | undefined
 let manifestAssetUrls: string[] | undefined
 let manifestRequest: Promise<string[]> | undefined
 let lastPrepareAt = 0
@@ -80,10 +82,6 @@ export function getOfflineShellAssets(): string[] {
 function resourceBasePath(): string {
   const base = window.resourceBaseUrl || '/'
   return base.endsWith('/') ? base : `${base}/`
-}
-
-function shellManifestUrl(): string {
-  return new URL(NEXTUI_SHELL_MANIFEST_FILENAME, window.location.origin + resourceBasePath()).href
 }
 
 /**
@@ -137,15 +135,29 @@ async function loadManifestAssetUrls(): Promise<string[]> {
   if (!manifestRequest) {
     manifestRequest = (async () => {
       try {
-        const response = await fetch(shellManifestUrl(), {
-          cache: 'no-store',
-          signal: AbortSignal.timeout(8000),
-        })
-        if (!response.ok) return []
+        const manifests = await Promise.all(
+          ['nextui-shell.json', 'webui-shell.json'].map(async (name) => {
+            const url = new URL(name, window.location.origin + resourceBasePath())
+            const response = await fetch(url.href, {
+              cache: 'no-store',
+              signal: AbortSignal.timeout(8000),
+            })
+            if (!response.ok) throw new Error('Shell manifest unavailable')
+            return response.json() as Promise<{ revision?: string; files?: unknown }>
+          }),
+        )
         const urls = resolveShellAssetUrls(
-          parseShellManifest(await response.json()),
+          manifests
+            .flatMap(parseShellManifest)
+            .filter(
+              (path) =>
+                !['index.html', 'service-worker.js'].includes(path) && !path.endsWith('.map'),
+            ),
           window.location.origin + resourceBasePath(),
         )
+        manifestRevision = manifests.every((manifest) => manifest.revision)
+          ? JSON.stringify(manifests.map((manifest) => manifest.revision))
+          : undefined
         manifestAssetUrls = urls
         return urls
       } catch (error: unknown) {
@@ -174,6 +186,7 @@ export function setServiceWorkerOfflineMode(enabled: boolean): void {
 export function resetOfflineShellStateForTests(): void {
   serviceWorkerRegistration = undefined
   manifestAssetUrls = undefined
+  manifestRevision = undefined
   manifestRequest = undefined
   lastPrepareAt = 0
   inFlightPrepare = undefined
@@ -344,7 +357,14 @@ export function prepareOfflineShell(force = false): void {
   lastPrepareAt = now
   inFlightPrepare = (async () => {
     try {
+      // Check manifests again after the throttle window, so an open tab can detect a deployment.
+      manifestAssetUrls = undefined
       const assets = mergeShellAssets(getOfflineShellAssets(), await loadManifestAssetUrls())
+      const status = await queryOfflineShellStatus()
+      if (manifestRevision && status?.revision === manifestRevision && status.shellReady) {
+        publishShellReadiness('ready', status.precache ?? { expected: 0, done: 0 })
+        return
+      }
       precacheBatchCounter += 1
       const batchId = `komga-shell-${now}-${precacheBatchCounter}`
       postToActiveWorker({

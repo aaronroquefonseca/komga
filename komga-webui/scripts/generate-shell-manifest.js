@@ -45,7 +45,8 @@ async function collectShellEntries(distDir, excludeFileNames = new Set()) {
 }
 
 function buildShellManifest(app, files) {
-  return { app, version: 1, files }
+  const revision = createHash('sha256').update(JSON.stringify({ app, files: [...files].sort((a, b) => a.url.localeCompare(b.url)) })).digest('hex')
+  return { app, version: 1, revision, files }
 }
 
 async function writeShellManifest({ distDir, manifestFileName, app, extraExcludes = [] }) {

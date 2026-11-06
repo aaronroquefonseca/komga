@@ -69,6 +69,7 @@ describe('writeShellManifest', () => {
         app: 'webui',
       })
       expect(second.files.map((file) => file.url)).not.toContain('webui-shell.json')
+      expect(second.revision).toBe(manifest.revision)
     } finally {
       await rm(dist, { recursive: true, force: true })
     }

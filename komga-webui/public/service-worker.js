@@ -1,4 +1,4 @@
-/* global self, caches, indexedDB, Response, Request, URL */
+/* global self, caches, indexedDB, Response, Request, URL, crypto */
 
 const DEPLOYMENT_SUFFIX = new URL(self.registration.scope).pathname === '/' ? '' : '-' + encodeURIComponent(new URL(self.registration.scope).pathname)
 const SHELL_CACHE = 'komga-shell-v3' + DEPLOYMENT_SUFFIX
@@ -125,7 +125,7 @@ function isHtmlResponse(response) {
   return response && response.ok && (response.headers.get('content-type') || '').includes('text/html')
 }
 
-async function cacheShellAssets(urls, onAssetSettled) {
+async function cacheShellAssets(urls, onAssetSettled, hashes = {}, previousHashes = {}) {
   const cache = await caches.open(SHELL_CACHE)
   const list = [...new Set(urls || [])]
   let cursor = 0
@@ -138,7 +138,14 @@ async function cacheShellAssets(urls, onAssetSettled) {
         if (url.origin !== self.location.origin) continue
         const request = new Request(url.href, {credentials: 'include'})
         // Hashed assets are immutable; reuse complete cached responses on retries.
-        if (await cache.match(request)) success = true
+        const cached = await cache.match(request)
+        const expectedHash = hashes[url.href]
+        let matches = !!cached
+        if (cached && expectedHash && previousHashes[url.href] !== expectedHash) {
+          const digest = await crypto.subtle.digest('SHA-256', await cached.clone().arrayBuffer())
+          matches = [...new Uint8Array(digest)].map(value => value.toString(16).padStart(2, '0')).join('') === expectedHash
+        }
+        if (matches) success = true
         else {
           const response = await boundedFetch(new Request(request, {cache: 'no-store'}))
           // A SPA fallback or proxy login page is not a JavaScript/CSS asset.
@@ -164,14 +171,16 @@ async function prepareOfflineShell(pageUrl, assets, batchId) {
   const run = async () => {
     const cache = await caches.open(SHELL_CACHE)
     const progress = {batchId: batchId || null, expected: 0, done: 0, failed: 0, complete: false, settled: false}
-    precacheProgress = progress
     const urls = new Set(assets || [])
     let manifestsReady = true
-    await Promise.all(['nextui-shell.json', 'webui-shell.json'].map(async name => {
+    const revisions = []
+    const hashes = {}
+    await Promise.all(['nextui-shell.json', 'webui-shell.json'].map(async (name, index) => {
       try {
         const response = await boundedFetch(new Request(new URL(name, self.registration.scope), {cache: 'no-store'}))
         if (!response.ok) throw new Error('Manifest unavailable')
         const manifest = await response.json()
+        revisions[index] = manifest.revision || JSON.stringify(manifest)
         const files = Array.isArray(manifest) ? manifest : manifest.files
         if (!Array.isArray(files) || !files.length) throw new Error('Empty manifest')
         for (const file of files) {
@@ -179,10 +188,23 @@ async function prepareOfflineShell(pageUrl, assets, batchId) {
           // index.html is a build artifact; the server renders it at /classic/.
           if (!path || path === 'index.html' || path === 'service-worker.js' || path.endsWith('.map')) continue
           const url = new URL(path, self.registration.scope)
-          if (url.origin === self.location.origin) urls.add(url.href)
+          if (url.origin === self.location.origin) {
+            urls.add(url.href)
+            if (file.sha256) hashes[url.href] = file.sha256
+          }
         }
       } catch (_) { manifestsReady = false }
     }))
+    const revision = JSON.stringify(revisions)
+    const status = await offlineStatus()
+    const stored = await cache.match(new URL(STATUS_PATH, self.registration.scope).href)
+    const previous = stored ? await stored.json() : null
+    const assetsPresent = (await Promise.all([...urls].map(url => cache.match(url)))).every(Boolean)
+    if (manifestsReady && status.shellReady && status.revision === revision && assetsPresent) {
+      precacheProgress = {...status.precache, batchId: batchId || null}
+      return true
+    }
+    precacheProgress = progress
     progress.expected = urls.size
     const shells = []
     await Promise.all([...new Set([pageUrl, scopeRootUrl(), new URL('next/', self.registration.scope).href,
@@ -196,7 +218,7 @@ async function prepareOfflineShell(pageUrl, assets, batchId) {
     await cacheShellAssets([...urls], success => {
       progress.done += 1
       if (!success) progress.failed += 1
-    })
+    }, hashes, previous?.hashes || {})
     progress.complete = manifestsReady && progress.failed === 0 && progress.expected > 0
     if (progress.complete) {
       for (const {url, response} of shells) {
@@ -206,7 +228,7 @@ async function prepareOfflineShell(pageUrl, assets, batchId) {
     }
     progress.settled = true
     await cache.put(new URL(STATUS_PATH, self.registration.scope).href,
-      new Response(JSON.stringify({...progress, assets: [...urls]}), {headers: {'Content-Type': 'application/json'}}))
+      new Response(JSON.stringify({...progress, revision, hashes, assets: [...urls]}), {headers: {'Content-Type': 'application/json'}}))
     return progress.complete
   }
   preparingShell = run()
@@ -225,6 +247,7 @@ async function offlineStatus() {
   }
   return {
     version: SHELL_CACHE,
+    revision: saved?.revision,
     scope: self.registration.scope,
     shellReady,
     precache: precacheProgress || saved,
@@ -276,6 +299,12 @@ self.addEventListener('fetch', event => {
 
   const url = new URL(request.url)
   if (url.origin !== self.location.origin) return
+
+  // Build manifests are mutable; a cached response would hide new deployments.
+  if (/\/(nextui-shell|webui-shell)\.json$/.test(url.pathname)) {
+    event.respondWith(boundedFetch(request).catch(() => new Response('', {status: 503})))
+    return
+  }
 
   // Staging a revision must bypass the active reader snapshot.
   if (request.headers.get('X-Komga-Download') === 'network') {

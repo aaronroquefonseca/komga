@@ -158,10 +158,17 @@ describe('service worker messaging without a worker', () => {
 })
 
 describe('prepareOfflineShell precaching', () => {
-  const postMessage = vi.fn()
+  let statusReply: Record<string, unknown> = { shellReady: false }
+  const prepareMessages = vi.fn()
+  const postMessage = vi.fn((message: { type: string }, ports?: MessagePort[]) => {
+    if (message.type === KOMGA_OFFLINE_STATUS) ports?.[0]?.postMessage(statusReply)
+    else prepareMessages(message)
+  })
 
   beforeEach(() => {
     postMessage.mockClear()
+    prepareMessages.mockClear()
+    statusReply = { shellReady: false }
     Object.defineProperty(navigator, 'serviceWorker', {
       value: { ready: Promise.resolve({ active: { postMessage } }) },
       configurable: true,
@@ -189,35 +196,35 @@ describe('prepareOfflineShell precaching', () => {
   test('posts merged DOM and manifest assets, then throttles and reuses the manifest', async () => {
     prepareOfflineShell()
     prepareOfflineShell()
-    await vi.waitFor(() => expect(postMessage).toHaveBeenCalledTimes(1))
+    await vi.waitFor(() => expect(prepareMessages).toHaveBeenCalledTimes(1))
 
-    const message = postMessage.mock.calls[0]?.[0] as { type: string; assets: string[] }
+    const message = prepareMessages.mock.calls[0]?.[0] as { type: string; assets: string[] }
     expect(message.type).toBe('KOMGA_PREPARE_OFFLINE_SHELL')
     expect(message.assets).toContain(`${window.location.origin}/assets/manifest-chunk.js`)
-    expect(fetch).toHaveBeenCalledTimes(1)
+    expect(fetch).toHaveBeenCalledTimes(2)
 
-    // A second prepare after the throttle window reuses the cached manifest.
+    // A later check revalidates both build identities.
     vi.spyOn(Date, 'now').mockReturnValue(Date.now() + 31_000)
     prepareOfflineShell(true)
-    await vi.waitFor(() => expect(postMessage).toHaveBeenCalledTimes(2))
-    expect(fetch).toHaveBeenCalledTimes(1)
+    await vi.waitFor(() => expect(prepareMessages).toHaveBeenCalledTimes(2))
+    expect(fetch).toHaveBeenCalledTimes(4)
   })
 
   test('falls back to DOM assets when the manifest fetch fails', async () => {
     vi.mocked(fetch).mockRejectedValueOnce(new Error('offline'))
     prepareOfflineShell()
-    await vi.waitFor(() => expect(postMessage).toHaveBeenCalledTimes(1))
+    await vi.waitFor(() => expect(prepareMessages).toHaveBeenCalledTimes(1))
 
-    const message = postMessage.mock.calls[0]?.[0] as { type: string; assets: string[] }
+    const message = prepareMessages.mock.calls[0]?.[0] as { type: string; assets: string[] }
     expect(message.type).toBe('KOMGA_PREPARE_OFFLINE_SHELL')
     expect(message.assets).toEqual(getOfflineShellAssets())
   })
 
   test('tags the batch and publishes preparing state to the store', async () => {
     prepareOfflineShell()
-    await vi.waitFor(() => expect(postMessage).toHaveBeenCalledTimes(1))
+    await vi.waitFor(() => expect(prepareMessages).toHaveBeenCalledTimes(1))
 
-    const message = postMessage.mock.calls[0]?.[0] as { type: string; batchId: unknown }
+    const message = prepareMessages.mock.calls[0]?.[0] as { type: string; batchId: unknown }
     expect(typeof message.batchId).toBe('string')
     expect(message.batchId).not.toBe('')
     await vi.waitFor(() =>
@@ -226,6 +233,19 @@ describe('prepareOfflineShell precaching', () => {
         expect.objectContaining({ done: 0 }),
       ),
     )
+  })
+
+  test('keeps an intact shell ready when both content hashes are unchanged', async () => {
+    vi.mocked(fetch).mockImplementation(() =>
+      Promise.resolve(Response.json({ revision: 'same', files: ['a.js'] })),
+    )
+    statusReply = { revision: '["same","same"]', shellReady: true }
+    prepareOfflineShell()
+    await vi.waitFor(() =>
+      expect(setShellReadinessMock).toHaveBeenCalledWith('ready', expect.anything()),
+    )
+    expect(prepareMessages).not.toHaveBeenCalled()
+    expect(setShellReadinessMock.mock.calls.some(([state]) => state === 'preparing')).toBe(false)
   })
 })
 

@@ -121,7 +121,7 @@ describe('writeShellManifest', () => {
         extraExcludes: ['index.html'],
       })
 
-      expect(manifest).toEqual(buildShellManifest('nextui', manifest.files))
+      expect(manifest).toEqual(buildShellManifest('nextui', manifest.files, '<html></html>'))
       expect(manifest.app).toBe('nextui')
       expect(manifest.version).toBe(1)
       expect(manifest.files.map((file) => file.url)).toEqual([
@@ -141,8 +141,21 @@ describe('writeShellManifest', () => {
         extraExcludes: ['index.html'],
       })
       expect(second.files.map((file) => file.url)).not.toContain('nextui-shell.json')
+      expect(second.revision).toBe(manifest.revision)
     } finally {
       await rm(dist, { recursive: true, force: true })
     }
+  })
+})
+
+describe('shell content identity', () => {
+  test('is stable for identical content and changes for assets or HTML', () => {
+    const files = [{ url: 'a.js', size: 1, sha256: 'old' }]
+    const original = buildShellManifest('nextui', files, 'html')
+    expect(buildShellManifest('nextui', [...files], 'html').revision).toBe(original.revision)
+    expect(
+      buildShellManifest('nextui', [{ ...files[0], sha256: 'new' }], 'html').revision,
+    ).not.toBe(original.revision)
+    expect(buildShellManifest('nextui', files, 'changed html').revision).not.toBe(original.revision)
   })
 })

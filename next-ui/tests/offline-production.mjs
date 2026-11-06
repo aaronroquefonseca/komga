@@ -1,6 +1,7 @@
 // Production regression: actual built bundles + shared worker, with the browser
 // process restarted and its network disabled. Run npm run test:offline after builds.
 import { test } from 'node:test'
+import { createHash } from 'node:crypto'
 import assert from 'node:assert/strict'
 import { createServer } from 'node:http'
 import { readFile, mkdtemp, rm } from 'node:fs/promises'
@@ -51,6 +52,12 @@ const catalogBooks = [
   })),
 ]
 const catalogRequests = []
+const deltaRequests = []
+const manifestStatuses = []
+const shellRequests = []
+let failDelta = false
+let shellPatch = ''
+const revision = (value) => createHash('sha256').update(JSON.stringify(value)).digest('hex')
 const pages = [1, 2].map((number) => ({
   number,
   fileName: `${number}.jpg`,
@@ -83,6 +90,8 @@ const server = createServer(async (req, res) => {
     return
   }
   const path = new URL(req.url, 'http://localhost').pathname
+  if (path.endsWith('.js') || path.endsWith('.css') || ['/next/', '/classic/'].includes(path))
+    shellRequests.push(path)
   const json = (value) => {
     res.setHeader('Content-Type', 'application/json')
     res.end(JSON.stringify(value))
@@ -100,6 +109,39 @@ const server = createServer(async (req, res) => {
       return
     }
     if (path.startsWith('/api/')) {
+      if (path === '/api/v1/offline/catalog') {
+        const manifest = {
+          books: Object.fromEntries(catalogBooks.map((item) => [item.id, revision(item)])),
+          series: { [series.id]: revision(series) },
+        }
+        if (holdCatalog) {
+          pendingCatalogResponse = () => json(manifest)
+          return
+        }
+        const etag = '"' + revision(manifest) + '"'
+        res.setHeader('ETag', etag)
+        if (req.headers['if-none-match'] === etag) {
+          manifestStatuses.push(304)
+          res.writeHead(304)
+          res.end()
+          return
+        }
+        manifestStatuses.push(200)
+        return json(manifest)
+      }
+      if (/^\/api\/v1\/offline\/catalog\/(books|series)$/.test(path)) {
+        const chunks = []
+        for await (const chunk of req) chunks.push(chunk)
+        const ids = JSON.parse(Buffer.concat(chunks).toString())
+        deltaRequests.push({ path, ids })
+        if (failDelta === true || (failDelta === 'last-batch' && ids.length === 1)) {
+          res.writeHead(503)
+          res.end()
+          return
+        }
+        const source = path.endsWith('/books') ? catalogBooks : [series]
+        return json(source.filter((item) => ids.includes(item.id)))
+      }
       if (path === '/api/logout') {
         authorized = false
         res.writeHead(204)
@@ -210,6 +252,18 @@ const server = createServer(async (req, res) => {
       content = await readFile(
         resolve(root, classic ? 'komga-webui/dist/index.html' : 'next-ui/dist/index.html'),
       )
+    if (path === '/nextui-shell.json' && shellPatch) {
+      const manifest = JSON.parse(content.toString())
+      manifest.revision = revision([manifest.revision, shellPatch])
+      const layer = manifest.files.find((file) => file.url === 'layers.css')
+      layer.sha256 = createHash('sha256')
+        .update(await readFile(resolve(root, 'next-ui/dist/layers.css')))
+        .update(shellPatch)
+        .digest('hex')
+      content = Buffer.from(JSON.stringify(manifest))
+    }
+    if (path === '/layers.css' && shellPatch)
+      content = Buffer.concat([content, Buffer.from(shellPatch)])
     // Match Gradle + Thymeleaf: HTML asset URLs are rendered from the resource base.
     if (!isAsset)
       content = Buffer.from(
@@ -267,7 +321,7 @@ try {
     await page.getByText('Books saved on this device for offline reading').waitFor()
     await waitFor(async () => {
       const s = await status(page)
-      if (s.precache?.done === s.precache?.expected && !s.shellReady) {
+      if (s.precache?.settled && s.precache.done === s.precache.expected && !s.shellReady) {
         console.log('INCOMPLETE', JSON.stringify(s))
         console.log(
           'MISSING',
@@ -316,7 +370,8 @@ try {
       'Automatic full catalog sync never completed after authentication',
     )
     assert.ok(
-      catalogRequests.some((r) => r.path.includes('/books/') && r.size === 200 && r.number === 1),
+      deltaRequests.some((r) => r.path.endsWith('/books') && r.ids.length === 200) &&
+        deltaRequests.some((r) => r.path.endsWith('/books') && r.ids.length === 1),
     )
     assert.equal(
       await page.evaluate(
@@ -328,6 +383,194 @@ try {
       201,
     )
     await context.close()
+  })
+  await test('unchanged shells do no setup downloads; new revisions and evicted assets repair only changed files', async () => {
+    context = await chromium.launchPersistentContext(profile, { headless: true })
+    contexts.push(context)
+    const page = await context.newPage()
+    await page.goto(base + '/downloads')
+    await page.getByText('Books saved on this device for offline reading').waitFor()
+    const before = await status(page)
+    const prepare = async (batchId) => {
+      await page.evaluate(async (batchId) => {
+        const worker = (await navigator.serviceWorker.ready).active
+        worker.postMessage({
+          type: 'KOMGA_PREPARE_OFFLINE_SHELL',
+          batchId,
+          pageUrl: location.href,
+          assets: [],
+        })
+      }, batchId)
+      await waitFor(
+        async () =>
+          (await status(page)).precache?.batchId === batchId &&
+          (await status(page)).precache?.settled,
+        'Shell check did not finish',
+      )
+    }
+    shellRequests.length = 0
+    await prepare('same-shell')
+    assert.equal((await status(page)).revision, before.revision)
+    assert.deepEqual(shellRequests, [], 'An unchanged shell must not fetch HTML or assets again')
+    shellPatch = '/* changed offline shell */'
+    await prepare('changed-shell')
+    assert.notEqual((await status(page)).revision, before.revision)
+    assert.equal(shellRequests.filter((url) => url === '/layers.css').length, 1)
+    assert.equal(shellRequests.filter((url) => url.endsWith('.js')).length, 0)
+    assert.ok(
+      await page.evaluate(async () =>
+        (await (await caches.open('komga-shell-v3')).match('/layers.css'))
+          .text()
+          .then((text) => text.includes('changed offline shell')),
+      ),
+    )
+    shellPatch = ''
+    await prepare('restored-shell')
+    const missing = await page.evaluate(async () => {
+      const cache = await caches.open('komga-shell-v3')
+      const key = (await cache.keys()).find((key) => /assets\/index-[^/]+\.js$/.test(key.url))
+      await cache.delete(key)
+      return new URL(key.url).pathname
+    })
+    shellRequests.length = 0
+    await prepare('repaired-shell')
+    assert.equal((await status(page)).shellReady, true)
+    assert.deepEqual(
+      shellRequests.filter((url) => url.endsWith('.js')),
+      [missing],
+    )
+    await context.close()
+  })
+  await test('catalog sync transfers only changes, removes deletions, repairs missing rows and retries interruptions', async () => {
+    context = await chromium.launchPersistentContext(profile, { headless: true })
+    contexts.push(context)
+    const page = await context.newPage()
+    await page.goto(base + '/downloads')
+    await page.getByText('Books saved on this device for offline reading').waitFor()
+    await waitFor(
+      () =>
+        page.evaluate(
+          () =>
+            !document
+              .querySelector('#app')
+              .__vue_app__.config.globalProperties.$pinia._s.get('offline-library').syncingMetadata,
+        ),
+      'Catalog check did not finish',
+    )
+    const sync = () =>
+      page.evaluate(() =>
+        document
+          .querySelector('#app')
+          .__vue_app__.config.globalProperties.$pinia._s.get('offline-library')
+          .syncCatalogMetadata(),
+      )
+    const original = [...catalogBooks]
+    try {
+      deltaRequests.length = 0
+      await sync()
+      assert.equal(manifestStatuses.at(-1), 304)
+      assert.deepEqual(deltaRequests, [])
+      const changed = catalogBooks.findIndex((item) => item.id === 'catalog-10')
+      catalogBooks[changed] = {
+        ...catalogBooks[changed],
+        metadata: { ...catalogBooks[changed].metadata, title: 'Changed offline title' },
+        readProgress: { completed: true, page: 2 },
+      }
+      catalogBooks.splice(
+        catalogBooks.findIndex((item) => item.id === 'catalog-11'),
+        1,
+      )
+      catalogBooks.push({ ...book, id: 'delta-added' })
+      await sync()
+      assert.deepEqual(deltaRequests.flatMap((request) => request.ids).sort(), [
+        'catalog-10',
+        'delta-added',
+      ])
+      assert.equal(
+        await page.evaluate(async () => {
+          const store = document
+            .querySelector('#app')
+            .__vue_app__.config.globalProperties.$pinia._s.get('offline-library')
+          return (
+            !(await store.getCachedBook('catalog-11')) &&
+            (await store.getCachedBook('catalog-10')).metadata.title === 'Changed offline title' &&
+            !!(await store.getCachedBook('delta-added'))
+          )
+        }),
+        true,
+      )
+      const checkpoint = await page.evaluate(
+        () =>
+          document
+            .querySelector('#app')
+            .__vue_app__.config.globalProperties.$pinia._s.get('offline-library').catalogSyncedAt,
+      )
+      catalogBooks[changed] = { ...catalogBooks[changed], name: 'Changed again' }
+      failDelta = true
+      await assert.rejects(sync(), /503/)
+      assert.equal(
+        await page.evaluate(
+          () =>
+            document
+              .querySelector('#app')
+              .__vue_app__.config.globalProperties.$pinia._s.get('offline-library').catalogSyncedAt,
+        ),
+        checkpoint,
+      )
+      failDelta = false
+      deltaRequests.length = 0
+      await sync()
+      assert.deepEqual(
+        deltaRequests.flatMap((request) => request.ids),
+        ['catalog-10'],
+      )
+      await page.evaluate(
+        () =>
+          new Promise((resolve, reject) => {
+            const request = indexedDB.open('komga-offline')
+            request.onsuccess = () => {
+              const db = request.result
+              const tx = db.transaction('books', 'readwrite')
+              tx.objectStore('books').delete('catalog-199')
+              tx.oncomplete = () => {
+                db.close()
+                resolve()
+              }
+              tx.onerror = () => reject(tx.error)
+            }
+          }),
+      )
+      deltaRequests.length = 0
+      await sync()
+      assert.equal(manifestStatuses.at(-1), 304)
+      assert.deepEqual(
+        deltaRequests.flatMap((request) => request.ids),
+        ['catalog-199'],
+      )
+      catalogBooks.splice(
+        0,
+        catalogBooks.length,
+        ...catalogBooks.map((item) => ({ ...item, name: item.name + ' batch changed' })),
+      )
+      failDelta = 'last-batch'
+      deltaRequests.length = 0
+      await assert.rejects(sync(), /503/)
+      assert.equal(deltaRequests[0].ids.length, 200)
+      const failedIds = deltaRequests.at(-1).ids
+      failDelta = false
+      deltaRequests.length = 0
+      await sync()
+      assert.deepEqual(
+        deltaRequests.flatMap((request) => request.ids),
+        failedIds,
+        'A retry should not fetch the already saved first batch again',
+      )
+    } finally {
+      failDelta = false
+      catalogBooks.splice(0, catalogBooks.length, ...original)
+      await sync()
+      await context.close()
+    }
   })
   await test('cold process offline: Downloads, book detail, unavailable content, classic handoff', async () => {
     context = await chromium.launchPersistentContext(profile, { headless: true })

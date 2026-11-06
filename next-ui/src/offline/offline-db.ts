@@ -198,3 +198,70 @@ export async function offlineCount(storeName: string): Promise<number> {
   await transactionDone(transaction)
   return result
 }
+
+export async function offlineKeys(storeName: string): Promise<IDBValidKey[]> {
+  const db = await openOfflineDatabase()
+  return requestResult(db.transaction(storeName, 'readonly').objectStore(storeName).getAllKeys())
+}
+
+const PENDING_CATALOG_PREFIX = 'catalogPending:'
+const pendingCatalogRange = () =>
+  IDBKeyRange.bound(PENDING_CATALOG_PREFIX, `${PENDING_CATALOG_PREFIX}\uffff`)
+
+export interface PendingCatalogRevision {
+  key: string
+  kind: 'books' | 'series'
+  id: string
+  revision: string
+}
+
+export async function pendingCatalogRevisions(): Promise<PendingCatalogRevision[]> {
+  const db = await openOfflineDatabase()
+  return requestResult(
+    db.transaction('settings', 'readonly').objectStore('settings').getAll(pendingCatalogRange()),
+  )
+}
+
+/** Record each successful batch so a later interruption does not cause it to be fetched again. */
+export async function saveCatalogEntries(
+  kind: 'books' | 'series',
+  items: { id: string }[],
+  revisions: Record<string, string>,
+  account: number,
+): Promise<void> {
+  const db = await openOfflineDatabase()
+  assertOfflineAccount(account)
+  const tx = db.transaction([kind, 'settings'], 'readwrite')
+  for (const item of items) {
+    tx.objectStore(kind).put(item)
+    tx.objectStore('settings').put({
+      key: `${PENDING_CATALOG_PREFIX}${kind}:${item.id}`,
+      kind,
+      id: item.id,
+      revision: revisions[item.id],
+    })
+  }
+  await transactionDone(tx)
+}
+
+/** A sync checkpoint must not advance until all changes and deletions are saved. */
+export async function commitCatalogDelta(
+  deletedBooks: string[],
+  deletedSeries: string[],
+  manifest: unknown,
+  syncedAt: string,
+  account: number,
+): Promise<void> {
+  const db = await openOfflineDatabase()
+  assertOfflineAccount(account)
+  const tx = db.transaction(['books', 'series', 'pages', 'settings'], 'readwrite')
+  deletedBooks.forEach((id) => {
+    tx.objectStore('books').delete(id)
+    tx.objectStore('pages').delete(id)
+  })
+  deletedSeries.forEach((id) => tx.objectStore('series').delete(id))
+  tx.objectStore('settings').put({ key: 'catalogManifest', value: manifest })
+  tx.objectStore('settings').put({ key: 'catalogSyncedAt', value: syncedAt })
+  tx.objectStore('settings').delete(pendingCatalogRange())
+  await transactionDone(tx)
+}

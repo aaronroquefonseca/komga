@@ -26,6 +26,7 @@ export interface ShellManifestEntry {
 export interface ShellManifest {
   app: string
   version: 1
+  revision: string
   files: ShellManifestEntry[]
 }
 
@@ -70,8 +71,16 @@ export async function collectShellEntries(
   return orderShellEntries(entries)
 }
 
-export function buildShellManifest(app: string, files: ShellManifestEntry[]): ShellManifest {
-  return { app, version: 1, files }
+export function buildShellManifest(
+  app: string,
+  files: ShellManifestEntry[],
+  html = '',
+): ShellManifest {
+  const canonical = [...files].sort((a, b) => a.url.localeCompare(b.url))
+  const revision = createHash('sha256')
+    .update(JSON.stringify({ app, files: canonical, html }))
+    .digest('hex')
+  return { app, version: 1, revision, files }
 }
 
 /**
@@ -109,7 +118,8 @@ export async function writeShellManifest(
 ): Promise<ShellManifest> {
   const { distDir, manifestFileName, app, extraExcludes = [] } = options
   const files = await collectShellEntries(distDir, new Set([manifestFileName, ...extraExcludes]))
-  const manifest = buildShellManifest(app, files)
+  const html = await readFile(join(distDir, 'index.html'), 'utf8').catch(() => '')
+  const manifest = buildShellManifest(app, files, html)
   await writeFile(join(distDir, manifestFileName), `${JSON.stringify(manifest, null, 2)}\n`)
   return manifest
 }

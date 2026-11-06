@@ -8,6 +8,13 @@ import org.springframework.data.domain.Page
 import org.springframework.data.domain.Pageable
 
 interface SeriesDtoRepository {
+  fun findOfflineRevisions(context: SearchContext): Map<String, String>
+
+  fun findAllByIds(
+    context: SearchContext,
+    ids: Collection<String>,
+  ): List<SeriesDto>
+
   fun findByIdOrNull(
     seriesId: String,
     userId: String,
