@@ -444,7 +444,11 @@ export default class OfflineLibraryService {
   }
 
   async getCachedSeries(seriesId: string): Promise<SeriesDto | undefined> {
-    return offlineGet<SeriesDto>(OFFLINE_STORES.series, seriesId)
+    const series = await offlineGet<SeriesDto>(OFFLINE_STORES.series, seriesId)
+    if (series) return series
+    if (!this.state.downloads.some(item => item.cacheName && item.book.seriesId === seriesId)) return undefined
+    const snapshot = await offlineGet<{value: SeriesDto}>(OFFLINE_STORES.settings, `downloadSeries:${seriesId}`)
+    return snapshot?.value
   }
 
   async getCachedPages(bookId: string): Promise<PageDto[] | undefined> {

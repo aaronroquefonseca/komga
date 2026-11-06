@@ -57,6 +57,7 @@ const manifestStatuses = []
 const shellRequests = []
 let failDelta = false
 let shellPatch = ''
+let seriesRemoved = false
 const revision = (value) => createHash('sha256').update(JSON.stringify(value)).digest('hex')
 const pages = [1, 2].map((number) => ({
   number,
@@ -112,7 +113,7 @@ const server = createServer(async (req, res) => {
       if (path === '/api/v1/offline/catalog') {
         const manifest = {
           books: Object.fromEntries(catalogBooks.map((item) => [item.id, revision(item)])),
-          series: { [series.id]: revision(series) },
+          series: seriesRemoved ? {} : { [series.id]: revision(series) },
         }
         if (holdCatalog) {
           pendingCatalogResponse = () => json(manifest)
@@ -565,8 +566,43 @@ try {
         failedIds,
         'A retry should not fetch the already saved first batch again',
       )
+      seriesRemoved = true
+      catalogBooks.splice(0)
+      await sync()
+      assert.equal(
+        await page.evaluate(async () => {
+          const store = document
+            .querySelector('#app')
+            .__vue_app__.config.globalProperties.$pinia._s.get('offline-library')
+          return (
+            (await store.getCachedBooksPage()).totalElements === 0 &&
+            (await store.getCachedSeriesPage()).totalElements === 0 &&
+            store.getDownload('offline-book').sourceMissing
+          )
+        }),
+        true,
+      )
+      networkDown = true
+      await context.setOffline(true)
+      await page.goto(base + '/classic/book/offline-book/read?source=nextui')
+      await waitFor(
+        () =>
+          page
+            .locator('img')
+            .evaluateAll((imgs) =>
+              imgs.some((img) => img.src.includes('/pages/') && img.naturalWidth > 0),
+            ),
+        'A downloaded book must remain readable after its series is deleted',
+      )
+      networkDown = false
+      await context.setOffline(false)
+      await page.goto(base + '/downloads')
+      await page.getByText('Books saved on this device for offline reading').waitFor()
     } finally {
       failDelta = false
+      seriesRemoved = false
+      networkDown = false
+      await context.setOffline(false)
       catalogBooks.splice(0, catalogBooks.length, ...original)
       await sync()
       await context.close()

@@ -251,6 +251,7 @@ export async function commitCatalogDelta(
   manifest: unknown,
   syncedAt: string,
   account: number,
+  retainedSeriesIds: string[] = [],
 ): Promise<void> {
   const db = await openOfflineDatabase()
   assertOfflineAccount(account)
@@ -259,7 +260,17 @@ export async function commitCatalogDelta(
     tx.objectStore('books').delete(id)
     tx.objectStore('pages').delete(id)
   })
-  deletedSeries.forEach((id) => tx.objectStore('series').delete(id))
+  const retained = new Set(retainedSeriesIds)
+  deletedSeries.forEach((id) => {
+    if (retained.has(id)) {
+      const request = tx.objectStore('series').get(id)
+      request.onsuccess = () => {
+        if (request.result)
+          tx.objectStore('settings').put({ key: `downloadSeries:${id}`, value: request.result })
+      }
+    }
+    tx.objectStore('series').delete(id)
+  })
   tx.objectStore('settings').put({ key: 'catalogManifest', value: manifest })
   tx.objectStore('settings').put({ key: 'catalogSyncedAt', value: syncedAt })
   tx.objectStore('settings').delete(pendingCatalogRange())

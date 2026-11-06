@@ -377,7 +377,14 @@ export const useOfflineLibraryStore = defineStore('offline-library', () => {
 
   async function getCachedSeries(seriesId: string): Promise<SeriesDto | undefined> {
     const series = await offlineGet<SeriesDto>(OFFLINE_STORES.series, seriesId)
-    return series ? rehydrateDates(series) : undefined
+    if (series) return rehydrateDates(series)
+    if (!downloads.value.some((item) => item.cacheName && item.book.seriesId === seriesId))
+      return undefined
+    const snapshot = await offlineGet<OfflineSetting<SeriesDto>>(
+      OFFLINE_STORES.settings,
+      `downloadSeries:${seriesId}`,
+    )
+    return snapshot?.value ? rehydrateDates(snapshot.value) : undefined
   }
 
   async function getCachedPages(bookId: string): Promise<PageDto[] | undefined> {
@@ -496,7 +503,14 @@ export const useOfflineLibraryStore = defineStore('offline-library', () => {
         saveCatalogEntries('series', items, manifest.series, accountToken),
       )
       const syncedAt = new Date().toISOString()
-      await commitCatalogDelta(books.deleted, series.deleted, manifest, syncedAt, accountToken)
+      await commitCatalogDelta(
+        books.deleted,
+        series.deleted,
+        manifest,
+        syncedAt,
+        accountToken,
+        downloads.value.filter((item) => item.cacheName).map((item) => item.book.seriesId),
+      )
       assertOfflineAccount(accountToken)
       catalogSyncedAt.value = syncedAt
       await refreshState()
