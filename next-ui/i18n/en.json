@@ -23,6 +23,10 @@
     "defaultMessage": "Nothing to show",
     "description": "Overview: empty state text when sections are configured but no data is available"
   },
+  "+ir2Ig": {
+    "defaultMessage": "Downloaded; update available",
+    "description": "Card badge: a saved download has a newer version on the server"
+  },
   "+jaADC": {
     "defaultMessage": "File name",
     "description": "Sort label: name"
@@ -379,10 +383,6 @@
     "defaultMessage": "Download remaining ({downloaded}/{total})",
     "description": "Series menu: download remaining"
   },
-  "57AL+B": {
-    "defaultMessage": "Saving catalog: {done} of {total} entries in this batch",
-    "description": "Downloads catalog sync progress"
-  },
   "5AAGkA": {
     "defaultMessage": "Password",
     "description": "Login screen: password field label"
@@ -426,6 +426,10 @@
   "5zPpyT": {
     "defaultMessage": "Age range",
     "description": "Filter by age rating: range label"
+  },
+  "6E5J8b": {
+    "defaultMessage": "Show download settings",
+    "description": "Downloads page: show settings"
   },
   "6F1ebQ": {
     "defaultMessage": "HTTP Server",
@@ -614,6 +618,10 @@
   "9aVhJC": {
     "defaultMessage": "CBZ",
     "description": "Book file format: CBZ"
+  },
+  "9b6K6x": {
+    "defaultMessage": "Checking for catalog changes…",
+    "description": "Downloads catalog change check"
   },
   "9dNd68": {
     "defaultMessage": "User uploaded",
@@ -1663,6 +1671,10 @@
     "defaultMessage": "Browse",
     "description": "Import books directory selection: file browser button label"
   },
+  "UtNTdk": {
+    "defaultMessage": "Hide download settings",
+    "description": "Downloads page: hide settings"
+  },
   "Uuu6fQ": {
     "defaultMessage": "No results",
     "description": "Filter empty state: title"
@@ -1931,6 +1943,10 @@
     "defaultMessage": "Series",
     "description": "Browsing context: series"
   },
+  "ZPpUnl": {
+    "defaultMessage": "Read",
+    "description": "Card badge: book or series has been read"
+  },
   "ZPuFVu": {
     "defaultMessage": "General",
     "description": "Form edit series: General"
@@ -1982,6 +1998,10 @@
   "aHyrmS": {
     "defaultMessage": "Delete",
     "description": "Poster card: action - delete"
+  },
+  "aMhVEe": {
+    "defaultMessage": "Saving catalog changes: {done} of {total} entries in this batch",
+    "description": "Downloads catalog sync progress"
   },
   "aOiU5f": {
     "defaultMessage": "Library updated: {library}",
@@ -3462,6 +3482,10 @@
   "vOS8Dl": {
     "defaultMessage": "A collection with that name already exists",
     "description": "Collection add to: duplicate name error message"
+  },
+  "vRnsnq": {
+    "defaultMessage": "Available offline",
+    "description": "Card badge: content is saved for offline reading"
   },
   "vTqlcG": {
     "defaultMessage": "Delete",

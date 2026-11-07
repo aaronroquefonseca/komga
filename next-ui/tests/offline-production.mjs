@@ -840,6 +840,94 @@ try {
     await page.getByText('Books saved on this device for offline reading').waitFor()
     unavailable = false
   })
+  await test('offline boot survives failed non-critical assets', async () => {
+    networkDown = false
+    await context.setOffline(false)
+    const page = await context.newPage()
+    await page.goto(base + '/downloads')
+    await page.getByText('Books saved on this device for offline reading').waitFor()
+    await waitFor(async () => (await status(page)).shellReady, 'Shell never became ready')
+    // Offline cold boot works before anything is evicted.
+    await context.setOffline(true)
+    await page.goto(base + '/downloads')
+    await page.getByText('Books saved on this device for offline reading').waitFor()
+    await context.setOffline(false)
+    // Evict one non-critical icon, every committed shell, and every cached
+    // navigation, so only the next preparation can restore offline boot:
+    // without the fix the failed batch commits nothing and the app falls
+    // through to the "unavailable offline" text.
+    const victim = '/maskable_icon.png'
+    const evicted = await page.evaluate(async (path) => {
+      const cache = await caches.open('komga-shell-v3')
+      const keys = await cache.keys()
+      const exact = [
+        location.href,
+        location.origin + '/',
+        location.origin + '/next/',
+        location.origin + '/classic/',
+      ]
+      const doomed = keys.filter(
+        (request) =>
+          request.url.endsWith(path) ||
+          request.url.includes('__komga_offline_shell__') ||
+          exact.includes(request.url),
+      )
+      await Promise.all(doomed.map((request) => cache.delete(request)))
+      return doomed.length
+    }, victim)
+    assert.ok(evicted > 0, 'eviction removed nothing, test setup is broken')
+    failAsset = victim
+    await page.evaluate(
+      (batchId) =>
+        navigator.serviceWorker.controller.postMessage({
+          type: 'KOMGA_PREPARE_OFFLINE_SHELL',
+          pageUrl: location.href,
+          assets: [],
+          batchId,
+        }),
+      'boot-survives-failure',
+    )
+    await waitFor(async () => {
+      const s = await status(page)
+      return s.precache?.batchId === 'boot-survives-failure' && s.precache.settled === true
+    }, 'Failure batch did not settle')
+    const afterFailure = await status(page)
+    assert.equal(afterFailure.shellReady, false)
+    assert.ok(afterFailure.precache.failed > 0)
+    const shells = await page.evaluate(async () => {
+      const cache = await caches.open('komga-shell-v3')
+      return Promise.all(
+        ['', '-next', '-classic'].map(async (suffix) => {
+          const key = `${location.origin}/__komga_offline_shell__${suffix}`
+          return Boolean(await cache.match(key))
+        }),
+      )
+    })
+    assert.deepEqual(shells, [true, true, true])
+    await context.setOffline(true)
+    await page.goto(base + '/downloads')
+    const body = await page.locator('body').innerText()
+    assert.ok(
+      !body.includes('unavailable offline'),
+      'Offline boot fell through to the unavailable page',
+    )
+    await page.getByText('Books saved on this device for offline reading').waitFor()
+    await context.setOffline(false)
+    // Heal for the suites that follow: the icon downloads fine again.
+    failAsset = ''
+    await page.evaluate(
+      (batchId) =>
+        navigator.serviceWorker.controller.postMessage({
+          type: 'KOMGA_PREPARE_OFFLINE_SHELL',
+          pageUrl: location.href,
+          assets: [],
+          batchId,
+        }),
+      'boot-survives-retry',
+    )
+    await waitFor(async () => (await status(page)).shellReady, 'Retry did not repair cache')
+    await page.close()
+  })
   await test('Wi-Fi connected with a hanging server still opens the saved app', async () => {
     const page = await context.newPage()
     unavailable = 'hang'

@@ -198,120 +198,143 @@
       variant="outlined"
       class="my-4"
     >
-      <v-card-title class="text-subtitle-1">
-        {{
-          $formatMessage({
-            description: 'Downloads page: settings',
-            defaultMessage: 'Download settings',
-            id: '8TrwIS',
-          })
-        }}
+      <v-card-title class="text-subtitle-1 d-flex align-center">
+        <span class="flex-grow-1">
+          {{
+            $formatMessage({
+              description: 'Downloads page: settings',
+              defaultMessage: 'Download settings',
+              id: '8TrwIS',
+            })
+          }}
+        </span>
+        <v-btn
+          :icon="showSettings ? 'i-mdi:chevron-up' : 'i-mdi:chevron-down'"
+          variant="text"
+          density="comfortable"
+          :aria-label="
+            showSettings
+              ? $formatMessage({
+                  description: 'Downloads page: hide settings',
+                  defaultMessage: 'Hide download settings',
+                  id: 'UtNTdk',
+                })
+              : $formatMessage({
+                  description: 'Downloads page: show settings',
+                  defaultMessage: 'Show download settings',
+                  id: '6E5J8b',
+                })
+          "
+          @click="showSettings = !showSettings"
+        />
       </v-card-title>
-      <v-card-text>
-        <v-row dense>
-          <v-col
-            cols="12"
-            sm="6"
-          >
-            <v-select
-              :model-value="offline.preferences.concurrentBooks"
-              :items="[1, 2, 3, 4, 6]"
-              :label="
-                $formatMessage({
-                  description: 'Downloads page: parallel books',
-                  defaultMessage: 'Parallel books',
-                  id: 'pWVitk',
-                })
-              "
-              hide-details
-              @update:model-value="(value) => setPreference('concurrentBooks', value)"
-            />
-          </v-col>
-          <v-col
-            cols="12"
-            sm="6"
-          >
-            <v-select
-              :model-value="offline.preferences.concurrentPages"
-              :items="[1, 2, 3, 4]"
-              :label="
-                $formatMessage({
-                  description: 'Downloads page: parallel pages',
-                  defaultMessage: 'Parallel pages',
-                  id: 'QGj7WT',
-                })
-              "
-              hide-details
-              @update:model-value="(value) => setPreference('concurrentPages', value)"
-            />
-          </v-col>
-        </v-row>
-        <v-switch
-          :model-value="offline.preferences.cacheCovers"
-          :label="
-            $formatMessage({
-              defaultMessage: 'Keep browsed covers offline',
-              id: '2gNaKC',
-              description: 'Downloads cover caching preference',
-            })
-          "
-          :hint="
-            $formatMessage({
-              defaultMessage:
-                'Off by default. Saves book and series covers as you browse, using additional device storage. Turning this off removes these extra covers; downloaded book covers are kept.',
-              id: 'H25Rdx',
-              description: 'Downloads cover caching explanation',
-            })
-          "
-          persistent-hint
-          @update:model-value="(value) => setPreference('cacheCovers', value === true)"
-        />
-        <v-switch
-          :model-value="notificationsEnabled"
-          :label="
-            $formatMessage({
-              description: 'Downloads page: notifications',
-              defaultMessage: 'Download notifications',
-              id: 'BVMgIP',
-            })
-          "
-          :hint="notificationHint"
-          persistent-hint
-          @update:model-value="toggleNotifications"
-        />
-        <v-switch
-          :model-value="offline.preferences.removeRead"
-          :label="
-            $formatMessage({
-              description: 'Downloads page: remove read',
-              defaultMessage: 'Remove books automatically when finished',
-              id: '4A3FI0',
-            })
-          "
-          hide-details
-          @update:model-value="(value) => setPreference('removeRead', value)"
-        />
-        <v-switch
-          :model-value="offline.preferences.autoDownloadNext"
-          :label="
-            $formatMessage({
-              description: 'Downloads page: auto download next',
-              defaultMessage: 'Automatically download the next book',
-              id: 'LgJVeS',
-            })
-          "
-          :hint="
-            $formatMessage({
-              description: 'Downloads page: auto download hint',
-              defaultMessage:
-                'Keeps the next unread book ready. Starts once two consecutive books are stored.',
-              id: 'Nwe7Ke',
-            })
-          "
-          persistent-hint
-          @update:model-value="(value) => setPreference('autoDownloadNext', value)"
-        />
-      </v-card-text>
+      <v-expand-transition>
+        <v-card-text v-show="showSettings">
+          <v-row dense>
+            <v-col
+              cols="12"
+              sm="6"
+            >
+              <v-select
+                :model-value="offline.preferences.concurrentBooks"
+                :items="[1, 2, 3, 4, 6]"
+                :label="
+                  $formatMessage({
+                    description: 'Downloads page: parallel books',
+                    defaultMessage: 'Parallel books',
+                    id: 'pWVitk',
+                  })
+                "
+                hide-details
+                @update:model-value="(value) => setPreference('concurrentBooks', value)"
+              />
+            </v-col>
+            <v-col
+              cols="12"
+              sm="6"
+            >
+              <v-select
+                :model-value="offline.preferences.concurrentPages"
+                :items="[1, 2, 3, 4]"
+                :label="
+                  $formatMessage({
+                    description: 'Downloads page: parallel pages',
+                    defaultMessage: 'Parallel pages',
+                    id: 'QGj7WT',
+                  })
+                "
+                hide-details
+                @update:model-value="(value) => setPreference('concurrentPages', value)"
+              />
+            </v-col>
+          </v-row>
+          <v-switch
+            :model-value="offline.preferences.cacheCovers"
+            :label="
+              $formatMessage({
+                defaultMessage: 'Keep browsed covers offline',
+                id: '2gNaKC',
+                description: 'Downloads cover caching preference',
+              })
+            "
+            :hint="
+              $formatMessage({
+                defaultMessage:
+                  'Off by default. Saves book and series covers as you browse, using additional device storage. Turning this off removes these extra covers; downloaded book covers are kept.',
+                id: 'H25Rdx',
+                description: 'Downloads cover caching explanation',
+              })
+            "
+            persistent-hint
+            @update:model-value="(value) => setPreference('cacheCovers', value === true)"
+          />
+          <v-switch
+            :model-value="notificationsEnabled"
+            :label="
+              $formatMessage({
+                description: 'Downloads page: notifications',
+                defaultMessage: 'Download notifications',
+                id: 'BVMgIP',
+              })
+            "
+            :hint="notificationHint"
+            persistent-hint
+            @update:model-value="toggleNotifications"
+          />
+          <v-switch
+            :model-value="offline.preferences.removeRead"
+            :label="
+              $formatMessage({
+                description: 'Downloads page: remove read',
+                defaultMessage: 'Remove books automatically when finished',
+                id: '4A3FI0',
+              })
+            "
+            hide-details
+            @update:model-value="(value) => setPreference('removeRead', value)"
+          />
+          <v-switch
+            :model-value="offline.preferences.autoDownloadNext"
+            :label="
+              $formatMessage({
+                description: 'Downloads page: auto download next',
+                defaultMessage: 'Automatically download the next book',
+                id: 'LgJVeS',
+              })
+            "
+            :hint="
+              $formatMessage({
+                description: 'Downloads page: auto download hint',
+                defaultMessage:
+                  'Keeps the next unread book ready. Starts once two consecutive books are stored.',
+                id: 'Nwe7Ke',
+              })
+            "
+            persistent-hint
+            @update:model-value="(value) => setPreference('autoDownloadNext', value)"
+          />
+        </v-card-text>
+      </v-expand-transition>
     </v-card>
 
     <v-expansion-panels
@@ -749,6 +772,7 @@ const intl = useIntl()
 const offline = useOfflineLibraryStore()
 
 const changingMode = ref(false)
+const showSettings = ref(false)
 const notificationPermission = ref(
   typeof Notification !== 'undefined' ? Notification.permission : 'unsupported',
 )

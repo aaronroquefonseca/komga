@@ -133,8 +133,10 @@ async function cacheShellAssets(urls, onAssetSettled, hashes = {}, previousHashe
     while (cursor < list.length) {
       const assetUrl = list[cursor++]
       let success = false
+      let href = null
       try {
         const url = new URL(assetUrl, self.registration.scope)
+        href = url.href
         if (url.origin !== self.location.origin) continue
         const request = new Request(url.href, {credentials: 'include'})
         // Hashed assets are immutable; reuse complete cached responses on retries.
@@ -157,7 +159,7 @@ async function cacheShellAssets(urls, onAssetSettled, hashes = {}, previousHashe
       } catch (_) {
         // Retry failed assets on the next preparation; never report them as ready.
       } finally {
-        if (onAssetSettled) onAssetSettled(success)
+        if (onAssetSettled) onAssetSettled(success, href || String(assetUrl))
       }
     }
   }
@@ -207,20 +209,32 @@ async function prepareOfflineShell(pageUrl, assets, batchId) {
     precacheProgress = progress
     progress.expected = urls.size
     const shells = []
+    let shellsReady = true
     await Promise.all([...new Set([pageUrl, scopeRootUrl(), new URL('next/', self.registration.scope).href,
       new URL('classic/', self.registration.scope).href].filter(Boolean))].map(async url => {
       try {
         const response = await boundedFetch(new Request(url, {credentials: 'include', cache: 'no-store'}))
         if (!isHtmlResponse(response)) throw new Error('Shell unavailable')
         shells.push({url, response})
-      } catch (_) { manifestsReady = false }
+      } catch (_) { shellsReady = false }
     }))
-    await cacheShellAssets([...urls], success => {
+    const missing = []
+    await cacheShellAssets([...urls], (success, assetUrl) => {
       progress.done += 1
-      if (!success) progress.failed += 1
+      if (!success) {
+        progress.failed += 1
+        // Keep a bounded sample for diagnostics; the full set is retried
+        // on the next preparation anyway.
+        if (assetUrl && missing.length < 50 && !missing.includes(assetUrl)) missing.push(assetUrl)
+      }
     }, hashes, previous?.hashes || {})
-    progress.complete = manifestsReady && progress.failed === 0 && progress.expected > 0
-    if (progress.complete) {
+    // A single failed asset must not take the whole offline shell down:
+    // commit the shells whenever they fetched fine so cold boots keep
+    // working, and let the missing assets ride along on the next run.
+    // `complete` stays strict so the UI still reports the gap with Retry.
+    progress.complete = manifestsReady && shellsReady && progress.failed === 0 && progress.expected > 0
+    progress.missing = missing
+    if (shellsReady) {
       for (const {url, response} of shells) {
         await cache.put(new Request(offlineShellUrl(shellApp(url))), response.clone())
         await cache.put(new Request(url), response.clone())
