@@ -646,11 +646,17 @@ export default Vue.extend({
     previousBook() {
       if (!this.$_.isEmpty(this.siblingPrevious)) {
         this.jumpToPreviousBook = false
-        this.$router.push({
+        const route = {
           name: getBookReadRouteFromMedia(this.siblingPrevious.media),
           params: {bookId: this.siblingPrevious.id.toString()},
           query: {context: this.context.origin, contextId: this.context.id, incognito: this.incognito.toString(), ...(this.source ? {source: this.source} : {})},
-        })
+        }
+        // nextui: replace so closeBook's history.go(-1) lands back in the new UI, not the previous book
+        if (this.source === 'nextui') {
+          this.$router.replace(route)
+        } else {
+          this.$router.push(route)
+        }
       }
     },
     nextBook() {
@@ -658,11 +664,17 @@ export default Vue.extend({
         this.closeBook()
       } else {
         this.jumpToNextBook = false
-        this.$router.push({
+        const route = {
           name: getBookReadRouteFromMedia(this.siblingNext.media),
           params: {bookId: this.siblingNext.id.toString()},
           query: {context: this.context.origin, contextId: this.context.id, incognito: this.incognito.toString(), ...(this.source ? {source: this.source} : {})},
-        })
+        }
+        // nextui: replace so closeBook's history.go(-1) lands back in the new UI, not the previous book
+        if (this.source === 'nextui') {
+          this.$router.replace(route)
+        } else {
+          this.$router.push(route)
+        }
       }
     },
     enterFullscreen() {

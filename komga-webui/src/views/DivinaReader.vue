@@ -924,11 +924,14 @@ export default Vue.extend({
         this.jumpToPreviousBook = false
         this.readerTransitioning = true
         this.pages = []
-        this.$router.push({
+        const route = {
           name: getBookReadRouteFromMedia(this.siblingPrevious.media),
           params: {bookId: this.siblingPrevious.id.toString()},
           query: {position: 'end', context: this.context.origin, contextId: this.context.id, incognito: this.incognito.toString(), ...(this.source ? {source: this.source} : {})},
-        }).catch(() => {
+        }
+        // nextui: replace so closeBook's history.go(-1) lands back in the new UI, not the previous book
+        const nav = this.source === 'nextui' ? this.$router.replace(route) : this.$router.push(route)
+        nav.catch(() => {
           this.readerTransitioning = false
         })
       }
@@ -944,11 +947,14 @@ export default Vue.extend({
         this.jumpToNextBook = false
         this.readerTransitioning = true
         this.pages = []
-        this.$router.push({
+        const route = {
           name: getBookReadRouteFromMedia(this.siblingNext.media),
           params: {bookId: this.siblingNext.id.toString()},
           query: {position: 'start', context: this.context.origin, contextId: this.context.id, incognito: this.incognito.toString(), ...(this.source ? {source: this.source} : {})},
-        }).catch(() => {
+        }
+        // nextui: replace so closeBook's history.go(-1) lands back in the new UI, not the previous book
+        const nav = this.source === 'nextui' ? this.$router.replace(route) : this.$router.push(route)
+        nav.catch(() => {
           this.readerTransitioning = false
         })
       }
