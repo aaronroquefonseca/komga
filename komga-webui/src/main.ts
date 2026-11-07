@@ -51,7 +51,7 @@ import router from './router'
 import store from './store'
 import i18n from './i18n'
 import urls from './functions/urls'
-import {isStandalonePwa} from './functions/pwa'
+import { mergeShellAssets, parseShellManifest, resolveShellAssetUrls, WEBUI_SHELL_MANIFEST_FILENAME } from './functions/offline-shell-manifest'
 import OfflineDownloads from './views/OfflineDownloads.vue'
 
 Vue.prototype.$_ = _
@@ -109,23 +109,31 @@ installSinglePageWideStateMachine()
 installPaperBoundsStability()
 sync(store, router)
 
-const installedPwa = isStandalonePwa()
+router.addRoute('home', {
+  path: '/downloads',
+  name: 'offline-downloads',
+  component: OfflineDownloads,
+})
 
-if (installedPwa) {
-  router.addRoute('home', {
-    path: '/downloads',
-    name: 'offline-downloads',
-    component: OfflineDownloads,
-  })
-}
+router.addRoute({
+  path: '/offline-unavailable', name: 'offline-unavailable',
+  component: Vue.extend({
+    render(h) {
+      return h('div', {style: {font: '16px system-ui', padding: '48px', maxWidth: '36rem', margin: 'auto'}}, [
+        h('h1', 'Unavailable offline'),
+        h('p', 'This book is not saved for offline reading. EPUB reading requires a connection.'),
+        h('a', {attrs: {href: urls.base + (this.$route.query.source === 'nextui' ? 'next/downloads' : 'classic/downloads')}}, 'Open Downloads'),
+      ])
+    },
+  }),
+})
 
 router.beforeEach(async (to, from, next) => {
   await Vue.prototype.$offline.whenReady()
-  if (installedPwa &&
-    to.name === 'read-book' &&
+  if (['read-book', 'read-epub'].includes(to.name || '') &&
     (Vue.prototype.$offline.state.offlineMode || !Vue.prototype.$offline.state.online) &&
-    !Vue.prototype.$offline.isDownloaded(to.params.bookId)) {
-    next({name: 'offline-downloads'})
+    (to.name === 'read-epub' || !Vue.prototype.$offline.isDownloaded(to.params.bookId))) {
+    next({name: 'offline-unavailable', query: {source: to.query.source}})
     return
   }
   next()
@@ -149,19 +157,59 @@ function getOfflineShellAssets(): string[] {
 
 let serviceWorkerRegistration: Promise<ServiceWorkerRegistration | undefined> = Promise.resolve(undefined)
 
+// Minimum delay between shell preparations; afterEach/online triggers fire often.
+const PREPARE_MIN_INTERVAL_MS = 30000
+let shellManifestUrls: string[] | undefined
+let shellManifestRequest: Promise<string[]> | undefined
+let lastPrepareAt = 0
+let inFlightPrepare: Promise<void> | undefined
+
+function shellManifestUrl(): string {
+  return `${urls.base}${WEBUI_SHELL_MANIFEST_FILENAME}`
+}
+
+async function loadManifestAssetUrls(): Promise<string[]> {
+  if (shellManifestUrls) return shellManifestUrls
+  if (!shellManifestRequest) {
+    shellManifestRequest = (async () => {
+      try {
+        const response = await fetch(shellManifestUrl(), { cache: 'no-store' })
+        if (!response.ok) return []
+        const resolved = resolveShellAssetUrls(parseShellManifest(await response.json()), urls.origin)
+        shellManifestUrls = resolved
+        return resolved
+      } catch (error) {
+        Vue.prototype.$warn('Komga offline shell manifest fetch failed', error)
+        return []
+      } finally {
+        shellManifestRequest = undefined
+      }
+    })()
+  }
+  return shellManifestRequest
+}
+
 function prepareOfflineShell(): void {
   if (!('serviceWorker' in navigator) || !Vue.prototype.$offline.state.online) return
-  serviceWorkerRegistration
-    .then(registration => {
-      const worker = registration?.active
-      if (!worker) return
-      worker.postMessage({
+  if (inFlightPrepare) return
+  const now = Date.now()
+  if (now - lastPrepareAt < PREPARE_MIN_INTERVAL_MS) return
+  lastPrepareAt = now
+  inFlightPrepare = (async () => {
+    try {
+      const assets = mergeShellAssets(getOfflineShellAssets(), await loadManifestAssetUrls())
+      const registration = await serviceWorkerRegistration
+      registration?.active?.postMessage({
         type: 'KOMGA_PREPARE_OFFLINE_SHELL',
         pageUrl: window.location.href,
-        assets: getOfflineShellAssets(),
+        assets,
       })
-    })
-    .catch(error => Vue.prototype.$warn('Komga offline shell preparation failed', error))
+    } catch (error) {
+      Vue.prototype.$warn('Komga offline shell preparation failed', error)
+    } finally {
+      inFlightPrepare = undefined
+    }
+  })()
 }
 
 if ('serviceWorker' in navigator) {
@@ -188,6 +236,7 @@ if ('serviceWorker' in navigator) {
 const syncOfflineState = (forceCatalog: boolean = false) => {
   if (!store.getters.authenticated || catalogSyncScheduled || !Vue.prototype.$offline.state.online) return
   catalogSyncScheduled = true
+  Vue.prototype.$offline.resumeDownloads()
 
   const shouldSyncCatalog = forceCatalog || Date.now() - lastCatalogSync >= CATALOG_SYNC_INTERVAL
   const reconcile = shouldSyncCatalog

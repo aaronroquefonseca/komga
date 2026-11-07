@@ -23,6 +23,10 @@
     "defaultMessage": "Nothing to show",
     "description": "Overview: empty state text when sections are configured but no data is available"
   },
+  "+ir2Ig": {
+    "defaultMessage": "Downloaded; update available",
+    "description": "Card badge: a saved download has a newer version on the server"
+  },
   "+jaADC": {
     "defaultMessage": "File name",
     "description": "Sort label: name"
@@ -114,6 +118,10 @@
   "0MePSx": {
     "defaultMessage": "Drag here to pin a library",
     "description": "Reorder library drawer: placeholder if no libraries are pinned"
+  },
+  "0NFECk": {
+    "defaultMessage": "Retry {count} failed",
+    "description": "Downloads page: retry failed"
   },
   "0OEO+j": {
     "defaultMessage": "Genres",
@@ -211,6 +219,10 @@
     "defaultMessage": "Show details",
     "description": "Import books table: book details button"
   },
+  "2MahXh": {
+    "defaultMessage": "Update available",
+    "description": "Book menu: update available"
+  },
   "2Sx0J4": {
     "defaultMessage": "Page",
     "description": "Duplicate Page Hash Matches Table header: page"
@@ -218,6 +230,10 @@
   "2g7iOx": {
     "defaultMessage": "Metrics",
     "description": "Drawer menu for Server > Metrics"
+  },
+  "2gNaKC": {
+    "defaultMessage": "Keep browsed covers offline",
+    "description": "Downloads cover caching preference"
   },
   "2p+JVw": {
     "defaultMessage": "This Komga server is not yet active, you need to create a user account to be able to access it.",
@@ -271,6 +287,10 @@
     "defaultMessage": "Collection",
     "description": "Browsing context: collection"
   },
+  "3q5mKl": {
+    "defaultMessage": "Cancel",
+    "description": "Downloads page: cancel"
+  },
   "3qQjnw": {
     "defaultMessage": "Language",
     "description": "Filter panel: Language"
@@ -278,6 +298,10 @@
   "3rNj7/": {
     "defaultMessage": "Click to confirm",
     "description": "Confirmation dialog: default checkbox label"
+  },
+  "3wX7pE": {
+    "defaultMessage": "{books} books and {series} series cached",
+    "description": "Downloads page: catalog cached"
   },
   "3zkvDp": {
     "defaultMessage": "Close",
@@ -291,6 +315,10 @@
     "defaultMessage": "Select series",
     "description": "Import books table: series cell: select series button"
   },
+  "4A3FI0": {
+    "defaultMessage": "Remove books automatically when finished",
+    "description": "Downloads page: remove read"
+  },
   "4AKIbg": {
     "defaultMessage": "Kobo Sync external port",
     "description": "Server settings: input field for kobo sync port"
@@ -302,6 +330,10 @@
   "4CX0cY": {
     "defaultMessage": "Import series metadata",
     "description": "Form add/edit library: Metadata - epub series metadata"
+  },
+  "4GWZ2Y": {
+    "defaultMessage": "Preparing offline app shell: {done} of {expected}",
+    "description": "Downloads page: offline shell preparing"
   },
   "4IKM3R": {
     "defaultMessage": "Label",
@@ -331,6 +363,10 @@
     "defaultMessage": "No series found",
     "description": "Series picker dialog: no results empty state - title"
   },
+  "4ir1Tm": {
+    "defaultMessage": "Available offline",
+    "description": "Book menu: available offline"
+  },
   "4jKnoO": {
     "defaultMessage": "On deck — {number}",
     "description": "Series view: book on deck"
@@ -342,6 +378,10 @@
   "4yDvPA": {
     "defaultMessage": "Clear filters",
     "description": "Filter empty state: button"
+  },
+  "55nOFo": {
+    "defaultMessage": "Download remaining ({downloaded}/{total})",
+    "description": "Series menu: download remaining"
   },
   "5AAGkA": {
     "defaultMessage": "Password",
@@ -387,6 +427,10 @@
     "defaultMessage": "Age range",
     "description": "Filter by age rating: range label"
   },
+  "6E5J8b": {
+    "defaultMessage": "Show download settings",
+    "description": "Downloads page: show settings"
+  },
   "6F1ebQ": {
     "defaultMessage": "HTTP Server",
     "description": "Server settings: section header for HTTP server"
@@ -423,6 +467,14 @@
     "defaultMessage": "Book",
     "description": "Import reading list table header: Book"
   },
+  "72+FCB": {
+    "defaultMessage": "Downloading {downloaded}/{total}",
+    "description": "Series menu: downloading with progress"
+  },
+  "72ma37": {
+    "defaultMessage": "Retry setup",
+    "description": "Retry offline setup"
+  },
   "7M1pUf": {
     "defaultMessage": "Empty trash",
     "description": "Library empty trash dialog: confirm button"
@@ -435,13 +487,29 @@
     "defaultMessage": "Summary",
     "description": "Form edit book: General - book summary"
   },
+  "7cqTpL": {
+    "defaultMessage": "Offline app shell is ready",
+    "description": "Downloads page: offline shell ready"
+  },
   "7gdpKG": {
     "defaultMessage": "Create",
     "description": "Read list add to: create button label"
   },
+  "7helmM": {
+    "defaultMessage": "Remove offline content?",
+    "description": "Downloads page: confirm remove title"
+  },
   "7hwFJo": {
     "defaultMessage": "Writer",
     "description": "Author role: writer"
+  },
+  "7lb85t": {
+    "defaultMessage": "Sign in online once on this device, then download books to read them offline.",
+    "description": "Offline missing session explanation"
+  },
+  "7uSsRk": {
+    "defaultMessage": "Open Downloads",
+    "description": "Offline downloads action"
   },
   "7z91nm": {
     "defaultMessage": "History",
@@ -459,6 +527,10 @@
     "defaultMessage": "Import book metadata",
     "description": "Form add/edit library: Metadata - epub book metadata"
   },
+  "81DZaK": {
+    "defaultMessage": "Read",
+    "description": "Downloads page: read"
+  },
   "87q6WX": {
     "defaultMessage": "None",
     "description": "Filter values: none"
@@ -470,6 +542,10 @@
   "8Dun/Y": {
     "defaultMessage": "No",
     "description": "Server settings: regenerate poster option - no"
+  },
+  "8K+Ymt": {
+    "defaultMessage": "Downloads",
+    "description": "Downloads page: title"
   },
   "8KsYYJ": {
     "defaultMessage": "Tags",
@@ -490,6 +566,10 @@
   "8P7Yn+": {
     "defaultMessage": "Age rating",
     "description": "Filter panel: Age rating"
+  },
+  "8TrwIS": {
+    "defaultMessage": "Download settings",
+    "description": "Downloads page: settings"
   },
   "8Yd/3a": {
     "defaultMessage": "Role name",
@@ -539,6 +619,10 @@
     "defaultMessage": "CBZ",
     "description": "Book file format: CBZ"
   },
+  "9b6K6x": {
+    "defaultMessage": "Checking for catalog changes…",
+    "description": "Downloads catalog change check"
+  },
   "9dNd68": {
     "defaultMessage": "User uploaded",
     "description": "Poster card: type - user uploaded"
@@ -550,6 +634,10 @@
   "9oA9gw": {
     "defaultMessage": "Unpinned",
     "description": "Library tab navigation: library selection: unpinned"
+  },
+  "A54yH6": {
+    "defaultMessage": "Offline setup is incomplete. Stay connected and retry before closing the app.",
+    "description": "Downloads incomplete offline setup"
   },
   "AEaKHC": {
     "defaultMessage": "Find book thumbnails to regenerate",
@@ -598,6 +686,10 @@
   "BQmPch": {
     "defaultMessage": "Delete book",
     "description": "Task name: DeleteBook"
+  },
+  "BVMgIP": {
+    "defaultMessage": "Download notifications",
+    "description": "Downloads page: notifications"
   },
   "BXkP7H": {
     "defaultMessage": "Close",
@@ -763,6 +855,10 @@
     "defaultMessage": "Scan interval",
     "description": "Form add/edit library: Scanner - scan interval"
   },
+  "Dx4ngf": {
+    "defaultMessage": "Update",
+    "description": "Downloads page: update copy"
+  },
   "DxtDpt": {
     "defaultMessage": "Media Analysis",
     "description": "Drawer menu for Media > Media Analysis"
@@ -871,6 +967,10 @@
     "defaultMessage": "Search",
     "description": "Book picker dialog: filter field label"
   },
+  "G4phj2": {
+    "defaultMessage": "Offline mode blocks the Komga API and page streaming. Only cached metadata and downloaded pages are used.",
+    "description": "Downloads page: offline mode description"
+  },
   "G7quju": {
     "defaultMessage": "Announcements",
     "description": "Drawer menu for Server > Announcements"
@@ -882,6 +982,14 @@
   "GCwZB2": {
     "defaultMessage": "Scan library files",
     "description": "Library menu: scan"
+  },
+  "GIXwVC": {
+    "defaultMessage": "No longer on server",
+    "description": "Downloads page: source missing"
+  },
+  "GkDyZf": {
+    "defaultMessage": "Unavailable offline",
+    "description": "Offline unavailable title"
   },
   "GnHrCd": {
     "defaultMessage": "Use local artwork",
@@ -906,6 +1014,10 @@
   "H1+81t": {
     "defaultMessage": "Manually",
     "description": "Form edit collection: General - series ordering: manually"
+  },
+  "H25Rdx": {
+    "defaultMessage": "Off by default. Saves book and series covers as you browse, using additional device storage. Turning this off removes these extra covers; downloaded book covers are kept.",
+    "description": "Downloads cover caching explanation"
   },
   "H2B6uF": {
     "defaultMessage": "Choose a series",
@@ -1019,6 +1131,10 @@
     "defaultMessage": "Server",
     "description": "Drawer menu for Server"
   },
+  "IwXRPg": {
+    "defaultMessage": "Storage estimate is unavailable in this browser",
+    "description": "Downloads page: storage unavailable"
+  },
   "J+H9cC": {
     "defaultMessage": "Delete files",
     "description": "Series menu: manage > delete file"
@@ -1051,9 +1167,17 @@
     "defaultMessage": "Password changed for user: {email}",
     "description": "Snackbar notification shown upon successful user's password modification"
   },
+  "JiSU+K": {
+    "defaultMessage": "Catalog sync did not finish. Saved entries remain available. Reconnect and retry Sync catalog.",
+    "description": "Downloads catalog sync error"
+  },
   "Jj4uO/": {
     "defaultMessage": "Number of pages",
     "description": "Book info: number of pages"
+  },
+  "Jq9Fjf": {
+    "defaultMessage": "Opening Komga…",
+    "description": "App loading title"
   },
   "JwBlXP": {
     "defaultMessage": "Open",
@@ -1107,6 +1231,14 @@
     "defaultMessage": "Passwords must be identical",
     "description": "User password change dialog: Error message if passwords differ"
   },
+  "LgJVeS": {
+    "defaultMessage": "Automatically download the next book",
+    "description": "Downloads page: auto download next"
+  },
+  "Lijq0W": {
+    "defaultMessage": "Manage downloads",
+    "description": "Series menu: manage downloads"
+  },
   "LjqS9+": {
     "defaultMessage": "A read list with that name already exists",
     "description": "Import reading list: error message if read list name already exists"
@@ -1114,6 +1246,10 @@
   "Lto2Lg": {
     "defaultMessage": "Must start with '/', not end with '/-_', and contain only '/-_a-z0-9'",
     "description": "Server settings: error message when server context path is invalid"
+  },
+  "M1qH9S": {
+    "defaultMessage": "Sign in",
+    "description": "Offline missing session action"
   },
   "MC2JtF": {
     "defaultMessage": "All",
@@ -1127,9 +1263,17 @@
     "defaultMessage": "Overview",
     "description": "Library navigation: overview"
   },
+  "MV+lb3": {
+    "defaultMessage": "old copy kept",
+    "description": "Downloads page: old copy kept"
+  },
   "MYYgTv": {
     "defaultMessage": "Unknown file size",
     "description": "Poster card: unknown file size"
+  },
+  "Mau++V": {
+    "defaultMessage": "Update available",
+    "description": "Downloads page: update available"
   },
   "MoOECu": {
     "defaultMessage": "Import series metadata",
@@ -1163,6 +1307,10 @@
     "defaultMessage": "Kobo sync forced: {apiKeyComment}",
     "description": "Snackbar notification shown upon successful API key force sync"
   },
+  "NUSK+b": {
+    "defaultMessage": "Notifications are not supported in this browser",
+    "description": "Downloads page: notifications unsupported"
+  },
   "Nahedl": {
     "defaultMessage": "Add",
     "description": "Metadata edition: add role dialog - add button"
@@ -1194,6 +1342,10 @@
   "NwK2Kv": {
     "defaultMessage": "Tag",
     "description": "Filter panel: Tag"
+  },
+  "Nwe7Ke": {
+    "defaultMessage": "Keeps the next unread book ready. Starts once two consecutive books are stored.",
+    "description": "Downloads page: auto download hint"
   },
   "O/3awV": {
     "defaultMessage": "Analysis",
@@ -1287,13 +1439,25 @@
     "defaultMessage": "Title",
     "description": "Form edit book: General - book title"
   },
+  "QGj7WT": {
+    "defaultMessage": "Parallel pages",
+    "description": "Downloads page: parallel pages"
+  },
   "QIr0z7": {
     "defaultMessage": "Email",
     "description": "Login screen: email field label"
   },
+  "QJFkAI": {
+    "defaultMessage": "Full catalog has not been saved yet. Stay online and sync it for offline browsing.",
+    "description": "Downloads catalog not ready"
+  },
   "QM5+gW": {
     "defaultMessage": "Delete count",
     "description": "Known Duplicate Page Table header: delete count"
+  },
+  "Qol9qn": {
+    "defaultMessage": "Downloading {done}/{total}",
+    "description": "Book menu: downloading with progress"
   },
   "Qxij/I": {
     "defaultMessage": "Deleted page",
@@ -1302,6 +1466,10 @@
   "Qz1UTX": {
     "defaultMessage": "Close",
     "description": "File name picker dialog: Close button"
+  },
+  "R43wiM": {
+    "defaultMessage": "Sync catalog",
+    "description": "Downloads sync catalog button"
   },
   "REmxIM": {
     "defaultMessage": "Modified",
@@ -1330,6 +1498,10 @@
   "RcbD73": {
     "defaultMessage": "Book {number}",
     "description": "Book navigation siblings menu: book number in series"
+  },
+  "RdPrIL": {
+    "defaultMessage": "Remove",
+    "description": "Downloads page: confirm remove"
   },
   "Rm52xk": {
     "defaultMessage": "Welcome to Komga",
@@ -1371,6 +1543,10 @@
     "defaultMessage": "Select book",
     "description": "Book picker dialog: title"
   },
+  "Saam0a": {
+    "defaultMessage": "{available} available",
+    "description": "Downloads page: browser headroom"
+  },
   "Sj0HXz": {
     "defaultMessage": "Allow only labels",
     "description": "User creation/edit dialog: Allow only labels field label"
@@ -1399,6 +1575,10 @@
     "defaultMessage": "Date added",
     "description": "Sort label: createdDate"
   },
+  "TH27e8": {
+    "defaultMessage": "This content is not saved on this device. Connect to your server to load it, or choose a downloaded book.",
+    "description": "Offline unavailable explanation"
+  },
   "TPX4qo": {
     "defaultMessage": "Tags",
     "description": "Book view table: tags header"
@@ -1410,6 +1590,10 @@
   "TUxJCd": {
     "defaultMessage": "Scan on application startup",
     "description": "Form add/edit library: Scanner - scan on startup"
+  },
+  "Te5oRu": {
+    "defaultMessage": "Remove offline copies",
+    "description": "Series menu: remove downloads"
   },
   "TfdugD": {
     "defaultMessage": "By release date",
@@ -1442,6 +1626,10 @@
   "U3Uo3q": {
     "defaultMessage": "Password",
     "description": "Claim server screen: password field label"
+  },
+  "UBdoAo": {
+    "defaultMessage": "Remove {count} offline books from {title}?",
+    "description": "Downloads page: confirm remove series"
   },
   "UFZ+PY": {
     "defaultMessage": "Tags",
@@ -1482,6 +1670,10 @@
   "Usohru": {
     "defaultMessage": "Browse",
     "description": "Import books directory selection: file browser button label"
+  },
+  "UtNTdk": {
+    "defaultMessage": "Hide download settings",
+    "description": "Downloads page: hide settings"
   },
   "Uuu6fQ": {
     "defaultMessage": "No results",
@@ -1599,6 +1791,10 @@
     "defaultMessage": "Requested number",
     "description": "Import reading list table header: requested number"
   },
+  "WyYZnH": {
+    "defaultMessage": "Browser quota: {quota}",
+    "description": "Downloads page: browser quota"
+  },
   "X/Z8x+": {
     "defaultMessage": "Make sure to copy your API key now. You won't be able to see it again!",
     "description": "Generate API key dialog: message shown after key creation"
@@ -1707,6 +1903,10 @@
     "defaultMessage": "IP",
     "description": "Authentication Activity table header: IP address"
   },
+  "YcBSEL": {
+    "defaultMessage": "Download failed",
+    "description": "Downloads page: download failed"
+  },
   "YeFgyc": {
     "defaultMessage": "Books in error can now be filtered directly in the main library view.",
     "description": "Media analysis: text"
@@ -1742,6 +1942,10 @@
   "ZGppaw": {
     "defaultMessage": "Series",
     "description": "Browsing context: series"
+  },
+  "ZPpUnl": {
+    "defaultMessage": "Read",
+    "description": "Card badge: book or series has been read"
   },
   "ZPuFVu": {
     "defaultMessage": "General",
@@ -1794,6 +1998,10 @@
   "aHyrmS": {
     "defaultMessage": "Delete",
     "description": "Poster card: action - delete"
+  },
+  "aMhVEe": {
+    "defaultMessage": "Saving catalog changes: {done} of {total} entries in this batch",
+    "description": "Downloads catalog sync progress"
   },
   "aOiU5f": {
     "defaultMessage": "Library updated: {library}",
@@ -2051,6 +2259,10 @@
     "defaultMessage": "Users",
     "description": "Users table global header"
   },
+  "c98pqU": {
+    "defaultMessage": "You are offline. Showing saved content; only downloaded books can be read. Reading progress will sync when you reconnect.",
+    "description": "Offline notice"
+  },
   "cAu/I6": {
     "defaultMessage": "Duplicate Pages",
     "description": "Drawer menu for Media > Duplicate Pages"
@@ -2150,6 +2362,10 @@
   "ddthL2": {
     "defaultMessage": "Confirm",
     "description": "Confirmation dialog: default confirm button"
+  },
+  "de4dox": {
+    "defaultMessage": "Books saved on this device for offline reading",
+    "description": "Downloads page: subtitle"
   },
   "dfslqC": {
     "defaultMessage": "The series files will be deleted<ul><li>Book media files will be deleted from disk.</li><li>Series and books will de deleted, along with their metadata and read progress.</li></ul><b>This action cannot be undone.</b>",
@@ -2407,6 +2623,10 @@
     "defaultMessage": "Ignore",
     "description": "Page Hash Action: IGNORE"
   },
+  "eoPZ4l": {
+    "defaultMessage": "Update offline series",
+    "description": "Series menu: update series"
+  },
   "estf95": {
     "defaultMessage": "Read list created",
     "description": "Create read list notification: read list created"
@@ -2463,6 +2683,10 @@
     "defaultMessage": "Book format is not supported",
     "description": "Import books: status message: book format is not supported"
   },
+  "g9V949": {
+    "defaultMessage": "Downloads",
+    "description": "Drawer menu for Downloads"
+  },
   "gEBeQv": {
     "defaultMessage": "Series metadata updated: {series}",
     "description": "Snackbar notification shown upon successful series metadata update"
@@ -2471,9 +2695,17 @@
     "defaultMessage": "Comment",
     "description": "API Key table header: key comment"
   },
+  "gZyEAs": {
+    "defaultMessage": "Connect to get started",
+    "description": "Offline missing session title"
+  },
   "ggaOkE": {
     "defaultMessage": "No data found",
     "description": "Duplicate Page Hash Matches Table: shown when table has no data"
+  },
+  "glX7JE": {
+    "defaultMessage": "Downloads",
+    "description": "Offline notice downloads action"
   },
   "gojrIJ": {
     "defaultMessage": "Select series",
@@ -2571,6 +2803,10 @@
     "defaultMessage": "EPUB",
     "description": "Book file format: EPUB"
   },
+  "iRH/Rd": {
+    "defaultMessage": "Update failed, old copy kept",
+    "description": "Downloads page: update failed kept"
+  },
   "iVYrha": {
     "defaultMessage": "General",
     "description": "Book Compare: General"
@@ -2607,6 +2843,10 @@
     "defaultMessage": "confirm",
     "description": "Confirmation dialog: default validation text"
   },
+  "jCU4Cu": {
+    "defaultMessage": "{downloaded} of {total} · {bytes}",
+    "description": "Downloads page: series summary"
+  },
   "jD87k9": {
     "defaultMessage": "The collection will be deleted<ul><li>Series and books will not be deleted.</li></ul><b>This action cannot be undone.</b>",
     "description": "Collection deletion warning notice"
@@ -2614,6 +2854,10 @@
   "jHJk+v": {
     "defaultMessage": "Created",
     "description": "Book view table: date created header"
+  },
+  "jM/9dD": {
+    "defaultMessage": "No offline books yet",
+    "description": "Downloads page: no downloads"
   },
   "jN3N1Q": {
     "defaultMessage": "Analyze",
@@ -2671,6 +2915,10 @@
     "defaultMessage": "Scan library",
     "description": "Task name: ScanLibrary"
   },
+  "kUl3uu": {
+    "defaultMessage": "Resume",
+    "description": "Downloads page: resume"
+  },
   "kXuNY8": {
     "defaultMessage": "Add page to selection",
     "description": "Selection bar: add page to selection"
@@ -2682,6 +2930,10 @@
   "kZ0WlY": {
     "defaultMessage": "The book file could not be found",
     "description": "Book view: book deleted"
+  },
+  "kZFfgo": {
+    "defaultMessage": "Paused",
+    "description": "Downloads page: paused"
   },
   "kh49ZJ": {
     "defaultMessage": "Discard",
@@ -2698,6 +2950,10 @@
   "kvbi4j": {
     "defaultMessage": "User updated: {email}",
     "description": "Snackbar notification shown upon successful user update"
+  },
+  "kwSOft": {
+    "defaultMessage": "Queued",
+    "description": "Downloads page: queued"
   },
   "l/To3S": {
     "defaultMessage": "History",
@@ -2827,6 +3083,10 @@
     "defaultMessage": "Select book",
     "description": "Import reading list table: book cell: select book button"
   },
+  "np/iRL": {
+    "defaultMessage": "Offline mode",
+    "description": "Downloads page: offline mode"
+  },
   "nuoJ1n": {
     "defaultMessage": "Create library",
     "description": "Create library dialog title"
@@ -2875,6 +3135,10 @@
     "defaultMessage": "My Account",
     "description": "Drawer menu for My Account"
   },
+  "omwGFp": {
+    "defaultMessage": "Downloading",
+    "description": "Downloads page: downloading"
+  },
   "oyeyK/": {
     "defaultMessage": "Thumbnail",
     "description": "Unknown Duplicate Page Table header: thumbnail"
@@ -2903,9 +3167,17 @@
     "defaultMessage": "Books",
     "description": "Library navigation: books"
   },
+  "pWVitk": {
+    "defaultMessage": "Parallel books",
+    "description": "Downloads page: parallel books"
+  },
   "phzvRy": {
     "defaultMessage": "Library",
     "description": "Filter panel: Library"
+  },
+  "plmAPV": {
+    "defaultMessage": "Download paused",
+    "description": "Book menu: paused"
   },
   "pvD6TS": {
     "defaultMessage": "Compare",
@@ -2926,6 +3198,10 @@
   "q7gxLw": {
     "defaultMessage": "The user account will be deleted from this server.<ul><li>The read progress for this user account will be permanently deleted.</li><li>Authentication activity for this user will be permanently deleted.</li></ul><b>This action cannot be undone.</b>",
     "description": "User deletion warning notice"
+  },
+  "qQQ+Xd": {
+    "defaultMessage": "Retry",
+    "description": "Downloads page: retry"
   },
   "qiZm6U": {
     "defaultMessage": "Unknown",
@@ -2966,6 +3242,10 @@
   "rHwSrF": {
     "defaultMessage": "Task threads",
     "description": "Server settings: input field for task threads"
+  },
+  "rIoYOY": {
+    "defaultMessage": "Pause",
+    "description": "Downloads page: pause"
   },
   "rKyTwd": {
     "defaultMessage": "Actions",
@@ -3135,6 +3415,14 @@
     "defaultMessage": "Undo",
     "description": "Poster card: action - undo"
   },
+  "u4D78u": {
+    "defaultMessage": "Save series offline",
+    "description": "Series menu: save offline"
+  },
+  "u8EmZl": {
+    "defaultMessage": "Full catalog saved on this device. Last synced {date}.",
+    "description": "Downloads catalog ready"
+  },
   "uBqZMx": {
     "defaultMessage": "Existing",
     "description": "Book Compare: existing book label"
@@ -3183,6 +3471,10 @@
     "defaultMessage": "Scan",
     "description": "Import books: scan button label"
   },
+  "uyLmvE": {
+    "defaultMessage": "Reconnect",
+    "description": "Offline reconnect action"
+  },
   "v3beFf": {
     "defaultMessage": "Must be a valid BCP 47 language code",
     "description": "Form edit series: General - language, error code"
@@ -3191,9 +3483,21 @@
     "defaultMessage": "A collection with that name already exists",
     "description": "Collection add to: duplicate name error message"
   },
+  "vRnsnq": {
+    "defaultMessage": "Available offline",
+    "description": "Card badge: content is saved for offline reading"
+  },
   "vTqlcG": {
     "defaultMessage": "Delete",
     "description": "Readlist delete dialog: confirm button"
+  },
+  "vVxJX1": {
+    "defaultMessage": "{usage} used",
+    "description": "Downloads page: storage used"
+  },
+  "vWALrR": {
+    "defaultMessage": "Remove offline copy of {title}?",
+    "description": "Downloads page: confirm remove book"
   },
   "vXhkpo": {
     "defaultMessage": "Delete file",
@@ -3223,6 +3527,10 @@
     "defaultMessage": "Read Lists",
     "description": "Library navigation: read lists"
   },
+  "w7CxFg": {
+    "defaultMessage": "Use a book or series menu to save titles for offline reading.",
+    "description": "Downloads page: no downloads description"
+  },
   "wESuod": {
     "defaultMessage": "Unread",
     "description": "Card subtitle: unread"
@@ -3234,6 +3542,10 @@
   "wRjFWz": {
     "defaultMessage": "Automatic ordering",
     "description": "Collection view: automatic ordering"
+  },
+  "wWii7g": {
+    "defaultMessage": "Remove series downloads",
+    "description": "Downloads page: remove series"
   },
   "wXGljO": {
     "defaultMessage": "Resume",
@@ -3255,9 +3567,17 @@
     "defaultMessage": "Release date",
     "description": "Form edit book: General - book release date"
   },
+  "x3QxTc": {
+    "defaultMessage": "Downloads share space with the browser profile. Removing offline copies frees space.",
+    "description": "Downloads page: storage warning"
+  },
   "xAZMxz": {
     "defaultMessage": "Filename",
     "description": "Book info: filename"
+  },
+  "xFrlmW": {
+    "defaultMessage": "Storage",
+    "description": "Downloads page: storage"
   },
   "xPBqGY": {
     "defaultMessage": "Delete series",
@@ -3307,6 +3627,10 @@
     "defaultMessage": "Performs a deep scan of the library files. Depending on your library size, this may take a long time.",
     "description": "Library deep scan dialog: warning text"
   },
+  "yBuCo8": {
+    "defaultMessage": "Notifications are blocked. Enable them in the browser settings.",
+    "description": "Downloads page: notifications denied"
+  },
   "yDWzUi": {
     "defaultMessage": "API Keys",
     "description": "API Key table global header"
@@ -3326,6 +3650,10 @@
   "yrE0Rx": {
     "defaultMessage": "Details",
     "description": "Book picker dialog: series books table header: book details"
+  },
+  "ysmJwg": {
+    "defaultMessage": "Available offline",
+    "description": "Downloads page: available offline"
   },
   "yxnX5k": {
     "defaultMessage": "Hide login fields if OAuth2 is enabled",
@@ -3355,6 +3683,10 @@
     "defaultMessage": "Email",
     "description": "User table header: user email"
   },
+  "zmI2mA": {
+    "defaultMessage": "Updating",
+    "description": "Downloads page: updating"
+  },
   "zphiTI": {
     "defaultMessage": "An API key with that comment already exists",
     "description": "API Key generate dialog: error message displayed when an API key with the same comment already exists"
@@ -3366,5 +3698,9 @@
   "zuhGGz": {
     "defaultMessage": "Reorder or pin",
     "description": "Libraries menu: reorder or pin"
+  },
+  "zzd9xD": {
+    "defaultMessage": "Remove download",
+    "description": "Downloads page: remove download"
   }
 }

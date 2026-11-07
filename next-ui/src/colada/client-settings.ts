@@ -1,3 +1,4 @@
+import { getUserSettingsOfflineFirst } from '@/offline/offline-readers'
 import {
   defineMutation,
   defineQuery,
@@ -11,7 +12,6 @@ import {
   type ClientSettingGlobalUpdateDto,
   type ClientSettingUserUpdateDto,
   komgaGetGlobalSettings,
-  komgaGetUserSettings,
   komgaSaveGlobalSetting,
   komgaSaveUserSetting,
 } from '@/generated/openapi'
@@ -70,7 +70,7 @@ export const useUpdateClientSettingsGlobal = defineMutation(() => {
 //region User settings
 export const clientSettingsUserQuery = defineQueryOptions({
   key: QUERY_KEYS_CLIENT_SETTINGS.user(),
-  query: () => komgaGetUserSettings(),
+  query: () => getUserSettingsOfflineFirst(),
   staleTime: STALE_TIME.LONG,
   gcTime: false,
 })

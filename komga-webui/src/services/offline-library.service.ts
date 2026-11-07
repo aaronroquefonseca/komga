@@ -12,6 +12,10 @@ import {
   offlinePut,
   offlinePutMany,
   openOfflineDatabase,
+  offlineAccountToken,
+  assertOfflineAccount,
+  isOfflineAccount,
+  offlineMediaCachePrefix,
 } from '@/services/offline-db'
 
 export const OFFLINE_BOOK_CACHE_PREFIX = 'komga-offline-book-v2-'
@@ -43,6 +47,7 @@ export interface OfflineDownloadRecord {
   bytes: number
   downloadedAt?: string
   error?: string
+  pages?: PageDto[]
   cacheName?: string
   manifestRevision?: string
   sourceLastModified?: string
@@ -264,6 +269,7 @@ export default class OfflineLibraryService {
   private activeJobs = new Map<string, AbortController>()
   private cancelledJobs = new Set<string>()
   private processingQueue = false
+  private switchingAccount = false
   private notifiedProgress = new Map<string, number>()
   private persistedProgressAt = new Map<string, number>()
   private notificationCloseTimers = new Map<string, number>()
@@ -313,7 +319,6 @@ export default class OfflineLibraryService {
     await this.cleanupOrphanedBookCaches()
     this.state.initialized = true
     this.notifyServiceWorker()
-    this.processQueue()
     this.closeLegacyDownloadNotifications()
 
     try {
@@ -363,7 +368,7 @@ export default class OfflineLibraryService {
 
   isDownloaded(bookId: string): boolean {
     const download = this.getDownload(bookId)
-    return !!download?.cacheName && ['downloaded', 'updating'].includes(download.status)
+    return !!download?.cacheName
   }
 
   getDownload(bookId: string): OfflineDownloadRecord | undefined {
@@ -386,7 +391,7 @@ export default class OfflineLibraryService {
     const active = new Set(this.state.downloads.map(x => x.cacheName).filter((x): x is string => !!x))
     const names = await caches.keys()
     await Promise.all(names
-      .filter(name => name.startsWith(OFFLINE_BOOK_CACHE_PREFIX) && !active.has(name))
+      .filter(name => name.startsWith(offlineMediaCachePrefix()) && !active.has(name))
       .map(name => caches.delete(name)))
   }
 
@@ -439,10 +444,16 @@ export default class OfflineLibraryService {
   }
 
   async getCachedSeries(seriesId: string): Promise<SeriesDto | undefined> {
-    return offlineGet<SeriesDto>(OFFLINE_STORES.series, seriesId)
+    const series = await offlineGet<SeriesDto>(OFFLINE_STORES.series, seriesId)
+    if (series) return series
+    if (!this.state.downloads.some(item => item.cacheName && item.book.seriesId === seriesId)) return undefined
+    const snapshot = await offlineGet<{value: SeriesDto}>(OFFLINE_STORES.settings, `downloadSeries:${seriesId}`)
+    return snapshot?.value
   }
 
   async getCachedPages(bookId: string): Promise<PageDto[] | undefined> {
+    const snapshot = this.getDownload(bookId)
+    if (snapshot?.cacheName && snapshot.pages) return clone(snapshot.pages)
     const record = await offlineGet<CachedPages>(OFFLINE_STORES.pages, bookId)
     return record?.pages
   }
@@ -488,6 +499,8 @@ export default class OfflineLibraryService {
   }
 
   private async checkDownloadUpdates(serverBooks: BookDto[]): Promise<void> {
+    const accountToken = offlineAccountToken()
+
     const byId = new Map(serverBooks.map(book => [book.id, book]))
     for (const record of this.state.downloads.filter(x => !!x.cacheName)) {
       const serverBook = byId.get(record.bookId)
@@ -495,6 +508,8 @@ export default class OfflineLibraryService {
         if (!record.sourceMissing) {
           record.sourceMissing = true
           await this.updateDownload(record)
+          assertOfflineAccount(accountToken)
+
         }
         continue
       }
@@ -507,6 +522,8 @@ export default class OfflineLibraryService {
 
       try {
         const response = await this.http.get(`/api/v1/books/${record.bookId}/pages`)
+        assertOfflineAccount(accountToken)
+
         const pages = response.data as PageDto[]
         const revision = manifestRevision(pages)
         if (revision === record.manifestRevision) {
@@ -518,11 +535,15 @@ export default class OfflineLibraryService {
           delete record.remoteManifestRevision
           delete record.remotePages
           await this.updateDownload(record)
+          assertOfflineAccount(accountToken)
+
         } else {
           record.updateAvailable = true
           record.remoteManifestRevision = revision
           record.remotePages = clone(pages)
           await this.updateDownload(record)
+          assertOfflineAccount(accountToken)
+
         }
       } catch (_) {
         // Keep the current snapshot. A later catalog sync will retry the check.
@@ -538,7 +559,7 @@ export default class OfflineLibraryService {
   }
 
   private cacheName(bookId: string, revision: string): string {
-    return `${OFFLINE_BOOK_CACHE_PREFIX}${stableHash(bookId)}-${revision}`
+    return `${offlineMediaCachePrefix()}${stableHash(bookId)}-${revision}`
   }
 
   private async updateDownload(record: OfflineDownloadRecord): Promise<void> {
@@ -550,15 +571,22 @@ export default class OfflineLibraryService {
   }
 
   async downloadBook(bookId: string, autoManaged: boolean = false, notificationGroupId?: string): Promise<void> {
+    const accountToken = offlineAccountToken()
+
     await this.ready
+    assertOfflineAccount(accountToken)
     if (!this.state.online || this.state.offlineMode) throw new Error('Connect to the server before downloading a book')
     if (!('caches' in window)) throw new Error('This browser does not provide Cache Storage')
 
     const current = this.getDownload(bookId)
     if (current && ['queued', 'downloading', 'updating'].includes(current.status)) return
     const bookResponse = await this.http.get(`/api/v1/books/${bookId}`)
+    assertOfflineAccount(accountToken)
+
     const book = bookResponse.data as BookDto
     await this.queueBook(book, autoManaged, notificationGroupId)
+    assertOfflineAccount(accountToken)
+
   }
 
   async downloadBooks(books: BookDto[], notificationGroupId: string): Promise<void> {
@@ -575,6 +603,9 @@ export default class OfflineLibraryService {
   }
 
   private async queueBook(book: BookDto, autoManaged: boolean, notificationGroupId?: string, startQueue: boolean = true): Promise<void> {
+    if (book.media?.mediaProfile?.toLowerCase() === 'epub' && !book.media.epubDivinaCompatible) {
+      throw new Error('EPUB books require a connection and cannot be saved for offline reading.')
+    }
     const bookId = book.id
     const current = this.getDownload(bookId)
     const queued: OfflineDownloadRecord = current?.cacheName
@@ -587,14 +618,21 @@ export default class OfflineLibraryService {
   }
 
   private async performDownload(bookId: string, controller: AbortController): Promise<void> {
+    const accountToken = offlineAccountToken()
+
     const existing = this.getDownload(bookId)
     if (!existing) return
     const [bookResponse, pagesResponse] = await Promise.all([
       this.http.get(`/api/v1/books/${bookId}`, {signal: controller.signal}),
       this.http.get(`/api/v1/books/${bookId}/pages`, {signal: controller.signal}),
     ])
+    assertOfflineAccount(accountToken)
+
     const book = bookResponse.data as BookDto
     const pages = pagesResponse.data as PageDto[]
+    if ((book.media?.mediaProfile?.toLowerCase() === 'epub' && !book.media.epubDivinaCompatible) || !pages?.length) {
+      throw new Error('Offline reading supports image-based comics only. EPUB books require a connection.')
+    }
     const revision = manifestRevision(pages)
 
     // If only the container/archive changed (for example CBR -> CBZ) while the
@@ -609,15 +647,24 @@ export default class OfflineLibraryService {
       delete existing.remotePages
       delete existing.error
       await this.cacheBook(book)
+      assertOfflineAccount(accountToken)
+
       await this.updateDownload(existing)
+      assertOfflineAccount(accountToken)
+
       return
     }
 
     const seriesResponse = await this.http.get(`/api/v1/series/${book.seriesId}`)
+    assertOfflineAccount(accountToken)
+
     const series = seriesResponse.data as SeriesDto
     const stagingCacheName = this.cacheName(bookId, revision)
     await caches.delete(stagingCacheName)
+    assertOfflineAccount(accountToken)
+
     const stagingCache = await caches.open(stagingCacheName)
+    assertOfflineAccount(accountToken)
 
     const hadActiveSnapshot = !!existing?.cacheName
     const oldCacheName = existing?.cacheName
@@ -643,7 +690,10 @@ export default class OfflineLibraryService {
       }
     delete record.error
     await this.updateDownload(record)
+    assertOfflineAccount(accountToken)
+
     await this.showDownloadProgressNotification(record, true)
+    assertOfflineAccount(accountToken)
 
     let cursor = 0
     try {
@@ -651,31 +701,46 @@ export default class OfflineLibraryService {
         while (cursor < pages.length) {
           if (controller.signal.aborted) throw new DOMException('Download cancelled', 'AbortError')
           const page = pages[cursor++]
-          const request = new Request(this.downloadPageUrl(bookId, page), {credentials: 'include', signal: controller.signal})
+          const request = new Request(this.downloadPageUrl(bookId, page), {credentials: 'include', signal: controller.signal, headers: {'X-Komga-Download': 'network'}})
           const response = await fetch(request)
+          assertOfflineAccount(accountToken)
           if (!response.ok) throw new Error(`Could not download page ${page.number} (${response.status})`)
 
           const sizeHeader = Number(response.headers.get('content-length') || 0)
           const sizePromise = sizeHeader > 0 ? Promise.resolve(sizeHeader) : response.clone().blob().then(blob => blob.size)
           await stagingCache.put(request, response)
+          assertOfflineAccount(accountToken)
+
           record.bytes += await sizePromise
+          assertOfflineAccount(accountToken)
+
           record.completedPages += 1
           await this.persistDownloadProgress(record)
+          assertOfflineAccount(accountToken)
+
           await this.showDownloadProgressNotification(record)
+          assertOfflineAccount(accountToken)
+
         }
       })
       await Promise.all(workers)
+      assertOfflineAccount(accountToken)
 
       try {
         const thumbnailRequest = new Request(bookThumbnailUrl(bookId), {credentials: 'include'})
         const thumbnail = await fetch(thumbnailRequest)
+        assertOfflineAccount(accountToken)
+
         if (thumbnail.ok) await stagingCache.put(thumbnailRequest, thumbnail)
+        assertOfflineAccount(accountToken)
+
       } catch (_) {
         // Poster failure does not invalidate a complete set of readable pages.
       }
 
       // Atomic commit: only now does this revision become the one the service
       // worker serves. Until this point the old cacheName remained active.
+      record.pages = clone(pages)
       record.book = clone(book)
       record.status = 'downloaded'
       record.cacheName = stagingCacheName
@@ -693,12 +758,22 @@ export default class OfflineLibraryService {
         this.cacheSeriesItem(series),
         this.cachePages(bookId, pages),
       ])
+      assertOfflineAccount(accountToken)
+
       await this.updateDownload(record)
+      assertOfflineAccount(accountToken)
 
       if (oldCacheName && oldCacheName !== stagingCacheName) await caches.delete(oldCacheName)
+      assertOfflineAccount(accountToken)
+
       await this.showDownloadNotification(record)
+      assertOfflineAccount(accountToken)
+
     } catch (e) {
+      if (!isOfflineAccount(accountToken)) { await caches.delete(stagingCacheName); return }
       await caches.delete(stagingCacheName)
+      assertOfflineAccount(accountToken)
+
       if (this.cancelledJobs.has(bookId) || !this.getDownload(bookId)) {
         this.cancelledJobs.delete(bookId)
       } else if (hadActiveSnapshot && existing) {
@@ -707,25 +782,51 @@ export default class OfflineLibraryService {
         restored.updateAvailable = true
         restored.error = e instanceof Error ? e.message : `${e}`
         await this.updateDownload(restored)
+        assertOfflineAccount(accountToken)
+
       } else if (controller.signal.aborted) {
         record.status = 'paused'
         delete record.cacheName
         delete record.error
         await this.updateDownload(record)
+        assertOfflineAccount(accountToken)
+
       } else {
         record.status = 'error'
         delete record.cacheName
         record.error = e instanceof Error ? e.message : `${e}`
         await this.updateDownload(record)
+        assertOfflineAccount(accountToken)
+
       }
       const failed = this.getDownload(bookId)
       if (failed?.error) await this.showDownloadNotification(failed)
+      assertOfflineAccount(accountToken)
+
       throw e
     }
   }
 
+  resumeDownloads(): void { this.processQueue() }
+
+  async reloadAccountData(): Promise<void> {
+    this.switchingAccount = true
+    try {
+      this.activeJobs.forEach(controller => controller.abort())
+      this.activeJobs.clear()
+      this.state.downloads = []
+      await this.refreshState()
+      const mode = await offlineGet<OfflineSetting<boolean>>(OFFLINE_STORES.settings, 'offlineMode')
+      const prefs = await offlineGet<OfflineSetting<OfflineDownloadPreferences>>(OFFLINE_STORES.settings, 'downloadPreferences')
+      this.state.offlineMode = mode?.value === true
+      this.state.preferences = {...DEFAULT_DOWNLOAD_PREFERENCES, ...prefs?.value}
+      await this.recoverInterruptedDownloads()
+      this.notifyServiceWorker()
+    } finally { this.switchingAccount = false }
+  }
+
   private processQueue(): void {
-    if (this.processingQueue || !this.state.online || this.state.offlineMode) return
+    if (this.switchingAccount || this.processingQueue || !this.state.online || this.state.offlineMode) return
     this.processingQueue = true
     Promise.resolve().then(async () => {
       try {
@@ -735,10 +836,12 @@ export default class OfflineLibraryService {
             .sort((a, b) => `${a.queuedAt || ''}`.localeCompare(`${b.queuedAt || ''}`))[0]
           if (!next) break
           next.status = 'queued'
+          const jobAccount = offlineAccountToken()
           const controller = new AbortController()
           this.activeJobs.set(next.bookId, controller)
           this.performDownload(next.bookId, controller)
             .catch(async e => {
+              if (!isOfflineAccount(jobAccount)) return
               const record = this.getDownload(next.bookId)
               if (record?.status === 'queued' && !this.cancelledJobs.has(next.bookId)) {
                 record.status = record.cacheName ? 'downloaded' : (this.state.online ? 'error' : 'queued')
@@ -748,7 +851,7 @@ export default class OfflineLibraryService {
               }
             })
             .finally(() => {
-              this.activeJobs.delete(next.bookId)
+              if (this.activeJobs.get(next.bookId) === controller) this.activeJobs.delete(next.bookId)
               this.processQueue()
             })
         }
@@ -861,7 +964,6 @@ export default class OfflineLibraryService {
     await this.updateDownload(record)
   }
 
-
   async removeDownload(bookId: string): Promise<void> {
     await this.ready
     const record = this.getDownload(bookId)
@@ -875,7 +977,10 @@ export default class OfflineLibraryService {
   }
 
   async updateReadProgress(bookId: string, progress: ReadProgressUpdateDto): Promise<void> {
+    const accountToken = offlineAccountToken()
+
     await this.ready
+    assertOfflineAccount(accountToken)
     const activeDownload = this.getDownload(bookId)
     const normalizedProgress = clone(progress)
     const pagesCount = activeDownload?.book.media?.pagesCount || activeDownload?.totalPages || 0
@@ -889,17 +994,24 @@ export default class OfflineLibraryService {
       revision: fromOfflineSnapshot ? activeDownload?.manifestRevision : undefined,
     }
     await offlinePut(OFFLINE_STORES.progress, queued)
+    assertOfflineAccount(accountToken)
 
     if (normalizedProgress.completed === true) {
       if (this.openReaderBooks.has(bookId)) this.deferredCompletions.add(bookId)
       else await this.handleCompletedDownload(bookId)
+      assertOfflineAccount(accountToken)
+
     }
 
     if (!this.state.online || this.state.offlineMode) return
     try {
       await this.http.patch(`/api/v1/books/${bookId}/read-progress`, normalizedProgress)
+      assertOfflineAccount(accountToken)
+
       queued.pending = false
       await offlinePut(OFFLINE_STORES.progress, queued)
+      assertOfflineAccount(accountToken)
+
     } catch (_) {
       // Remains queued and is retried after catalog/revision reconciliation.
     }
@@ -941,11 +1053,23 @@ export default class OfflineLibraryService {
   }
 
   async flushProgressQueue(): Promise<void> {
+    const accountToken = offlineAccountToken()
+
     await this.ready
+    assertOfflineAccount(accountToken)
     if (!this.state.online || this.state.offlineMode || this.state.syncingProgress) return
     this.state.syncingProgress = true
     try {
+      const session = await offlineGet<OfflineSetting<any>>(OFFLINE_STORES.settings, 'sessionUser')
+      assertOfflineAccount(accountToken)
+
+      const current = (await this.http.get('/api/v2/users/me')).data
+      assertOfflineAccount(accountToken)
+
+      if (!session?.value || current.id !== session.value.id) return
       const entries = await offlineGetAll<QueuedProgress>(OFFLINE_STORES.progress)
+      assertOfflineAccount(accountToken)
+
       for (const entry of entries.filter(x => x.pending)) {
         try {
           const outgoing = clone(entry.progress)
@@ -953,12 +1077,18 @@ export default class OfflineLibraryService {
           if (outgoing.page && entry.revision && download?.manifestRevision === entry.revision &&
             download.updateAvailable && download.remotePages?.length) {
             const oldPages = await this.getCachedPages(entry.bookId) || []
+            assertOfflineAccount(accountToken)
+
             outgoing.page = remapPage(oldPages, download.remotePages, outgoing.page)
           }
 
           await this.http.patch(`/api/v1/books/${entry.bookId}/read-progress`, outgoing)
+          assertOfflineAccount(accountToken)
+
           entry.pending = false
           await offlinePut(OFFLINE_STORES.progress, entry)
+          assertOfflineAccount(accountToken)
+
         } catch (_) {
           break
         }

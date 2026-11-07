@@ -1,4 +1,5 @@
-export const OFFLINE_DB_NAME = 'komga-offline'
+const deploymentPath = typeof window === 'undefined' ? '/' : (window.resourceBaseUrl || '/')
+export const OFFLINE_DB_NAME = 'komga-offline' + (deploymentPath === '/' ? '' : '-' + encodeURIComponent(deploymentPath))
 export const OFFLINE_DB_VERSION = 1
 
 export const OFFLINE_STORES = {
@@ -10,13 +11,19 @@ export const OFFLINE_STORES = {
   settings: 'settings',
 } as const
 
+const accountChannel = typeof window !== 'undefined' && typeof BroadcastChannel !== 'undefined'
+  ? new BroadcastChannel(OFFLINE_DB_NAME + '-account') : undefined
+if (accountChannel) accountChannel.onmessage = () => window.location.reload()
+
+export function notifyOfflineAccountChanged(): void {
+  accountChannel?.postMessage('changed')
+}
+
 let databasePromise: Promise<IDBDatabase> | null = null
 
-export function openOfflineDatabase(): Promise<IDBDatabase> {
-  if (databasePromise) return databasePromise
-
-  databasePromise = new Promise((resolve, reject) => {
-    const request = indexedDB.open(OFFLINE_DB_NAME, OFFLINE_DB_VERSION)
+function openNamedDatabase(name: string): Promise<IDBDatabase> {
+  return new Promise((resolve, reject) => {
+    const request = indexedDB.open(name, OFFLINE_DB_VERSION)
 
     request.onupgradeneeded = () => {
       const db = request.result
@@ -49,7 +56,66 @@ export function openOfflineDatabase(): Promise<IDBDatabase> {
     request.onblocked = () => reject(new Error('Offline database upgrade was blocked'))
   })
 
+}
+
+let accountGeneration = 0
+export function offlineAccountToken(): number { return accountGeneration }
+export function isOfflineAccount(token: number): boolean { return token === accountGeneration }
+export function assertOfflineAccount(token: number): void {
+  if (!isOfflineAccount(token)) throw new Error('Offline account changed during request')
+}
+let activeDatabaseName = OFFLINE_DB_NAME
+
+export function offlineMediaCachePrefix(): string {
+  return 'komga-offline-book-v2-' + encodeURIComponent(activeDatabaseName) + '-'
+}
+
+export function openOfflineDatabase(): Promise<IDBDatabase> {
+  if (!databasePromise) databasePromise = (async () => {
+    const control = await openNamedDatabase(OFFLINE_DB_NAME)
+    const pointer = await requestResult(control.transaction('settings', 'readonly').objectStore('settings').get('activeDatabase'))
+    activeDatabaseName = pointer?.value || OFFLINE_DB_NAME
+    if (activeDatabaseName === OFFLINE_DB_NAME) return control
+    control.close()
+    return openNamedDatabase(activeDatabaseName)
+  })()
   return databasePromise
+}
+
+/** Select an account without deleting any other account's downloads/progress. */
+export async function selectOfflineUser(userId: string): Promise<boolean> {
+  const current = await openOfflineDatabase()
+  const settings = current.transaction('settings', 'readonly').objectStore('settings')
+  const [owner, session] = await Promise.all([
+    requestResult(settings.get('ownerUser')),
+    requestResult(settings.get('sessionUser')),
+  ])
+  const previousUser = owner?.value || session?.value?.id
+  const control = await openNamedDatabase(OFFLINE_DB_NAME)
+  if (previousUser) {
+    const tx = control.transaction('settings', 'readwrite')
+    tx.objectStore('settings').put({key: 'userDatabase:' + previousUser, value: activeDatabaseName})
+    await transactionDone(tx)
+  }
+  if (!previousUser || previousUser === userId) {
+    control.close()
+    await offlinePut('settings', {key: 'ownerUser', value: userId})
+    return false
+  }
+  accountGeneration += 1
+  const known = await requestResult(control.transaction('settings', 'readonly').objectStore('settings').get('userDatabase:' + userId))
+  const name = known?.value || OFFLINE_DB_NAME + '-user-' + encodeURIComponent(userId)
+  const transaction = control.transaction('settings', 'readwrite')
+  transaction.objectStore('settings').put({key: 'activeDatabase', value: name})
+  await transactionDone(transaction)
+  control.close()
+  current.close()
+  databasePromise = null
+  await openOfflineDatabase()
+  await offlinePut('settings', {key: 'ownerUser', value: userId})
+  navigator.serviceWorker?.controller?.postMessage({type: 'KOMGA_SESSION_CHANGED'})
+  notifyOfflineAccountChanged()
+  return true
 }
 
 function requestResult<T>(request: IDBRequest<T>): Promise<T> {

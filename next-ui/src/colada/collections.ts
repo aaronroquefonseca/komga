@@ -1,3 +1,4 @@
+import { getCollectionsBySeriesOfflineFirst } from '@/offline'
 import {
   defineInfiniteQueryOptions,
   defineMutation,
@@ -19,7 +20,6 @@ import {
   komgaAddUserUploadedCollectionThumbnail,
   komgaDeleteUserUploadedCollectionThumbnail,
   komgaMarkCollectionThumbnailSelected,
-  komgaGetCollectionsBySeriesId,
 } from '@/generated/openapi'
 import { useImageCacheStore } from '@/stores/image-cache'
 import { STALE_TIME } from '@/types/time'
@@ -95,12 +95,7 @@ export const collectionDetailQuery = defineQueryOptions(
 
 export const seriesCollectionsQuery = defineQueryOptions(({ seriesId }: { seriesId: string }) => ({
   key: QUERY_KEYS_COLLECTIONS.bySeriesId(seriesId),
-  query: () =>
-    komgaGetCollectionsBySeriesId({
-      path: {
-        seriesId: seriesId,
-      },
-    }),
+  query: () => getCollectionsBySeriesOfflineFirst(seriesId),
   staleTime: STALE_TIME.LONG,
 }))
 

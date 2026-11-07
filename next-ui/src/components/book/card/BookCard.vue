@@ -5,6 +5,7 @@
     :lines="titleAndLines.lines"
     :poster-url="bookPosterUrl(book.id, cacheStore.getVersion(book.id))"
     :top-right-icon="isRead ? 'i-mdi:check' : undefined"
+    :download-status="downloadStatus"
     :progress-percent="progressPercent"
     :fab-icon="canRead ? 'i-mdi:play' : undefined"
     :quick-action-icon="quickActionIcon"
@@ -38,6 +39,7 @@ import { useBook } from '@/composables/book/useBook'
 import { bookReaderUrl } from '@/api/links'
 import type { BookDto } from '@/generated/openapi'
 import { useImageCacheStore } from '@/stores/image-cache'
+import { useOfflineLibraryStore } from '@/offline'
 import { BrowsingContextKey, formatBrowsingContextAsQueryParam } from '@/functions/browsing-context'
 import type { RouteLocationObject } from '@/types/route'
 import type { SortKeysBook } from '@/types/sort'
@@ -46,6 +48,15 @@ import { getFileSize } from '@/functions/filesize'
 
 const intl = useIntl()
 const cacheStore = useImageCacheStore()
+const offline = useOfflineLibraryStore()
+void offline.whenReady()
+
+const downloadStatus = computed(() => {
+  const record = offline.getDownload(book.value.id)
+  if (!record) return undefined
+  if (!offline.isDownloaded(book.value.id)) return undefined
+  return record.updateAvailable ? 'update-available' : 'downloaded'
+})
 
 const id = useId()
 
@@ -210,6 +221,7 @@ const menuActivator = ref()
 function openReader() {
   // Same-tab: '_blank' escapes an installed PWA into the system browser
   // (URL banner, no fullscreen). The classic reader is same-origin/in-scope.
+  offline.readerOpened(book.value.id)
   window.open(bookReaderUrl(book.value.id, isEpubReader.value), '_self')
 }
 </script>

@@ -41,6 +41,10 @@ const {
 const main = [
   ActionName.OpenReader,
   ActionName.OpenReaderIncognito,
+  ActionName.SaveOffline,
+  ActionName.RetryDownload,
+  ActionName.RemoveDownload,
+  ActionName.ManageDownloads,
   ActionName.MarkRead,
   ActionName.MarkUnread,
   ActionName.AddToCollection,

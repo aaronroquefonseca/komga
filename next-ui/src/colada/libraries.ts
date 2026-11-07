@@ -1,10 +1,10 @@
+import { getLibrariesOfflineFirst } from '@/offline'
 import { defineMutation, defineQueryOptions, useMutation, useQuery } from '@pinia/colada'
 import { clearAllLibraries } from '@/colada/cache'
 import { useAppStore } from '@/stores/app'
 import {
   komgaAddLibrary,
   komgaDeleteLibraryById,
-  komgaGetLibraries,
   komgaLibraryAnalyze,
   komgaLibraryEmptyTrash,
   komgaLibraryRefreshMetadata,
@@ -21,7 +21,7 @@ export const QUERY_KEYS_LIBRARIES = {
 
 export const librariesQuery = defineQueryOptions({
   key: QUERY_KEYS_LIBRARIES.root,
-  query: () => komgaGetLibraries(),
+  query: () => getLibrariesOfflineFirst(),
   staleTime: STALE_TIME.LONG,
   gcTime: false,
 })

@@ -5,9 +5,10 @@
   "version": "0.0.0",
   "scripts": {
     "dev": "vite",
-    "build": "vite build --mode prod",
+    "build": "vite build --mode prod && npm run generate-shell-manifest --silent",
     "build:mode-dev": "vite build --mode development",
     "build:with-i18n": "run-s i18n:compile \"build {@}\" --",
+    "generate-shell-manifest": "tsx scripts/generate-shell-manifest.ts",
     "preview": "vite preview",
     "test": "vitest run",
     "test:coverage": "vitest run --coverage",
@@ -29,7 +30,8 @@
     "storybook:dev": "storybook dev -p 6006",
     "storybook:build": "storybook build",
     "chromatic": "chromatic",
-    "chromatic:force-rebuild": "chromatic --force-rebuild"
+    "chromatic:force-rebuild": "chromatic --force-rebuild",
+    "test:offline": "node --test tests/offline-production.mjs"
   },
   "dependencies": {
     "@formatjs/intl-localematcher": "^0.9.0",

@@ -1,3 +1,4 @@
+import { offlineAccountToken, assertOfflineAccount } from '@/services/offline-db'
 import _Vue from 'vue'
 import {BookDto, PageDto, ReadProgressUpdateDto} from '@/types/komga-books'
 import {BookSearch, SearchConditionSeriesId, SearchOperatorIs, SeriesSearch} from '@/types/komga-search'
@@ -6,7 +7,7 @@ import {UserDto} from '@/types/komga-users'
 import {LibraryDto} from '@/types/komga-libraries'
 import {NameValue} from '@/types/filter'
 import {handleDates} from '@/plugins/http.plugin'
-import {OFFLINE_STORES, offlineDelete, offlineGet, offlinePut} from '@/services/offline-db'
+import {OFFLINE_STORES, offlineDelete, offlineGet, offlinePut, selectOfflineUser} from '@/services/offline-db'
 
 export const OFFLINE_SESSION_KEY = 'sessionUser'
 export const OFFLINE_LIBRARIES_KEY = 'libraries'
@@ -157,6 +158,8 @@ export default {
       const originalLogout = users.logout.bind(users)
 
       users.getMe = async (): Promise<UserDto> => {
+        const accountToken = offlineAccountToken()
+
         if (localOnly()) {
           const cached = await getOfflineSessionUser()
           if (cached) return cached
@@ -164,9 +167,17 @@ export default {
         }
         try {
           const user = await originalGetMe()
+          assertOfflineAccount(accountToken)
+
+          if (await selectOfflineUser(user.id)) await offline.reloadAccountData()
           await offlinePut(OFFLINE_STORES.settings, {key: OFFLINE_SESSION_KEY, value: user} as CachedSetting<UserDto>)
           return user
         } catch (e) {
+          assertOfflineAccount(accountToken)
+          if ([401, 403].includes((e as any)?.response?.status)) {
+            await offlineDelete(OFFLINE_STORES.settings, OFFLINE_SESSION_KEY)
+            throw e
+          }
           const cached = await getOfflineSessionUser()
           if (cached) return cached
           throw e
@@ -174,8 +185,13 @@ export default {
       }
 
       users.getMeWithAuth = async (login: string, password: string, rememberMe: boolean): Promise<UserDto> => {
+        const accountToken = offlineAccountToken()
+
         const user = await originalGetMeWithAuth(login, password, rememberMe)
-        await offlinePut(OFFLINE_STORES.settings, {key: OFFLINE_SESSION_KEY, value: user} as CachedSetting<UserDto>)
+        assertOfflineAccount(accountToken)
+
+        if (await selectOfflineUser(user.id)) await offline.reloadAccountData()
+          await offlinePut(OFFLINE_STORES.settings, {key: OFFLINE_SESSION_KEY, value: user} as CachedSetting<UserDto>)
         return user
       }
 
@@ -194,9 +210,13 @@ export default {
       const originalGetLibrary = libraries.getLibrary.bind(libraries)
 
       libraries.getLibraries = async (): Promise<LibraryDto[]> => {
+        const accountToken = offlineAccountToken()
+
         if (localOnly()) return getOfflineLibraries()
         try {
           const items = await originalGetLibraries()
+          assertOfflineAccount(accountToken)
+
           await offlinePut(OFFLINE_STORES.settings, {key: OFFLINE_LIBRARIES_KEY, value: items} as CachedSetting<LibraryDto[]>)
           return items
         } catch (e) {
@@ -220,10 +240,17 @@ export default {
           throw e
         }
       }
+
     }
 
     const originalGetBook = books.getBook.bind(books)
     books.getBook = async (bookId: string): Promise<BookDto> => {
+      const accountToken = offlineAccountToken()
+
+        if (offline.getDownload(bookId)?.cacheName) {
+          const snapshot = await offline.getCachedBook(bookId)
+          if (snapshot) return snapshot
+        }
       if (localOnly()) {
         const cached = await offline.getCachedBook(bookId)
         if (cached) return rehydrate(cached)
@@ -231,6 +258,8 @@ export default {
       }
       try {
         const book = await originalGetBook(bookId)
+        assertOfflineAccount(accountToken)
+
         await offline.cacheBook(book)
         return book
       } catch (e) {
@@ -242,6 +271,12 @@ export default {
 
     const originalGetBookPages = books.getBookPages.bind(books)
     books.getBookPages = async (bookId: string): Promise<PageDto[]> => {
+      const accountToken = offlineAccountToken()
+
+        if (offline.getDownload(bookId)?.cacheName) {
+          const snapshot = await offline.getCachedPages(bookId)
+          if (snapshot) return snapshot
+        }
       if (localOnly()) {
         const cached = await offline.getCachedPages(bookId)
         if (cached) return rehydrate(cached)
@@ -249,6 +284,8 @@ export default {
       }
       try {
         const pages = await originalGetBookPages(bookId)
+        assertOfflineAccount(accountToken)
+
         await offline.cachePages(bookId, pages)
         return pages
       } catch (e) {
@@ -260,9 +297,13 @@ export default {
 
     const originalGetBooksList = books.getBooksList.bind(books)
     books.getBooksList = async (search: BookSearch, pageRequest?: PageRequest): Promise<Page<BookDto>> => {
+      const accountToken = offlineAccountToken()
+
       if (localOnly()) return rehydrate(await offline.getCachedBooksPage(search, pageRequest))
       try {
         const page = await originalGetBooksList(search, pageRequest)
+        assertOfflineAccount(accountToken)
+
         await offline.cacheBooks(page.content || [])
         return page
       } catch (e) {
@@ -274,9 +315,13 @@ export default {
 
     const originalGetBooksOnDeck = books.getBooksOnDeck.bind(books)
     books.getBooksOnDeck = async (libraryIds?: string[], pageRequest?: PageRequest): Promise<Page<BookDto>> => {
+      const accountToken = offlineAccountToken()
+
       if (localOnly()) return rehydrate(await offline.getCachedOnDeck(libraryIds, pageRequest))
       try {
         const page = await originalGetBooksOnDeck(libraryIds, pageRequest)
+        assertOfflineAccount(accountToken)
+
         await offline.cacheBooks(page.content || [])
         return page
       } catch (e) {
@@ -329,6 +374,8 @@ export default {
 
     const originalGetOneSeries = series.getOneSeries.bind(series)
     series.getOneSeries = async (seriesId: string): Promise<SeriesDto> => {
+      const accountToken = offlineAccountToken()
+
       if (localOnly()) {
         const cached = await offline.getCachedSeries(seriesId)
         if (cached) return rehydrate(cached)
@@ -336,6 +383,8 @@ export default {
       }
       try {
         const item = await originalGetOneSeries(seriesId)
+        assertOfflineAccount(accountToken)
+
         await offline.cacheSeriesItem(item)
         return item
       } catch (e) {
@@ -347,9 +396,13 @@ export default {
 
     const originalGetSeriesList = series.getSeriesList.bind(series)
     series.getSeriesList = async (search: SeriesSearch, pageRequest?: PageRequest): Promise<Page<SeriesDto>> => {
+      const accountToken = offlineAccountToken()
+
       if (localOnly()) return localSeriesPage(search, pageRequest)
       try {
         const page = await originalGetSeriesList(search, pageRequest)
+        assertOfflineAccount(accountToken)
+
         await offline.cacheSeries(page.content || [])
         return page
       } catch (e) {
@@ -479,6 +532,7 @@ export default {
           throw e
         }
       }
+
     }
   },
 }

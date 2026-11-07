@@ -6,6 +6,7 @@ import {parseISO} from 'date-fns'
 export default {
   install(Vue: typeof _Vue) {
     const client = axios.create({
+      timeout: 8000,
       baseURL: urls.origin,
       withCredentials: true,
       headers: {'X-Requested-With': 'XMLHttpRequest'},

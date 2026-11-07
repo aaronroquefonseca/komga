@@ -94,6 +94,13 @@ declare module 'vue-router/auto-routes' {
       { id: ParamValue<false> },
       | never
     >,
+    '/downloads': RouteRecordInfo<
+      '/downloads',
+      '/downloads',
+      Record<never, never>,
+      Record<never, never>,
+      | never
+    >,
     '/error': RouteRecordInfo<
       '/error',
       '/error',
@@ -221,6 +228,13 @@ declare module 'vue-router/auto-routes' {
     '/media/missing-posters': RouteRecordInfo<
       '/media/missing-posters',
       '/media/missing-posters',
+      Record<never, never>,
+      Record<never, never>,
+      | never
+    >,
+    '/offline': RouteRecordInfo<
+      '/offline',
+      '/offline',
       Record<never, never>,
       Record<never, never>,
       | never
@@ -373,6 +387,14 @@ declare module 'vue-router/auto-routes' {
       pathParamNames:
         | 'id'
     }
+    'src/pages/downloads.vue': {
+      routes:
+        | '/downloads'
+      views:
+        | never
+      pathParamNames:
+        | never
+    }
     'src/pages/error.vue': {
       routes:
         | '/error'
@@ -519,6 +541,14 @@ declare module 'vue-router/auto-routes' {
     'src/pages/media/missing-posters.vue': {
       routes:
         | '/media/missing-posters'
+      views:
+        | never
+      pathParamNames:
+        | never
+    }
+    'src/pages/offline.vue': {
+      routes:
+        | '/offline'
       views:
         | never
       pathParamNames:

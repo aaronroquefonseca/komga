@@ -29,6 +29,10 @@ export const ActionName = {
   Analyze: 'ANALYZE',
   OpenReader: 'OPEN_READER',
   OpenReaderIncognito: 'OPEN_READER_INCOGNITO',
+  SaveOffline: 'SAVE_OFFLINE',
+  RemoveDownload: 'REMOVE_DOWNLOAD',
+  RetryDownload: 'RETRY_DOWNLOAD',
+  ManageDownloads: 'MANAGE_DOWNLOADS',
 } as const
 
 export type ActionName = (typeof ActionName)[keyof typeof ActionName]
@@ -168,5 +172,37 @@ export const actionDetails: Record<ActionName, { message: MessageDescriptor; ico
       id: 'DLUIbm',
     },
     icon: 'i-mdi:incognito',
+  },
+  [ActionName.SaveOffline]: {
+    message: {
+      description: 'Book menu: save offline',
+      defaultMessage: 'Save offline',
+      id: 'Eu1/cF',
+    },
+    icon: 'i-mdi:download-box-outline',
+  },
+  [ActionName.RemoveDownload]: {
+    message: {
+      description: 'Book menu: remove download',
+      defaultMessage: 'Remove download',
+      id: 'VhUqq6',
+    },
+    icon: 'i-mdi:download-box',
+  },
+  [ActionName.RetryDownload]: {
+    message: {
+      description: 'Book menu: retry download',
+      defaultMessage: 'Retry download',
+      id: 'kHPRKT',
+    },
+    icon: 'i-mdi:refresh',
+  },
+  [ActionName.ManageDownloads]: {
+    message: {
+      description: 'Book menu: manage downloads',
+      defaultMessage: 'Manage downloads',
+      id: 'qTeILp',
+    },
+    icon: 'i-mdi:download-multiple',
   },
 }

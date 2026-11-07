@@ -38,13 +38,58 @@
             /*]]>*/
         </script>
         <script>
+            // Register before the application bundles execute. This is intentionally
+            // independent from Vue bootstrap so an installed PWA can acquire an
+            // active worker even if a later API/bootstrap request fails.
+            ;(function () {
+                if (!('serviceWorker' in navigator)) return
+                var base = window.resourceBaseUrl || '/'
+                if (base.charAt(base.length - 1) !== '/') base += '/'
+                var workerUrl = new URL('service-worker.js', window.location.origin + base).href
+                window.__komgaServiceWorkerRegistration = navigator.serviceWorker
+                    .register(workerUrl, { scope: base })
+                    .then(function (registration) {
+                        // Explicitly check for updated worker code whenever Komga is
+                        // opened online; installed PWAs otherwise may retain an old
+                        // worker longer than expected.
+                        registration.update().catch(function () {})
+                        return registration
+                    })
+                    .catch(function () {
+                        return undefined
+                    })
+            })()
+        </script>
+        <script>
             window.buildUrl = (filename) => {
                 return `${window.resourceBaseUrl}${filename}`
             }
         </script>
     </head>
     <body>
-        <div id="app"></div>
+        <div id="app">
+            <div
+                style="
+                    font: 16px system-ui;
+                    max-width: 32rem;
+                    margin: 20vh auto;
+                    padding: 24px;
+                    line-height: 1.6;
+                "
+            >
+                <h1>Opening Komga…</h1>
+                <p>
+                    If the app cannot open, reconnect to finish offline setup, then try again. Your
+                    downloaded books remain on this device.
+                </p>
+                <button
+                    onclick="location.reload()"
+                    style="padding: 12px 24px"
+                >
+                    Retry
+                </button>
+            </div>
+        </div>
         <script
             type="module"
             src="/src/main.ts"
