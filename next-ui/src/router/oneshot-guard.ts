@@ -1,3 +1,4 @@
+import { refreshWithTimeout } from '@/router/refresh-with-timeout'
 import type { Router } from 'vue-router'
 import { useQueryCache } from '@pinia/colada'
 import { logger } from '@/services/logtape'
@@ -16,7 +17,7 @@ export function useOneshotGuard(router: Router) {
       const queryCache = useQueryCache()
       const cacheEntry = queryCache.ensure(seriesDetailQuery({ seriesId: to.params.id }))
       try {
-        const state = await queryCache.refresh(cacheEntry)
+        const state = await refreshWithTimeout(queryCache.refresh(cacheEntry))
         const series = state.data
 
         if (series?.oneshot) {
@@ -33,7 +34,8 @@ export function useOneshotGuard(router: Router) {
           }
         }
       } catch (ignored) {
-        return { name: '/error' }
+        // The detail view supplies an unavailable state when metadata is missing.
+        return
       }
     }
   })

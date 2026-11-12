@@ -2,10 +2,11 @@
   <ItemCard
     :id="id"
     :title="title"
-    :lines="[footer]"
+    :lines="lines"
     :poster-url="seriesPosterUrl(series.id, cacheStore.getVersion(series.id))"
     :top-right="unreadCount"
     :top-right-icon="isRead ? 'i-mdi:check' : undefined"
+    :download-status="downloadStatus"
     :fab-icon="canRead ? 'i-mdi:play' : undefined"
     :quick-action-icon="quickActionIcon"
     :quick-action-props="quickActionProps"
@@ -37,6 +38,7 @@ import { useBooks } from '@/composables/book/useBooks'
 import { useSeries } from '@/composables/series/useSeries'
 import type { SeriesDto } from '@/generated/openapi'
 import { useImageCacheStore } from '@/stores/image-cache'
+import { useOfflineLibraryStore } from '@/offline'
 import { BrowsingContextKey, formatBrowsingContextAsQueryParam } from '@/functions/browsing-context'
 import type { RouteLocationObject } from '@/types/route'
 import type { SortKeysSeries } from '@/types/sort'
@@ -44,6 +46,21 @@ import { commonMessages } from '@/utils/i18n/common-messages'
 
 const intl = useIntl()
 const cacheStore = useImageCacheStore()
+const offline = useOfflineLibraryStore()
+void offline.whenReady()
+
+const lines = computed<ItemCardLine[]>(() => [footer.value])
+
+const downloadStatus = computed(() => {
+  const records = offline.downloads.filter((record) => record.book.seriesId === series.value.id)
+  if (records.length === 0) return undefined
+  const downloaded = records.filter((record) => offline.isDownloaded(record.bookId)).length
+  if (downloaded === 0) return undefined
+  const needsUpdate = records.some(
+    (record) => record.updateAvailable === true && !record.sourceMissing,
+  )
+  return needsUpdate ? 'update-available' : 'downloaded'
+})
 
 const id = useId()
 

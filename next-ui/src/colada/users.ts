@@ -26,6 +26,7 @@ import {
   type UserCreationDto,
   type UserDto,
 } from '@/generated/openapi'
+import { cacheSessionUser, clearCachedSessionUser, getSessionUserOfflineFirst } from '@/offline'
 import { MINUTE, STALE_TIME } from '@/types/time'
 
 export const QUERY_KEYS_USERS = {
@@ -44,7 +45,7 @@ export const useUsers = defineQuery(() =>
 
 export const currentUserQuery = defineQueryOptions({
   key: QUERY_KEYS_USERS.currentUser(),
-  query: () => komgaGetCurrentUser(),
+  query: () => getSessionUserOfflineFirst(),
   staleTime: 10 * MINUTE,
   gcTime: false,
   autoRefetch: true,
@@ -91,7 +92,10 @@ export const useLogin = defineMutation(() => {
           'remember-me': rememberMe,
         },
       }),
-    onSuccess: (data) => {
+    onSuccess: async (data) => {
+      const previous = queryCache.getQueryData<UserDto>(QUERY_KEYS_USERS.currentUser())
+      if (previous && previous.id !== data.id) clearAll()
+      await cacheSessionUser(data).catch(() => undefined)
       queryCache.setQueryData(QUERY_KEYS_USERS.currentUser(), data)
       queryCache.cancelQueries({ key: QUERY_KEYS_USERS.currentUser() })
 
@@ -103,7 +107,8 @@ export const useLogin = defineMutation(() => {
 export const useLogout = defineMutation(() =>
   useMutation({
     mutation: () => komgaPostLogout1(),
-    onSuccess: () => {
+    onSuccess: async () => {
+      await clearCachedSessionUser()
       userLoggedOut()
     },
   }),

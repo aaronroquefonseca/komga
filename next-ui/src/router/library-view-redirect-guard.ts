@@ -1,3 +1,5 @@
+import { refreshWithTimeout } from '@/router/refresh-with-timeout'
+import { useOfflineLibraryStore } from '@/offline'
 import type { Router, NavigationGuardReturn } from 'vue-router'
 import { useQueryCache } from '@pinia/colada'
 import { librariesQuery } from '@/colada/libraries'
@@ -19,10 +21,24 @@ export function useLibraryViewRedirectGuard(router: Router) {
     if (!viewId) return
 
     const queryCache = useQueryCache()
-    const [stateLibraries, stateUserSettings] = await Promise.all([
-      queryCache.refresh(queryCache.ensure(librariesQuery)),
-      queryCache.refresh(queryCache.ensure(clientSettingsUserQuery)),
-    ])
+    const offline = useOfflineLibraryStore()
+    if (offline.offlineMode || !offline.online) {
+      if (to.name === '/libraries/[viewId]')
+        return { name: '/libraries/[viewId]/overview', params: { viewId } }
+      return
+    }
+    const states = await refreshWithTimeout(
+      Promise.all([
+        queryCache.refresh(queryCache.ensure(librariesQuery)),
+        queryCache.refresh(queryCache.ensure(clientSettingsUserQuery)),
+      ]),
+    ).catch(() => undefined)
+    if (!states) {
+      if (to.name === '/libraries/[viewId]')
+        return { name: '/libraries/[viewId]/overview', params: { viewId } }
+      return
+    }
+    const [stateLibraries, stateUserSettings] = states
 
     const userSettings = parseUserSettings(stateUserSettings.data)
     const { noLibraries, anyPinned, anyUnpinned } = getUserLibrariesState(

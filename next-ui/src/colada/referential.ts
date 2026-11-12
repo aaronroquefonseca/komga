@@ -1,18 +1,20 @@
+import {
+  queryGenresOfflineFirst as komgaGetGenres,
+  queryTagsOfflineFirst as komgaGetTags,
+  queryPublishersOfflineFirst as komgaGetPublishers,
+  querySharingLabelsOfflineFirst as komgaGetSharingLabels,
+  queryLanguagesOfflineFirst as komgaGetLanguages,
+  querySeriesReleaseYearsOfflineFirst as komgaGetSeriesReleaseYears,
+  queryAgeRatingsOfflineFirst as komgaGetAgeRatings,
+} from '@/offline/offline-facets'
 import { defineInfiniteQueryOptions, defineQueryOptions } from '@pinia/colada'
 import { PageRequest } from '@/types/PageRequest'
 import {
-  komgaGetAgeRatings,
   komgaGetAuthors,
   komgaGetAuthorsNames,
   komgaGetAuthorsRoles,
-  komgaGetGenres,
-  komgaGetLanguages,
   komgaGetNotableEntitiesKinds,
   komgaGetNotableEntitiesNames,
-  komgaGetPublishers,
-  komgaGetSeriesReleaseYears,
-  komgaGetSharingLabels,
-  komgaGetTags,
 } from '@/generated/openapi'
 
 export const authorsQuery = defineQueryOptions(

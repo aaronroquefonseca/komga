@@ -1,4 +1,5 @@
 <template>
+  <OfflineNotice />
   <v-form
     ref="form"
     :disabled="isLoading"

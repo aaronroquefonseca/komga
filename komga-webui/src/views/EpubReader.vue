@@ -451,6 +451,7 @@ export default Vue.extend({
   },
   destroyed() {
     this.$vuetify.rtl = (this.$t('common.locale_rtl') === 'true')
+    this.disarmFullscreenGesture()
     if (screenfull.isEnabled) {
       screenfull.off('change', this.fullscreenChanged)
       screenfull.exit()
@@ -616,7 +617,10 @@ export default Vue.extend({
         this.settings.alwaysFullscreen = alwaysFullscreen
         this.$store.commit('setWebreaderAlwaysFullscreen', alwaysFullscreen)
         if (alwaysFullscreen) this.enterFullscreen()
-        else screenfull.isEnabled && screenfull.exit()
+        else {
+          this.disarmFullscreenGesture()
+          if (screenfull.isEnabled) screenfull.exit()
+        }
       },
     },
     navigationMode: {
@@ -646,11 +650,17 @@ export default Vue.extend({
     previousBook() {
       if (!this.$_.isEmpty(this.siblingPrevious)) {
         this.jumpToPreviousBook = false
-        this.$router.push({
+        const route = {
           name: getBookReadRouteFromMedia(this.siblingPrevious.media),
           params: {bookId: this.siblingPrevious.id.toString()},
           query: {context: this.context.origin, contextId: this.context.id, incognito: this.incognito.toString(), ...(this.source ? {source: this.source} : {})},
-        })
+        }
+        // nextui: replace so closeBook's history.go(-1) lands back in the new UI, not the previous book
+        if (this.source === 'nextui') {
+          this.$router.replace(route)
+        } else {
+          this.$router.push(route)
+        }
       }
     },
     nextBook() {
@@ -658,22 +668,71 @@ export default Vue.extend({
         this.closeBook()
       } else {
         this.jumpToNextBook = false
-        this.$router.push({
+        const route = {
           name: getBookReadRouteFromMedia(this.siblingNext.media),
           params: {bookId: this.siblingNext.id.toString()},
           query: {context: this.context.origin, contextId: this.context.id, incognito: this.incognito.toString(), ...(this.source ? {source: this.source} : {})},
-        })
+        }
+        // nextui: replace so closeBook's history.go(-1) lands back in the new UI, not the previous book
+        if (this.source === 'nextui') {
+          this.$router.replace(route)
+        } else {
+          this.$router.push(route)
+        }
       }
     },
     enterFullscreen() {
-      if (screenfull.isEnabled) screenfull.request(document.documentElement, {navigationUI: 'hide'})
+      if (!screenfull.isEnabled || screenfull.isFullscreen) return
+      // Browsers reject fullscreen without a user gesture (e.g. on-load after
+      // a full page navigation from next-ui). Fall back to the next tap/key.
+      try {
+        const result = screenfull.request(document.documentElement, {navigationUI: 'hide'}) as unknown as Promise<void> | undefined
+        if (result && typeof result.catch === 'function') {
+          result.catch(() => this.armFullscreenGesture())
+        } else {
+          setTimeout(() => {
+            if (screenfull.isEnabled && !screenfull.isFullscreen && this.alwaysFullscreen) this.armFullscreenGesture()
+          }, 0)
+        }
+      } catch {
+        this.armFullscreenGesture()
+      }
+    },
+    armFullscreenGesture() {
+      if ((this as any).fullscreenGestureHandler) return
+      const handler = () => {
+        if (this.alwaysFullscreen && screenfull.isEnabled && !screenfull.isFullscreen) {
+          try {
+            const result = screenfull.request(document.documentElement, {navigationUI: 'hide'}) as unknown as Promise<void> | undefined
+            if (result && typeof result.catch === 'function') result.catch(() => undefined)
+          } catch {
+            // stay armed for the next gesture
+          }
+        }
+      }
+      ;(this as any).fullscreenGestureHandler = handler
+      window.addEventListener('pointerdown', handler)
+      window.addEventListener('keydown', handler)
+    },
+    disarmFullscreenGesture() {
+      const handler = (this as any).fullscreenGestureHandler
+      if (handler) {
+        window.removeEventListener('pointerdown', handler)
+        window.removeEventListener('keydown', handler)
+        ;(this as any).fullscreenGestureHandler = null
+      }
     },
     switchFullscreen() {
       if (screenfull.isEnabled) screenfull.isFullscreen ? screenfull.exit() : this.enterFullscreen()
     },
     fullscreenChanged() {
-      if (screenfull.isEnabled && screenfull.isFullscreen) this.fullscreenIcon = 'mdi-fullscreen-exit'
-      else this.fullscreenIcon = 'mdi-fullscreen'
+      if (screenfull.isEnabled && screenfull.isFullscreen) {
+        this.fullscreenIcon = 'mdi-fullscreen-exit'
+        this.disarmFullscreenGesture()
+      } else {
+        this.fullscreenIcon = 'mdi-fullscreen'
+        if (this.alwaysFullscreen) this.armFullscreenGesture()
+      }
     },
     toggleToolbars() {
       this.showToolbars = !this.showToolbars

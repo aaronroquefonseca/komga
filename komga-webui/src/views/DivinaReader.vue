@@ -1,7 +1,13 @@
 <template>
   <v-container class="ma-0 pa-0 full-height" fluid v-if="pages.length > 0"
                :style="`width: 100%; background-color: ${backgroundColor}`"
+               @error.capture="handlePageError"
   >
+    <v-alert v-if="unavailablePage" type="warning" style="position:fixed;top:16px;left:16px;right:16px;z-index:100">
+      Page {{ unavailablePage }} is unavailable. Reconnect or download this book again to restore missing pages.
+      <v-btn text @click="retryUnavailablePage">Retry page</v-btn>
+      <v-btn text :href="source === 'nextui' ? `${resourceBase}next/downloads` : `${resourceBase}classic/downloads`">Open Downloads</v-btn>
+    </v-alert>
     <div>
       <v-slide-y-transition>
         <!-- Top Toolbar-->
@@ -405,6 +411,8 @@ export default Vue.extend({
       series: {} as SeriesDto,
       context: {} as Context,
       contextName: '',
+      unavailablePage: null as number | null,
+      resourceBase: window.resourceBaseUrl || '/',
       incognito: false,
       // set when the reader was opened from the new UI: closing goes back there
       source: '',
@@ -501,6 +509,7 @@ export default Vue.extend({
     if (screenfull.isEnabled) screenfull.on('change', this.fullscreenChanged)
   },
   async mounted() {
+    document.addEventListener('error', this.handlePageError, true)
     this.$offline.readerOpened(this.bookId)
     document.documentElement.classList.add('html-reader')
 
@@ -531,11 +540,13 @@ export default Vue.extend({
     this.setup(this.bookId, Number(this.$route.query.page), this.$route.query.position as string | undefined)
   },
   destroyed() {
+    document.removeEventListener('error', this.handlePageError, true)
     this.$offline.readerClosed(this.bookId)
     document.documentElement.classList.remove('html-reader')
 
     this.$vuetify.rtl = (this.$t('common.locale_rtl') === 'true')
     window.removeEventListener('keydown', this.keyPressed)
+    this.disarmFullscreenGesture()
     if (screenfull.isEnabled) {
       screenfull.off('change', this.fullscreenChanged)
       screenfull.exit()
@@ -752,26 +763,96 @@ export default Vue.extend({
         this.settings.alwaysFullscreen = alwaysFullscreen
         this.$store.commit('setWebreaderAlwaysFullscreen', alwaysFullscreen)
         if (alwaysFullscreen) this.enterFullscreen()
-        else screenfull.isEnabled && screenfull.exit()
+        else {
+          this.disarmFullscreenGesture()
+          if (screenfull.isEnabled) screenfull.exit()
+        }
       },
     },
   },
   methods: {
+    handlePageError(event: Event) {
+      const image = event.target as HTMLImageElement
+      const match = image?.src?.match(/\/api\/v1\/books\/[^/]+\/pages\/(\d+)/)
+      if (match) this.unavailablePage = Number(match[1])
+    },
+    retryUnavailablePage() {
+      const page = this.unavailablePage
+      this.unavailablePage = null
+      this.$el.querySelectorAll('img').forEach(image => {
+        if (image.src.includes(`/pages/${page}`) && !image.naturalWidth) {
+          const url = image.src
+          image.removeAttribute('src')
+          image.src = url
+        }
+      })
+    },
     enterFullscreen() {
-      if (screenfull.isEnabled) screenfull.request(document.documentElement, {navigationUI: 'hide'})
+      if (!screenfull.isEnabled || screenfull.isFullscreen) return
+      // Browsers reject fullscreen without a user gesture (e.g. on-load after
+      // a full page navigation from next-ui). Fall back to the next tap/key.
+      try {
+        const result = screenfull.request(document.documentElement, {navigationUI: 'hide'}) as unknown as Promise<void> | undefined
+        if (result && typeof result.catch === 'function') {
+          result.catch(() => this.armFullscreenGesture())
+        } else {
+          setTimeout(() => {
+            if (screenfull.isEnabled && !screenfull.isFullscreen && this.alwaysFullscreen) this.armFullscreenGesture()
+          }, 0)
+        }
+      } catch {
+        this.armFullscreenGesture()
+      }
+    },
+    armFullscreenGesture() {
+      if ((this as any).fullscreenGestureHandler) return
+      const handler = () => {
+        if (this.alwaysFullscreen && screenfull.isEnabled && !screenfull.isFullscreen) {
+          try {
+            const result = screenfull.request(document.documentElement, {navigationUI: 'hide'}) as unknown as Promise<void> | undefined
+            if (result && typeof result.catch === 'function') result.catch(() => undefined)
+          } catch {
+            // stay armed for the next gesture
+          }
+        }
+      }
+      ;(this as any).fullscreenGestureHandler = handler
+      window.addEventListener('pointerdown', handler)
+      window.addEventListener('keydown', handler)
+    },
+    disarmFullscreenGesture() {
+      const handler = (this as any).fullscreenGestureHandler
+      if (handler) {
+        window.removeEventListener('pointerdown', handler)
+        window.removeEventListener('keydown', handler)
+        ;(this as any).fullscreenGestureHandler = null
+      }
     },
     switchFullscreen() {
       if (screenfull.isEnabled) screenfull.isFullscreen ? screenfull.exit() : this.enterFullscreen()
     },
     fullscreenChanged() {
-      if (screenfull.isEnabled && screenfull.isFullscreen) this.fullscreenIcon = 'mdi-fullscreen-exit'
-      else this.fullscreenIcon = 'mdi-fullscreen'
+      if (screenfull.isEnabled && screenfull.isFullscreen) {
+        this.fullscreenIcon = 'mdi-fullscreen-exit'
+        this.disarmFullscreenGesture()
+      } else {
+        this.fullscreenIcon = 'mdi-fullscreen'
+        if (this.alwaysFullscreen) this.armFullscreenGesture()
+      }
     },
     keyPressed(e: KeyboardEvent) {
       if (e.ctrlKey || e.altKey || e.shiftKey || e.metaKey) return
       this.shortcuts[e.key]?.execute(this)
     },
     async setup(bookId: string, page?: number, position?: string) {
+      try {
+        await this.setupBook(bookId, page, position)
+      } catch (error) {
+        this.$warn('Reader setup failed', error)
+        this.$router.replace({name: 'offline-unavailable', query: {source: this.$route.query.source}})
+      }
+    },
+    async setupBook(bookId: string, page?: number, position?: string) {
       const revision = ++this.setupRevision
       this.$debug('[setup]', `bookId:${bookId}`, `page:${page}`)
       const book = await this.$komgaBooks.getBook(bookId)
@@ -792,7 +873,7 @@ export default Vue.extend({
       }
 
       if (this?.context.origin === ContextOrigin.READLIST) {
-        this.contextName = (await (this.$komgaReadLists.getOneReadList(this.context.id))).name
+        this.contextName = await this.$komgaReadLists.getOneReadList(this.context.id).then(x => x.name).catch(() => '')
         if (revision !== this.setupRevision) return
         document.title = `Komga - ${this.contextName} - ${this.book.metadata.title}`
       } else {
@@ -890,11 +971,14 @@ export default Vue.extend({
         this.jumpToPreviousBook = false
         this.readerTransitioning = true
         this.pages = []
-        this.$router.push({
+        const route = {
           name: getBookReadRouteFromMedia(this.siblingPrevious.media),
           params: {bookId: this.siblingPrevious.id.toString()},
           query: {position: 'end', context: this.context.origin, contextId: this.context.id, incognito: this.incognito.toString(), ...(this.source ? {source: this.source} : {})},
-        }).catch(() => {
+        }
+        // nextui: replace so closeBook's history.go(-1) lands back in the new UI, not the previous book
+        const nav = this.source === 'nextui' ? this.$router.replace(route) : this.$router.push(route)
+        nav.catch(() => {
           this.readerTransitioning = false
         })
       }
@@ -910,11 +994,14 @@ export default Vue.extend({
         this.jumpToNextBook = false
         this.readerTransitioning = true
         this.pages = []
-        this.$router.push({
+        const route = {
           name: getBookReadRouteFromMedia(this.siblingNext.media),
           params: {bookId: this.siblingNext.id.toString()},
           query: {position: 'start', context: this.context.origin, contextId: this.context.id, incognito: this.incognito.toString(), ...(this.source ? {source: this.source} : {})},
-        }).catch(() => {
+        }
+        // nextui: replace so closeBook's history.go(-1) lands back in the new UI, not the previous book
+        const nav = this.source === 'nextui' ? this.$router.replace(route) : this.$router.push(route)
+        nav.catch(() => {
           this.readerTransitioning = false
         })
       }

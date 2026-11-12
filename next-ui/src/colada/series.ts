@@ -1,10 +1,15 @@
 import {
+  getSeriesOfflineFirst,
+  getSeriesListOfflineFirst,
+  getSeriesUpdatedOfflineFirst,
+} from '@/offline'
+import {
   defineInfiniteQueryOptions,
   defineMutation,
   defineQueryOptions,
   useMutation,
 } from '@pinia/colada'
-import { PageRequest, type Sort, sortToString } from '@/types/PageRequest'
+import { PageRequest, type Sort } from '@/types/PageRequest'
 import { seriesMetadataToUpdateDto } from '@/functions/series'
 import { clearSeries, clearThumbnailSeries } from '@/colada/cache'
 import { useAppStore } from '@/stores/app'
@@ -12,10 +17,7 @@ import {
   komgaAddUserUploadedSeriesThumbnail,
   komgaDeleteSeriesFile,
   komgaDeleteUserUploadedSeriesThumbnail,
-  komgaGetSeries,
-  komgaGetSeriesById,
   komgaGetSeriesThumbnails,
-  komgaGetSeriesUpdated,
   komgaMarkSeriesAsRead,
   komgaMarkSeriesAsUnread,
   komgaMarkSeriesThumbnailSelected,
@@ -40,13 +42,7 @@ export const QUERY_KEYS_SERIES = {
 export const seriesListQuery = defineQueryOptions(
   ({ search, pageRequest }: { search: SeriesSearch; pageRequest?: PageRequest }) => ({
     key: QUERY_KEYS_SERIES.bySearch({ search: search, pageRequest: pageRequest }),
-    query: () =>
-      komgaGetSeries({
-        body: search,
-        query: {
-          ...pageRequest,
-        },
-      }),
+    query: () => getSeriesListOfflineFirst(search, pageRequest),
     placeholderData: (previousData) => previousData,
   }),
 )
@@ -55,15 +51,7 @@ export const seriesListQueryInfinite = defineInfiniteQueryOptions(
   ({ search, sort }: { search: SeriesSearch; sort?: Sort[] }) => ({
     key: QUERY_KEYS_SERIES.bySearch({ search: search, sort: sort, infinite: true }),
     initialPageParam: new PageRequest(0, 50, sort),
-    query: ({ pageParam }) =>
-      komgaGetSeries({
-        body: search,
-        query: {
-          page: pageParam.page,
-          size: pageParam.size,
-          sort: sort?.map((it) => sortToString(it)),
-        },
-      }),
+    query: ({ pageParam }) => getSeriesListOfflineFirst(search, pageParam),
     getNextPageParam: (lastPage, _, lastPageParam) =>
       !lastPage?.last ? lastPageParam.next() : null,
   }),
@@ -73,15 +61,7 @@ export const seriesUpdatedQueryInfinite = defineInfiniteQueryOptions(
   ({ libraryIds }: { libraryIds?: string[] }) => ({
     key: QUERY_KEYS_SERIES.updated({ libraryIds: libraryIds, infinite: true }),
     initialPageParam: new PageRequest(0, 50),
-    query: ({ pageParam }) =>
-      komgaGetSeriesUpdated({
-        query: {
-          library_id: libraryIds,
-          oneshot: false,
-          page: pageParam.page,
-          size: pageParam.size,
-        },
-      }),
+    query: ({ pageParam }) => getSeriesUpdatedOfflineFirst(libraryIds, pageParam),
     getNextPageParam: (lastPage, _, lastPageParam) =>
       !lastPage?.last ? lastPageParam.next() : null,
   }),
@@ -89,12 +69,7 @@ export const seriesUpdatedQueryInfinite = defineInfiniteQueryOptions(
 
 export const seriesDetailQuery = defineQueryOptions(({ seriesId }: { seriesId: string }) => ({
   key: QUERY_KEYS_SERIES.byId(seriesId),
-  query: () =>
-    komgaGetSeriesById({
-      path: {
-        seriesId: seriesId,
-      },
-    }),
+  query: () => getSeriesOfflineFirst(seriesId),
   staleTime: STALE_TIME.LONG,
 }))
 

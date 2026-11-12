@@ -26,6 +26,7 @@ export default defineConfigWithVueTs(
       '**/generated/**',
       'public-msw/**/*',
       'eslint.config.ts',
+      'tests/**/*.mjs',
     ],
   },
 

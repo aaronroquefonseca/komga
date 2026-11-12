@@ -9,6 +9,13 @@ import org.springframework.data.domain.Page
 import org.springframework.data.domain.Pageable
 
 interface BookDtoRepository {
+  fun findOfflineRevisions(context: SearchContext): Map<String, String>
+
+  fun findAllByIds(
+    context: SearchContext,
+    ids: Collection<String>,
+  ): List<BookDto>
+
   fun findAll(pageable: Pageable): Page<BookDto>
 
   fun findAll(

@@ -27,8 +27,9 @@ export default defineConfig(({ mode }) => ({
   plugins: [
     VueRouter({
       dts: 'src/route-map.d.ts',
+      importMode: (file) => file.endsWith('/error.vue') ? 'sync' : 'async',
     }),
-    Layouts(),
+    Layouts({ importMode: (name) => name === 'single' ? 'sync' : 'async' }),
     AutoImport({
       imports: ['vue', VueRouterAutoImports, unheadVueComposablesImports],
       dts: 'src/auto-imports.d.ts',
@@ -42,7 +43,7 @@ export default defineConfig(({ mode }) => ({
       dirs: ['src/components', 'src/directives'],
       extensions: ['vue', 'ts'],
       include: [/\.vue$/, /\.[tj]s$/],
-      excludeNames: [/\.stories/],
+      excludeNames: [/\.(stories|test)/],
       directoryAsNamespace: true,
       collapseSamePrefixes: true,
       resolvers: [
@@ -135,6 +136,7 @@ export default defineConfig(({ mode }) => ({
         test: {
           name: 'unit',
           environment: 'happy-dom',
+          server: { deps: { inline: ['vuetify'] } },
           restoreMocks: true,
           setupFiles: ['./vitest.setup.ts'],
         },

@@ -1,0 +1,47 @@
+name: Test offline production apps
+
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/test-offline.yml'
+      - 'next-ui/**'
+      - 'komga-webui/**'
+      - 'komga/src/main/resources/offline/**'
+  push:
+    branches-ignore:
+      - 'dependabot/**'
+    paths:
+      - '.github/workflows/test-offline.yml'
+      - 'next-ui/**'
+      - 'komga-webui/**'
+      - 'komga/src/main/resources/offline/**'
+  workflow_dispatch:
+
+jobs:
+  offline-browser:
+    name: Offline cold launch and reading
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+      - name: Classic UI setup
+        uses: ./.github/actions/setup-web
+        with:
+          working-directory: komga-webui
+      - name: Next UI setup
+        uses: ./.github/actions/setup-web
+        with:
+          working-directory: next-ui
+      - name: Install browser
+        working-directory: next-ui
+        run: npx playwright install --with-deps --only-shell chromium
+      - name: Build both production apps
+        run: |
+          npm --prefix komga-webui run build
+          npm --prefix next-ui run build:with-i18n
+        env:
+          NODE_OPTIONS: '--max-old-space-size=4096'
+      - name: Check service worker copies
+        run: cmp komga-webui/public/service-worker.js komga/src/main/resources/offline/service-worker.js
+      - name: Offline browser regressions
+        run: npm --prefix next-ui run test:offline

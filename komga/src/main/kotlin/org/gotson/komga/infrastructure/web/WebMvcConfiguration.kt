@@ -38,6 +38,8 @@ class WebMvcConfiguration : WebMvcConfigurer {
         "maskable_icon_x192.png",
         "maskable_icon_x512.png",
         "/manifest.json",
+        "/nextui-shell.json",
+        "/webui-shell.json",
         "/layers.css",
       ).addResourceLocations("classpath:public/")
       .setCacheControl(CacheControl.noStore())

@@ -1,5 +1,7 @@
 <template>
+  <OfflineUnavailable v-if="offline.offlineMode || !offline.online" />
   <v-empty-state
+    v-else
     icon="i-mdi:connection"
     :title="
       $formatMessage({
@@ -27,6 +29,8 @@
 </template>
 
 <script lang="ts" setup>
+import { useOfflineLibraryStore } from '@/offline'
+const offline = useOfflineLibraryStore()
 const router = useRouter()
 
 function goHome() {

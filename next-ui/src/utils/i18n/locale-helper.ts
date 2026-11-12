@@ -18,7 +18,8 @@ export async function loadLocale(locale: string): Promise<Record<string, string>
   const loadFn = lazyImports[localeToLoad]
   if(!loadFn) return {}
 
-  const module = await loadFn()
+  // A missing translation chunk must not prevent the entire app from mounting.
+  const module = await loadFn().catch(() => ({ default: {} }))
 
   return module.default || module
 }

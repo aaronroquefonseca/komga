@@ -92,6 +92,27 @@ export const TopRightIcon: Story = {
   },
 }
 
+export const ReadAndDownloaded: Story = {
+  args: {
+    topRightIcon: 'i-mdi:check',
+    downloadStatus: 'downloaded',
+  },
+}
+
+export const UnreadCountAndDownloaded: Story = {
+  args: {
+    topRight: 24,
+    downloadStatus: 'downloaded',
+  },
+}
+
+export const ReadAndDownloadUpdateAvailable: Story = {
+  args: {
+    topRightIcon: 'i-mdi:check',
+    downloadStatus: 'update-available',
+  },
+}
+
 export const LandscapeStretched: Story = {
   args: {
     topRightIcon: 'i-mdi:check',

@@ -15,6 +15,8 @@ import App from './App.vue'
 import { createApp } from 'vue'
 import { initLogger } from '@/services/logtape'
 import { setupOpenapiClient } from '@/api/komga-client'
+import router from '@/router'
+import { setupOfflineShell } from '@/services/offline-shell'
 
 await initLogger()
 
@@ -25,3 +27,5 @@ const app = createApp(App)
 registerPlugins(app)
 
 app.mount('#app')
+
+setupOfflineShell(router)

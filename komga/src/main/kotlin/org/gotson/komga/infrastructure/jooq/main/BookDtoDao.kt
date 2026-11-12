@@ -99,6 +99,36 @@ class BookDtoDao(
       "readList.number" to rlb.NUMBER,
     )
 
+  override fun findOfflineRevisions(context: SearchContext): Map<String, String> {
+    val userId = requireNotNull(context.userId)
+    val (conditions, _) = BookSearchHelper(context).toCondition(null)
+    return dslRO
+      .select(b.ID, b.LAST_MODIFIED_DATE, b.SERIES_ID, b.LIBRARY_ID, b.NUMBER, b.DELETED_DATE, b.ONESHOT, m.LAST_MODIFIED_DATE, d.LAST_MODIFIED_DATE, r.LAST_MODIFIED_DATE, r.PAGE, r.COMPLETED, sd.TITLE)
+      .from(b)
+      .leftJoin(m)
+      .on(b.ID.eq(m.BOOK_ID))
+      .leftJoin(d)
+      .on(b.ID.eq(d.BOOK_ID))
+      .leftJoin(r)
+      .on(b.ID.eq(r.BOOK_ID).and(readProgressCondition(userId)))
+      .leftJoin(sd)
+      .on(b.SERIES_ID.eq(sd.SERIES_ID))
+      .where(conditions)
+      .orderBy(b.ID)
+      .fetch()
+      .associate { it.get(b.ID) to offlineRevision(*it.intoArray()) }
+  }
+
+  override fun findAllByIds(
+    context: SearchContext,
+    ids: Collection<String>,
+  ): List<BookDto> {
+    if (ids.isEmpty()) return emptyList()
+    val userId = requireNotNull(context.userId)
+    val (conditions, joins) = BookSearchHelper(context).toCondition(null)
+    return findAll(conditions.and(b.ID.`in`(ids)), userId, Pageable.unpaged(), null, joins).content
+  }
+
   override fun findAll(pageable: Pageable): Page<BookDto> = findAll(BookSearch(), SearchContext.ofAnonymousUser(), pageable)
 
   override fun findAll(
