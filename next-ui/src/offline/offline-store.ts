@@ -42,6 +42,7 @@ import {
   assertOfflineAccount,
   isOfflineAccount,
   offlineMediaCachePrefix,
+  isOwnOfflineBookCache,
 } from './offline-db'
 import type {
   CachedPages,
@@ -196,7 +197,7 @@ export const useOfflineLibraryStore = defineStore('offline-library', () => {
     const names = await caches.keys()
     await Promise.all(
       names
-        .filter((name) => name.startsWith(offlineMediaCachePrefix()) && !active.has(name))
+        .filter((name) => isOwnOfflineBookCache(name) && !active.has(name))
         .map((name) => caches.delete(name)),
     )
   }

@@ -16,6 +16,7 @@ import {
   assertOfflineAccount,
   isOfflineAccount,
   offlineMediaCachePrefix,
+  isOwnOfflineBookCache,
 } from '@/services/offline-db'
 
 export const OFFLINE_BOOK_CACHE_PREFIX = 'komga-offline-book-v2-'
@@ -391,7 +392,7 @@ export default class OfflineLibraryService {
     const active = new Set(this.state.downloads.map(x => x.cacheName).filter((x): x is string => !!x))
     const names = await caches.keys()
     await Promise.all(names
-      .filter(name => name.startsWith(offlineMediaCachePrefix()) && !active.has(name))
+      .filter(name => isOwnOfflineBookCache(name) && !active.has(name))
       .map(name => caches.delete(name)))
   }
 

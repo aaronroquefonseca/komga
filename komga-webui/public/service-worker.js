@@ -166,6 +166,30 @@ async function cacheShellAssets(urls, onAssetSettled, hashes = {}, previousHashe
   await Promise.all(Array.from({length: Math.min(8, list.length)}, consume))
 }
 
+function extractCriticalShellAssets(html, baseUrl) {
+  const critical = new Set()
+  const patterns = [
+    /<script[^>]+src=["']([^"']+)["']/gi,
+    /<link[^>]+href=["']([^"']+)["']/gi,
+  ]
+  for (const pattern of patterns) {
+    let match
+    while ((match = pattern.exec(html)) !== null) {
+      const ref = match[1]
+      if (!ref || ref.startsWith('data:') || ref.startsWith('blob:')) continue
+      // Icons, fonts and images degrade gracefully; JS/CSS do not.
+      if (!/\.(js|css)(\?.*)?$/i.test(ref.split('#')[0])) continue
+      try {
+        const url = new URL(ref, baseUrl)
+        if (url.origin === self.location.origin) critical.add(url.href)
+      } catch (_) {
+        // ignore unresolvable references
+      }
+    }
+  }
+  return [...critical]
+}
+
 async function prepareOfflineShell(pageUrl, assets, batchId) {
   // One worker serves both UIs. Next UI opens the classic reader, so both
   // HTML entries AND both manifests are needed, even before the first read.
@@ -219,22 +243,56 @@ async function prepareOfflineShell(pageUrl, assets, batchId) {
       } catch (_) { shellsReady = false }
     }))
     const missing = []
+    const failedUrls = new Set()
+    const verifiedHashes = {}
+    // Hashes stored by an incomplete run may describe bytes that never made
+    // it into the cache (failed same-URL update keeps old bytes). Only trust
+    // hashes from a complete run; otherwise force digest re-verification.
+    const trustedPreviousHashes = previous?.complete === true ? previous?.hashes || {} : {}
     await cacheShellAssets([...urls], (success, assetUrl) => {
       progress.done += 1
       if (!success) {
         progress.failed += 1
+        if (assetUrl) failedUrls.add(assetUrl)
         // Keep a bounded sample for diagnostics; the full set is retried
         // on the next preparation anyway.
         if (assetUrl && missing.length < 50 && !missing.includes(assetUrl)) missing.push(assetUrl)
+      } else if (assetUrl && hashes[assetUrl]) {
+        verifiedHashes[assetUrl] = hashes[assetUrl]
       }
-    }, hashes, previous?.hashes || {})
-    // A single failed asset must not take the whole offline shell down:
-    // commit the shells whenever they fetched fine so cold boots keep
-    // working, and let the missing assets ride along on the next run.
+    }, hashes, trustedPreviousHashes)
+    // Critical assets are the JS/CSS referenced by the freshly fetched shell
+    // HTML. A failed lazy chunk degrades gracefully, but committing HTML that
+    // references a missing entry script breaks every offline cold boot, so
+    // preserve the last good shell until the critical set is available.
+    const criticalUrls = new Set()
+    for (const {url, response} of shells) {
+      try {
+        const html = await response.clone().text()
+        for (const assetUrl of extractCriticalShellAssets(html, url)) criticalUrls.add(assetUrl)
+      } catch (_) {
+        // If HTML cannot be parsed, treat the shell as not committable.
+        criticalUrls.add(url + '#unparseable')
+      }
+    }
+    let criticalOk = shellsReady
+    if (criticalOk) {
+      const cache = await caches.open(SHELL_CACHE)
+      await Promise.all([...criticalUrls].map(async url => {
+        if (failedUrls.has(url)) { criticalOk = false; return }
+        try {
+          if (!(await cache.match(url))) criticalOk = false
+        } catch (_) { criticalOk = false }
+      }))
+    }
+    // A single failed non-critical asset must not take the whole offline
+    // shell down: commit the shells whenever they fetched fine AND their
+    // critical dependencies are present, so cold boots keep working, and let
+    // the missing assets ride along on the next run.
     // `complete` stays strict so the UI still reports the gap with Retry.
-    progress.complete = manifestsReady && shellsReady && progress.failed === 0 && progress.expected > 0
+    progress.complete = manifestsReady && shellsReady && criticalOk && progress.failed === 0 && progress.expected > 0
     progress.missing = missing
-    if (shellsReady) {
+    if (shellsReady && criticalOk) {
       for (const {url, response} of shells) {
         await cache.put(new Request(offlineShellUrl(shellApp(url))), response.clone())
         await cache.put(new Request(url), response.clone())
@@ -242,7 +300,7 @@ async function prepareOfflineShell(pageUrl, assets, batchId) {
     }
     progress.settled = true
     await cache.put(new URL(STATUS_PATH, self.registration.scope).href,
-      new Response(JSON.stringify({...progress, revision, hashes, assets: [...urls]}), {headers: {'Content-Type': 'application/json'}}))
+      new Response(JSON.stringify({...progress, revision, hashes: verifiedHashes, assets: [...urls]}), {headers: {'Content-Type': 'application/json'}}))
     return progress.complete
   }
   preparingShell = run()

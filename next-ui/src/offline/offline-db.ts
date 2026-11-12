@@ -76,6 +76,21 @@ export function offlineMediaCachePrefix(): string {
   return 'komga-offline-book-v2-' + encodeURIComponent(activeDatabaseName) + '-'
 }
 
+/**
+ * Cache names are `<prefix><stableHash(bookId)>-<manifestRevision>`, e.g.
+ * `...-<8 hex>-<pages>-<8 hex>`. A plain startsWith(prefix) check is not
+ * enough: the default account prefix is a string prefix of per-user account
+ * prefixes (`komga-offline-...` vs `komga-offline-user-B-...`), so one
+ * account's orphan cleanup would delete another account's downloads.
+ */
+const OWN_BOOK_CACHE_SUFFIX = /^[0-9a-f]{8}-\d+-[0-9a-f]{8}$/
+
+export function isOwnOfflineBookCache(name: string): boolean {
+  const prefix = offlineMediaCachePrefix()
+  if (!name.startsWith(prefix)) return false
+  return OWN_BOOK_CACHE_SUFFIX.test(name.slice(prefix.length))
+}
+
 export function openOfflineDatabase(): Promise<IDBDatabase> {
   if (!databasePromise)
     databasePromise = (async () => {
