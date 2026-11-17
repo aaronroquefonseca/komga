@@ -49,13 +49,11 @@ export interface OfflineDownloadRecord {
   bytes: number
   downloadedAt?: string
   error?: string
-  pages?: PageDto[]
   cacheName?: string
   manifestRevision?: string
   sourceLastModified?: string
   updateAvailable?: boolean
   remoteManifestRevision?: string
-  remotePages?: PageDto[]
   sourceMissing?: boolean
   queuedAt?: string
   autoManaged?: boolean
