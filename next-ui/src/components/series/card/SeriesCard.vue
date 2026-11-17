@@ -52,7 +52,7 @@ void offline.whenReady()
 const lines = computed<ItemCardLine[]>(() => [footer.value])
 
 const downloadStatus = computed(() => {
-  const records = offline.downloads.filter((record) => record.book.seriesId === series.value.id)
+  const records = offline.getSeriesDownloads(series.value.id)
   if (records.length === 0) return undefined
   const downloaded = records.filter((record) => offline.isDownloaded(record.bookId)).length
   if (downloaded === 0) return undefined

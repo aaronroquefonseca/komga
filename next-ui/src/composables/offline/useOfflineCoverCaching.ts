@@ -32,10 +32,14 @@ export function useOfflineCoverCaching() {
         continue
       }
       running++
-      void fetch(item.url, { credentials: 'include' })
-        .catch(() => undefined)
+      // Keep successful keys in `pending`: virtual scroll reloads the same
+      // covers constantly and each revisit would cost a worker round-trip.
+      void fetch(item.url, { credentials: 'include', priority: 'low' })
+        .then((response) => {
+          if (!response.ok) pending.delete(item.key)
+        })
+        .catch(() => pending.delete(item.key))
         .finally(() => {
-          pending.delete(item.key)
           running--
           processQueue()
         })
@@ -61,6 +65,8 @@ export function useOfflineCoverCaching() {
   }
 
   function scanLoadedCovers(): void {
+    // Disabling clears the worker cache; re-enabling must warm covers again.
+    if (!offline.preferences.cacheCovers) pending.clear()
     if (canCache()) document.querySelectorAll('img').forEach(cacheLoadedCover)
   }
 

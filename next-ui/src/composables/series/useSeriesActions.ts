@@ -44,9 +44,7 @@ export function useSeriesActions(
   const offlineBusy = computed(() => !offline.online || offline.offlineMode)
   const seriesDownloading = ref(false)
 
-  const seriesDownloads = computed(() =>
-    offline.downloads.filter((record) => record.book.seriesId === toValue(series).id),
-  )
+  const seriesDownloads = computed(() => offline.getSeriesDownloads(toValue(series).id))
   const downloadedBookCount = computed(
     () => seriesDownloads.value.filter((record) => offline.isDownloaded(record.bookId)).length,
   )

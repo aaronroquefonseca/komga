@@ -54,25 +54,54 @@ function openDatabase(name = DB_NAME) {
       if (!db.objectStoreNames.contains('progress')) db.createObjectStore('progress', {keyPath: 'bookId'})
       if (!db.objectStoreNames.contains(SETTINGS_STORE)) db.createObjectStore(SETTINGS_STORE, {keyPath: 'key'})
     }
-    request.onsuccess = () => resolve(request.result)
+    request.onsuccess = () => {
+      const db = request.result
+      // Never block a page-side deleteDatabase/upgrade with a cached connection.
+      db.onversionchange = () => { db.close(); connections.delete(name) }
+      resolve(db)
+    }
     request.onerror = () => reject(request.error)
   })
 }
 
-async function readStore(storeName, key) {
-  let db = await openDatabase()
-  const pointer = await new Promise(resolve => {
-    const request = db.transaction(SETTINGS_STORE, 'readonly').objectStore(SETTINGS_STORE).get('activeDatabase')
-    request.onsuccess = () => resolve(request.result?.value)
+// Every thumbnail/page request reads settings; opening the database twice per
+// read made a cover grid issue hundreds of IndexedDB opens. Reuse connections
+// by name; the account pointer is still read on every call.
+const connections = new Map()
+
+function cachedDatabase(name) {
+  let db = connections.get(name)
+  if (!db) {
+    db = openDatabase(name)
+    connections.set(name, db)
+    db.catch(() => connections.delete(name))
+  }
+  return db
+}
+
+function getValue(db, storeName, key) {
+  return new Promise(resolve => {
+    const request = db.transaction(storeName, 'readonly').objectStore(storeName).get(key)
+    request.onsuccess = () => resolve(request.result)
     request.onerror = () => resolve(undefined)
   })
-  if (pointer) { db.close(); db = await openDatabase(pointer) }
-  return new Promise(resolve => {
-    const tx = db.transaction(storeName, 'readonly')
-    const request = tx.objectStore(storeName).get(key)
-    request.onsuccess = () => { db.close(); resolve(request.result) }
-    request.onerror = () => { db.close(); resolve(undefined) }
-  })
+}
+
+async function readStoreOnce(storeName, key) {
+  const control = await cachedDatabase(DB_NAME)
+  const pointer = (await getValue(control, SETTINGS_STORE, 'activeDatabase'))?.value
+  const db = pointer && pointer !== DB_NAME ? await cachedDatabase(pointer) : control
+  return getValue(db, storeName, key)
+}
+
+async function readStore(storeName, key) {
+  try {
+    return await readStoreOnce(storeName, key)
+  } catch (_) {
+    // A cached connection was closed underneath us: reopen once.
+    connections.clear()
+    return readStoreOnce(storeName, key)
+  }
 }
 
 async function readOfflineMode() {
@@ -371,6 +400,11 @@ self.addEventListener('fetch', event => {
 
   const url = new URL(request.url)
   if (url.origin !== self.location.origin) return
+
+  // Server-sent events never end: the cache-first fallback below would wait
+  // forever on cache.put, so the page never got its stream and one HTTP
+  // connection stayed pinned for the life of the worker.
+  if ((request.headers.get('Accept') || '').includes('text/event-stream')) return
 
   // Build manifests are mutable; a cached response would hide new deployments.
   if (/\/(nextui-shell|webui-shell)\.json$/.test(url.pathname)) {

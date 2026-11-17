@@ -181,7 +181,7 @@ export async function getBookOfflineFirst(bookId: string): Promise<BookDto> {
     const book = await komgaGetBookById({ path: { bookId } })
     assertOfflineAccount(accountToken)
 
-    await store.cacheBook(book).catch(() => undefined)
+    void store.cacheBook(book).catch(() => undefined)
     return book
   } catch (e) {
     const cached = await store.getCachedBook(bookId)
@@ -208,7 +208,7 @@ export async function getBookPagesOfflineFirst(bookId: string): Promise<PageDto[
     const pages = (await komgaGetBookPages({ path: { bookId } })) ?? []
     assertOfflineAccount(accountToken)
 
-    await store.cachePages(bookId, pages).catch(() => undefined)
+    void store.cachePages(bookId, pages).catch(() => undefined)
     return pages
   } catch (e) {
     const cached = await store.getCachedPages(bookId)
@@ -229,7 +229,7 @@ export async function getBooksListOfflineFirst(
     const page = await komgaGetBooks({ body: search, query: toQueryPaging(pageRequest) })
     assertOfflineAccount(accountToken)
 
-    await store.cacheBooks(page.content ?? []).catch(() => undefined)
+    void store.cacheBooks(page.content ?? []).catch(() => undefined)
     return rehydrateDates(page)
   } catch (e) {
     const cached = await store.getCachedBooksPage(search, pageRequest)
@@ -252,7 +252,7 @@ export async function getBooksOnDeckOfflineFirst(
     })
     assertOfflineAccount(accountToken)
 
-    await store.cacheBooks(page.content ?? []).catch(() => undefined)
+    void store.cacheBooks(page.content ?? []).catch(() => undefined)
     return rehydrateDates(page)
   } catch (e) {
     const cached = await store.getCachedOnDeck(libraryIds, pageRequest)
@@ -286,7 +286,7 @@ export async function getBookSiblingOfflineFirst(bookId: string, delta: 1 | -1):
   if (isLocalOnly()) return cachedSibling(bookId, delta)
   try {
     const book = await fetcher()
-    await store.cacheBook(book).catch(() => undefined)
+    void store.cacheBook(book).catch(() => undefined)
     return book
   } catch (e) {
     try {
@@ -310,7 +310,7 @@ export async function getSeriesOfflineFirst(seriesId: string): Promise<SeriesDto
     const series = await komgaGetSeriesById({ path: { seriesId } })
     assertOfflineAccount(accountToken)
 
-    await store.cacheSeriesItem(series).catch(() => undefined)
+    void store.cacheSeriesItem(series).catch(() => undefined)
     return series
   } catch (e) {
     const cached = await store.getCachedSeries(seriesId)
@@ -331,7 +331,7 @@ export async function getSeriesListOfflineFirst(
     const page = await komgaGetSeries({ body: search, query: toQueryPaging(pageRequest) })
     assertOfflineAccount(accountToken)
 
-    await store.cacheSeries(page.content ?? []).catch(() => undefined)
+    void store.cacheSeries(page.content ?? []).catch(() => undefined)
     return rehydrateDates(page)
   } catch (e) {
     const cached = await localSeriesPage(search, pageRequest)
