@@ -624,6 +624,42 @@ try {
     await page.getByText('Books saved on this device for offline reading').waitFor()
     assert.match(await page.locator('body').innerText(), /You are offline/)
     assert.equal((await status(page)).shellReady, true)
+    // Legacy records embedded their page manifest; booting must split it out
+    // so startup reads stay small, and reading offline must still work.
+    const legacyStore = (mode) =>
+      page.evaluate(async (mode) => {
+        const db = await new Promise((resolve) => {
+          const r = indexedDB.open('komga-offline')
+          r.onsuccess = () => resolve(r.result)
+        })
+        const tx = db.transaction(['downloads', 'settings'], 'readwrite')
+        const get = (store, key) =>
+          new Promise((resolve) => {
+            const r = tx.objectStore(store).get(key)
+            r.onsuccess = () => resolve(r.result)
+          })
+        const record = await get('downloads', 'offline-book')
+        const manifest = await get('settings', 'downloadPages:offline-book')
+        const state = { inline: !!record.pages, split: manifest?.value?.length ?? 0 }
+        if (mode === 'inline') {
+          record.pages = manifest.value
+          tx.objectStore('downloads').put(record)
+          tx.objectStore('settings').delete('downloadPages:offline-book')
+        }
+        await new Promise((resolve) => (tx.oncomplete = resolve))
+        db.close()
+        return state
+      }, mode)
+    assert.deepEqual(await legacyStore('inline'), { inline: false, split: 2 })
+    await page.reload()
+    await page.getByText('Books saved on this device for offline reading').waitFor()
+    await waitFor(
+      async () => {
+        const state = await legacyStore('read')
+        return !state.inline && state.split === 2
+      },
+      'Legacy inline page manifest was not migrated',
+    )
     await page.goto(base + '/book/offline-book')
     await page.getByText(book.metadata.title, { exact: true }).first().waitFor()
     await page.goto(base + '/book/catalog-199')

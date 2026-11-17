@@ -6,7 +6,6 @@ import {BookSearch, SeriesSearch} from '@/types/komga-search'
 import urls, {bookPageUrl, bookThumbnailUrl} from '@/functions/urls'
 import {
   OFFLINE_STORES,
-  offlineDelete,
   offlineGet,
   offlineGetAll,
   offlinePut,
@@ -17,6 +16,13 @@ import {
   isOfflineAccount,
   offlineMediaCachePrefix,
   isOwnOfflineBookCache,
+  offlineCount,
+  writeDownload,
+  deleteDownload,
+  splitInlineDownloadManifests,
+  downloadPagesKey,
+  downloadRemotePagesKey,
+  DownloadPageManifests,
 } from '@/services/offline-db'
 
 export const OFFLINE_BOOK_CACHE_PREFIX = 'komga-offline-book-v2-'
@@ -48,13 +54,11 @@ export interface OfflineDownloadRecord {
   bytes: number
   downloadedAt?: string
   error?: string
-  pages?: PageDto[]
   cacheName?: string
   manifestRevision?: string
   sourceLastModified?: string
   updateAvailable?: boolean
   remoteManifestRevision?: string
-  remotePages?: PageDto[]
   sourceMissing?: boolean
   queuedAt?: string
   autoManaged?: boolean
@@ -317,9 +321,10 @@ export default class OfflineLibraryService {
     this.state.preferences.concurrentPages = Math.max(1, Math.min(4, this.state.preferences.concurrentPages))
     await this.refreshState()
     await this.recoverInterruptedDownloads()
-    await this.cleanupOrphanedBookCaches()
     this.state.initialized = true
     this.notifyServiceWorker()
+    // Housekeeping only; enumerating every cache must not delay readiness.
+    this.cleanupOrphanedBookCaches().catch(() => undefined)
     this.closeLegacyDownloadNotifications()
 
     try {
@@ -377,14 +382,16 @@ export default class OfflineLibraryService {
   }
 
   async refreshState(): Promise<void> {
+    // Count, never load, the catalog: it can hold every book on the server.
     const [downloads, books, series] = await Promise.all([
       offlineGetAll<OfflineDownloadRecord>(OFFLINE_STORES.downloads),
-      offlineGetAll<BookDto>(OFFLINE_STORES.books),
-      offlineGetAll<SeriesDto>(OFFLINE_STORES.series),
+      offlineCount(OFFLINE_STORES.books),
+      offlineCount(OFFLINE_STORES.series),
     ])
+    await splitInlineDownloadManifests(downloads)
     this.state.downloads = downloads.sort((a, b) => `${b.downloadedAt || ''}`.localeCompare(`${a.downloadedAt || ''}`))
-    this.state.cachedBooks = books.length
-    this.state.cachedSeries = series.length
+    this.state.cachedBooks = books
+    this.state.cachedSeries = series
   }
 
   private async cleanupOrphanedBookCaches(): Promise<void> {
@@ -398,22 +405,22 @@ export default class OfflineLibraryService {
 
   async cacheBook(book: BookDto): Promise<void> {
     await offlinePut(OFFLINE_STORES.books, clone(book))
-    this.state.cachedBooks = (await offlineGetAll<BookDto>(OFFLINE_STORES.books)).length
+    this.state.cachedBooks = await offlineCount(OFFLINE_STORES.books)
   }
 
   async cacheBooks(books: BookDto[]): Promise<void> {
     await offlinePutMany(OFFLINE_STORES.books, books.map(clone))
-    this.state.cachedBooks = (await offlineGetAll<BookDto>(OFFLINE_STORES.books)).length
+    this.state.cachedBooks = await offlineCount(OFFLINE_STORES.books)
   }
 
   async cacheSeriesItem(series: SeriesDto): Promise<void> {
     await offlinePut(OFFLINE_STORES.series, clone(series))
-    this.state.cachedSeries = (await offlineGetAll<SeriesDto>(OFFLINE_STORES.series)).length
+    this.state.cachedSeries = await offlineCount(OFFLINE_STORES.series)
   }
 
   async cacheSeries(series: SeriesDto[]): Promise<void> {
     await offlinePutMany(OFFLINE_STORES.series, series.map(clone))
-    this.state.cachedSeries = (await offlineGetAll<SeriesDto>(OFFLINE_STORES.series)).length
+    this.state.cachedSeries = await offlineCount(OFFLINE_STORES.series)
   }
 
   async cachePages(bookId: string, pages: PageDto[]): Promise<void> {
@@ -453,8 +460,10 @@ export default class OfflineLibraryService {
   }
 
   async getCachedPages(bookId: string): Promise<PageDto[] | undefined> {
-    const snapshot = this.getDownload(bookId)
-    if (snapshot?.cacheName && snapshot.pages) return clone(snapshot.pages)
+    if (this.getDownload(bookId)?.cacheName) {
+      const snapshot = await offlineGet<OfflineSetting<PageDto[]>>(OFFLINE_STORES.settings, downloadPagesKey(bookId))
+      if (snapshot?.value) return snapshot.value
+    }
     const record = await offlineGet<CachedPages>(OFFLINE_STORES.pages, bookId)
     return record?.pages
   }
@@ -534,15 +543,13 @@ export default class OfflineLibraryService {
           record.sourceLastModified = modified
           record.updateAvailable = false
           delete record.remoteManifestRevision
-          delete record.remotePages
-          await this.updateDownload(record)
+          await this.updateDownload(record, {remotePages: null})
           assertOfflineAccount(accountToken)
 
         } else {
           record.updateAvailable = true
           record.remoteManifestRevision = revision
-          record.remotePages = clone(pages)
-          await this.updateDownload(record)
+          await this.updateDownload(record, {remotePages: pages})
           assertOfflineAccount(accountToken)
 
         }
@@ -563,8 +570,8 @@ export default class OfflineLibraryService {
     return `${offlineMediaCachePrefix()}${stableHash(bookId)}-${revision}`
   }
 
-  private async updateDownload(record: OfflineDownloadRecord): Promise<void> {
-    await offlinePut(OFFLINE_STORES.downloads, clone(record))
+  private async updateDownload(record: OfflineDownloadRecord, manifests?: DownloadPageManifests): Promise<void> {
+    await writeDownload(clone(record), manifests && clone(manifests))
     const index = this.state.downloads.findIndex(x => x.bookId === record.bookId)
     if (index >= 0) this.state.downloads.splice(index, 1, clone(record))
     else this.state.downloads.unshift(clone(record))
@@ -645,12 +652,11 @@ export default class OfflineLibraryService {
       existing.updateAvailable = false
       existing.sourceMissing = false
       delete existing.remoteManifestRevision
-      delete existing.remotePages
       delete existing.error
       await this.cacheBook(book)
       assertOfflineAccount(accountToken)
 
-      await this.updateDownload(existing)
+      await this.updateDownload(existing, {pages, remotePages: null})
       assertOfflineAccount(accountToken)
 
       return
@@ -741,7 +747,6 @@ export default class OfflineLibraryService {
 
       // Atomic commit: only now does this revision become the one the service
       // worker serves. Until this point the old cacheName remained active.
-      record.pages = clone(pages)
       record.book = clone(book)
       record.status = 'downloaded'
       record.cacheName = stagingCacheName
@@ -751,7 +756,6 @@ export default class OfflineLibraryService {
       record.updateAvailable = false
       record.sourceMissing = false
       delete record.remoteManifestRevision
-      delete record.remotePages
       delete record.error
 
       await Promise.all([
@@ -761,7 +765,7 @@ export default class OfflineLibraryService {
       ])
       assertOfflineAccount(accountToken)
 
-      await this.updateDownload(record)
+      await this.updateDownload(record, {pages, remotePages: null})
       assertOfflineAccount(accountToken)
 
       if (oldCacheName && oldCacheName !== stagingCacheName) await caches.delete(oldCacheName)
@@ -971,7 +975,7 @@ export default class OfflineLibraryService {
     if (this.activeJobs.has(bookId)) this.cancelledJobs.add(bookId)
     this.activeJobs.get(bookId)?.abort()
     if (record?.cacheName) await caches.delete(record.cacheName)
-    await offlineDelete(OFFLINE_STORES.downloads, bookId)
+    await deleteDownload(bookId)
     this.state.downloads = this.state.downloads.filter(x => x.bookId !== bookId)
     this.notifyServiceWorker(bookId)
     // Metadata deliberately remains. Removing a download removes only media.
@@ -1075,12 +1079,15 @@ export default class OfflineLibraryService {
         try {
           const outgoing = clone(entry.progress)
           const download = this.getDownload(entry.bookId)
-          if (outgoing.page && entry.revision && download?.manifestRevision === entry.revision &&
-            download.updateAvailable && download.remotePages?.length) {
+          const remotePages = outgoing.page && entry.revision && download?.manifestRevision === entry.revision &&
+            download.updateAvailable && download.remoteManifestRevision
+            ? (await offlineGet<OfflineSetting<PageDto[]>>(OFFLINE_STORES.settings, downloadRemotePagesKey(entry.bookId)))?.value
+            : undefined
+          if (outgoing.page && remotePages?.length) {
             const oldPages = await this.getCachedPages(entry.bookId) || []
             assertOfflineAccount(accountToken)
 
-            outgoing.page = remapPage(oldPages, download.remotePages, outgoing.page)
+            outgoing.page = remapPage(oldPages, remotePages, outgoing.page)
           }
 
           await this.http.patch(`/api/v1/books/${entry.bookId}/read-progress`, outgoing)

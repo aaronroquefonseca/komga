@@ -219,6 +219,85 @@ export async function offlineKeys(storeName: string): Promise<IDBValidKey[]> {
   return requestResult(db.transaction(storeName, 'readonly').objectStore(storeName).getAllKeys())
 }
 
+/** Read several keys in one transaction instead of one transaction per key. */
+export async function offlineGetMany<T>(
+  storeName: string,
+  keys: IDBValidKey[],
+): Promise<(T | undefined)[]> {
+  if (keys.length === 0) return []
+  const db = await openOfflineDatabase()
+  const store = db.transaction(storeName, 'readonly').objectStore(storeName)
+  return Promise.all(keys.map((key) => requestResult(store.get(key) as IDBRequest<T | undefined>)))
+}
+
+/**
+ * Page manifests live beside download records, not inside them: every boot
+ * reads all records, and embedded manifests made that read scale with the
+ * total number of downloaded pages. Same database version, so an older
+ * cached UI or worker can still open it.
+ */
+export const downloadPagesKey = (bookId: string) => `downloadPages:${bookId}`
+export const downloadRemotePagesKey = (bookId: string) => `downloadRemotePages:${bookId}`
+
+/** undefined keeps the stored manifest, null deletes it. */
+export interface DownloadPageManifests {
+  pages?: unknown[] | null
+  remotePages?: unknown[] | null
+}
+
+/** Persist a download record and its manifests atomically. */
+export async function writeDownload(
+  record: { bookId: string },
+  manifests: DownloadPageManifests = {},
+): Promise<void> {
+  const db = await openOfflineDatabase()
+  const tx = db.transaction([OFFLINE_STORES.downloads, OFFLINE_STORES.settings], 'readwrite')
+  tx.objectStore(OFFLINE_STORES.downloads).put(record)
+  const settings = tx.objectStore(OFFLINE_STORES.settings)
+  const entries = [
+    [downloadPagesKey(record.bookId), manifests.pages],
+    [downloadRemotePagesKey(record.bookId), manifests.remotePages],
+  ] as const
+  for (const [key, value] of entries) {
+    if (value === null) settings.delete(key)
+    else if (value) settings.put({ key, value })
+  }
+  await transactionDone(tx)
+}
+
+export async function deleteDownload(bookId: string): Promise<void> {
+  const db = await openOfflineDatabase()
+  const tx = db.transaction([OFFLINE_STORES.downloads, OFFLINE_STORES.settings], 'readwrite')
+  tx.objectStore(OFFLINE_STORES.downloads).delete(bookId)
+  tx.objectStore(OFFLINE_STORES.settings).delete(downloadPagesKey(bookId))
+  tx.objectStore(OFFLINE_STORES.settings).delete(downloadRemotePagesKey(bookId))
+  await transactionDone(tx)
+}
+
+/**
+ * Migration: records written before the split (or by an older cached UI)
+ * embed `pages`/`remotePages`. Move them out once; strips the given records.
+ */
+export async function splitInlineDownloadManifests(
+  records: { bookId: string; pages?: unknown[]; remotePages?: unknown[] }[],
+): Promise<void> {
+  const legacy = records.filter((record) => record.pages || record.remotePages)
+  if (legacy.length === 0) return
+  const db = await openOfflineDatabase()
+  const tx = db.transaction([OFFLINE_STORES.downloads, OFFLINE_STORES.settings], 'readwrite')
+  const downloads = tx.objectStore(OFFLINE_STORES.downloads)
+  const settings = tx.objectStore(OFFLINE_STORES.settings)
+  for (const record of legacy) {
+    if (record.pages) settings.put({ key: downloadPagesKey(record.bookId), value: record.pages })
+    if (record.remotePages)
+      settings.put({ key: downloadRemotePagesKey(record.bookId), value: record.remotePages })
+    delete record.pages
+    delete record.remotePages
+    downloads.put(record)
+  }
+  await transactionDone(tx)
+}
+
 const PENDING_CATALOG_PREFIX = 'catalogPending:'
 const pendingCatalogRange = () =>
   IDBKeyRange.bound(PENDING_CATALOG_PREFIX, `${PENDING_CATALOG_PREFIX}\uffff`)
