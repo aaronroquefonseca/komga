@@ -640,6 +640,7 @@ try {
           })
         const record = await get('downloads', 'offline-book')
         const manifest = await get('settings', 'downloadPages:offline-book')
+        const state = { inline: !!record.pages, split: manifest?.value?.length ?? 0 }
         if (mode === 'inline') {
           record.pages = manifest.value
           tx.objectStore('downloads').put(record)
@@ -647,7 +648,7 @@ try {
         }
         await new Promise((resolve) => (tx.oncomplete = resolve))
         db.close()
-        return { inline: !!record.pages, split: manifest?.value?.length ?? 0 }
+        return state
       }, mode)
     assert.deepEqual(await legacyStore('inline'), { inline: false, split: 2 })
     await page.reload()

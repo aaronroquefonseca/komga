@@ -523,9 +523,20 @@ export const useOfflineLibraryStore = defineStore('offline-library', () => {
       assertOfflineAccount(accountToken)
       const pending = await pendingCatalogRevisions()
       assertOfflineAccount(accountToken)
-      // 304 with nothing half-applied: the local catalog already matches, so
-      // skip key scans, the manifest rewrite and the download update checks.
-      if (manifest === saved?.value && pending.length === 0) {
+      // 304, nothing half-applied and no locally missing rows: the catalog
+      // already matches, so skip key scans, the manifest rewrite and the
+      // download update checks. Counts are cheap; loading keys is not.
+      let unchanged = manifest === saved?.value && pending.length === 0
+      if (unchanged) {
+        const [books, series] = await Promise.all([
+          offlineCount(OFFLINE_STORES.books),
+          offlineCount(OFFLINE_STORES.series),
+        ])
+        unchanged =
+          books === Object.keys(manifest.books).length &&
+          series === Object.keys(manifest.series).length
+      }
+      if (unchanged) {
         const syncedAt = new Date().toISOString()
         await offlinePut(OFFLINE_STORES.settings, { key: 'catalogSyncedAt', value: syncedAt })
         assertOfflineAccount(accountToken)
