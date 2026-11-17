@@ -22,7 +22,8 @@ export function isApiErrorWithCause(error: unknown): error is Error & { cause: A
 
 const responseInterceptor = async (response: Response) => {
   if (!response.ok) {
-    if (response.status >= 500) {
+    // Gateway/unavailable only: a 500 from one endpoint does not mean the server is down.
+    if ([502, 503, 504].includes(response.status)) {
       try {
         useOfflineLibraryStore().markServerUnavailable()
       } catch {

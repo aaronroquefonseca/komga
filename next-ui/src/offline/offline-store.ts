@@ -139,6 +139,38 @@ export const useOfflineLibraryStore = defineStore('offline-library', () => {
     online.value = false
   }
 
+  let serverProbe: number | undefined
+  /**
+   * A failed/timed-out request flips the app to cache-only reads. The browser
+   * `online` event never fires while the network stays up, so probe the
+   * server instead of staying in (expensive) local-only mode until reload.
+   */
+  function markServerUnavailable(): void {
+    online.value = false
+    if (!isBrowser() || serverProbe !== undefined) return
+    serverProbe = window.setTimeout(() => {
+      // Explicit offline mode answers locally; setOfflineMode(false) restarts probing.
+      if (offlineMode.value) {
+        serverProbe = undefined
+        return
+      }
+      void fetch(`${ApiBaseUrl.noSlash}/api/v1/users/me`, {
+        credentials: 'include',
+        headers: { 'X-Requested-With': 'XMLHttpRequest' },
+        cache: 'no-store',
+        signal: AbortSignal.timeout(8000),
+      })
+        // Any HTTP answer (even 401) proves the server is reachable again.
+        .then((response) => response.status < 500 && navigator.onLine)
+        .catch(() => false)
+        .then((reachable) => {
+          serverProbe = undefined
+          if (reachable) handleOnline()
+          else markServerUnavailable()
+        })
+    }, 15_000)
+  }
+
   if (isBrowser()) {
     window.addEventListener('online', handleOnline)
     window.addEventListener('offline', handleOffline)
@@ -161,8 +193,25 @@ export const useOfflineLibraryStore = defineStore('offline-library', () => {
     return new Date(lastQueuedAt).toISOString()
   }
 
+  // Every book/series card looks up its download; index once per list change
+  // instead of scanning thousands of records per card.
+  const downloadsById = computed(() => new Map(downloads.value.map((x) => [x.bookId, x])))
+  const downloadsBySeries = computed(() => {
+    const bySeries = new Map<string, OfflineDownloadRecord[]>()
+    for (const record of downloads.value) {
+      const list = bySeries.get(record.book.seriesId)
+      if (list) list.push(record)
+      else bySeries.set(record.book.seriesId, [record])
+    }
+    return bySeries
+  })
+
   function getDownload(bookId: string): OfflineDownloadRecord | undefined {
-    return downloads.value.find((x) => x.bookId === bookId)
+    return downloadsById.value.get(bookId)
+  }
+
+  function getSeriesDownloads(seriesId: string): OfflineDownloadRecord[] {
+    return downloadsBySeries.value.get(seriesId) ?? []
   }
 
   function isDownloaded(bookId: string): boolean {
@@ -278,6 +327,7 @@ export const useOfflineLibraryStore = defineStore('offline-library', () => {
       value: enabled,
     })
     notifyServiceWorker()
+    if (!enabled && !online.value) markServerUnavailable()
     if (!enabled) processQueue()
   }
 
@@ -638,7 +688,7 @@ export const useOfflineLibraryStore = defineStore('offline-library', () => {
     if (!finished && (now - synced < 2000 || percent === lastPercent)) return false
     syncedProgressAt.set(record.bookId, now)
     syncedProgressPercent.set(record.bookId, percent)
-    const existing = downloads.value.find((x) => x.bookId === record.bookId)
+    const existing = getDownload(record.bookId)
     if (existing) {
       existing.completedPages = record.completedPages
       existing.bytes = record.bytes
@@ -812,6 +862,8 @@ export const useOfflineLibraryStore = defineStore('offline-library', () => {
               credentials: 'include',
               signal: controller.signal,
               headers: { 'X-Komga-Download': 'network' },
+              // Bulk downloads must not starve UI requests of HTTP/1.1 connections.
+              priority: 'low',
             })
             const response = await fetch(request)
             assertOfflineAccount(accountToken)
@@ -848,7 +900,10 @@ export const useOfflineLibraryStore = defineStore('offline-library', () => {
       try {
         const posterUrl = bookPosterUrl(bookId)
         if (posterUrl) {
-          const thumbnailRequest = new Request(posterUrl, { credentials: 'include' })
+          const thumbnailRequest = new Request(posterUrl, {
+            credentials: 'include',
+            priority: 'low',
+          })
           const thumbnail = await fetch(thumbnailRequest)
           assertOfflineAccount(accountToken)
 
@@ -1151,6 +1206,13 @@ export const useOfflineLibraryStore = defineStore('offline-library', () => {
     if (!online.value || offlineMode.value || syncingProgress.value) return
     syncingProgress.value = true
     try {
+      // Runs after every navigation/focus: skip the server round-trip when nothing is queued.
+      const pending = (await offlineGetAll<QueuedProgress>(OFFLINE_STORES.progress)).filter(
+        (x) => x.pending,
+      )
+      assertOfflineAccount(accountToken)
+      if (!pending.length) return
+
       const session = await offlineGet<OfflineSetting<UserDto>>(
         OFFLINE_STORES.settings,
         'sessionUser',
@@ -1161,10 +1223,8 @@ export const useOfflineLibraryStore = defineStore('offline-library', () => {
       assertOfflineAccount(accountToken)
 
       if (!session?.value || current.id !== session.value.id) return
-      const entries = await offlineGetAll<QueuedProgress>(OFFLINE_STORES.progress)
-      assertOfflineAccount(accountToken)
 
-      for (const entry of entries.filter((x) => x.pending)) {
+      for (const entry of pending) {
         try {
           const outgoing = clone(entry.progress)
           const download = getDownload(entry.bookId)
@@ -1240,9 +1300,7 @@ export const useOfflineLibraryStore = defineStore('offline-library', () => {
 
   return {
     initialized,
-    markServerUnavailable: () => {
-      online.value = false
-    },
+    markServerUnavailable,
     offlineMode,
     online,
     syncingMetadata,
@@ -1266,6 +1324,7 @@ export const useOfflineLibraryStore = defineStore('offline-library', () => {
     setDownloadPreferences,
     clearCachedCovers,
     isDownloaded,
+    getSeriesDownloads,
     getDownload,
     refreshState,
     cacheBook,
